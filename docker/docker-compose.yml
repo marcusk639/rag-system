@@ -1,0 +1,45 @@
+# Local development stack for the RAG system.
+# - postgres: Postgres 16 with pgvector extension for embeddings + tsvector for BM25
+# - parser:   Python FastAPI sidecar that converts any document to clean markdown
+#
+# Production deployments should run these as managed services (e.g. Neon for Postgres)
+# but the contract is identical.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  parser:
+    build:
+      context: ../services/parser-py
+      dockerfile: Dockerfile
+    container_name: rag-parser
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      # MarkItDown can optionally call an LLM for image-to-text. Leave blank to disable.
+      OPENAI_API_KEY: ""
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

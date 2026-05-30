@@ -1,0 +1,93 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: rag
+          POSTGRES_DB: rag
+          POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://rag:rag@localhost:5432/rag
+      PARSER_URL: http://localhost:8000
+      E2E_SKIP_DOCKER_UP: "1"
+      E2E_PGBOSS_SCHEMA: pgboss_e2e_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply pgvector init bootstrap to Postgres
+        run: |
+          PGPASSWORD=rag psql -h localhost -U rag -d rag -f docker/init-db.sql
+
+      - name: Build parser image
+        run: docker build -t rag-parser:e2e services/parser-py
+
+      - name: Run parser container
+        run: |
+          docker run -d --name rag-parser \
+            -p 8000:8000 \
+            -e PYTHONUNBUFFERED=1 \
+            rag-parser:e2e
+          # Poll the parser health endpoint until it's ready (or fail).
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "parser ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "parser did not become ready" >&2
+          docker logs rag-parser
+          exit 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm -r build
+
+      - name: Run E2E suite
+        run: pnpm e2e
+
+      - name: Capture parser logs on failure
+        if: failure()
+        run: docker logs rag-parser || true
+
+      - name: Upload vitest artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            tests/e2e/coverage
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14

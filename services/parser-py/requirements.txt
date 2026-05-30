@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+# MarkItDown: Microsoft's universal document → markdown converter.
+# Handles docx, xlsx, pptx, pdf, html, csv, json, xml, and more.
+markitdown[all]==0.0.1a4
+# Unstructured: fallback for difficult/scanned docs with OCR support.
+unstructured[local-inference]==0.16.11
+# openpyxl: direct XLSX parsing with formula-value access (data_only=True).
+# Pulled in transitively by markitdown but pinned here because we import it directly.
+openpyxl==3.1.5
+# pydantic v2 for response models. Requires v2.5+ for alias_generators.to_camel.
+pydantic==2.10.4
+# python-magic for MIME sniffing when extension is missing
+python-magic==0.4.27

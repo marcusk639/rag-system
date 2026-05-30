@@ -1,0 +1,44 @@
+import type { RetrievalResult } from "@rag/core";
+import type { GenerationResult, Generator } from "@rag/rag";
+
+/**
+ * Deterministic Generator for /ask specs.
+ *
+ *   - Returns an answer string that includes the first chunk's text verbatim
+ *     so specs can assert on what landed in the model's context.
+ *   - Emits one citation per retrieved chunk so the citation rendering path
+ *     gets exercised.
+ *   - Records every call for later inspection.
+ */
+export class FakeGenerator implements Generator {
+  readonly calls: Array<{
+    question: string;
+    contextSize: number;
+    contextTexts: string[];
+  }> = [];
+
+  async answer(
+    question: string,
+    context: RetrievalResult[],
+  ): Promise<GenerationResult> {
+    this.calls.push({
+      question,
+      contextSize: context.length,
+      contextTexts: context.map((c) => c.text),
+    });
+
+    const head = context[0];
+    const headPreview = head ? head.text.slice(0, 80) : "<no context>";
+    return {
+      answer: `Q: ${question} | ctx#0: ${headPreview}`,
+      citations: context.map((r, i) => ({
+        index: i + 1,
+        documentId: r.document.id,
+        title: r.document.title,
+        chunkId: r.chunk.id,
+        score: r.score,
+        ...(r.document.url !== undefined ? { url: r.document.url } : {}),
+      })),
+    };
+  }
+}

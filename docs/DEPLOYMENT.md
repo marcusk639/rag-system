@@ -1,0 +1,140 @@
+# Deployment
+
+How to run the RAG system in production. Local dev is covered in the root README; this doc focuses on the production picture.
+
+## Components to deploy
+
+| Component           | Where it runs                          | Scaling                                                                                              |
+| ------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Postgres + pgvector | Managed (Neon, Supabase, RDS)          | Vertical for write-heavy ingestion. Read replicas for retrieval-heavy workloads.                     |
+| Python parser       | N container replicas                   | Horizontal — stateless. Tune count by ingestion throughput.                                          |
+| `@rag/api`          | N container replicas behind LB         | Horizontal — stateless. Add replicas when retrieval QPS climbs.                                      |
+| `@rag/mcp`          | 1+ replicas (HTTP) or per-user (stdio) | HTTP for shared agent infrastructure. stdio for single-user (Claude Desktop).                        |
+| `@rag/worker`       | N replicas                             | Horizontal — pg-boss distributes jobs. Each replica processes `WORKER_CONCURRENCY` docs in parallel. |
+
+## Environment variables
+
+Every runtime reads the same `.env` (or container env). See `env.example` at repo root for the authoritative list. The minimum to bring the system up:
+
+```
+DATABASE_URL=postgres://...
+GEMINI_API_KEY=...              # or OPENAI_API_KEY if you set EMBEDDING_PROVIDER=openai
+API_TOKENS=long-random-token-here
+PARSER_URL=http://parser:8000   # service-discoverable URL
+```
+
+Source-specific credentials (Microsoft, Google) only need to be present on the **worker** — the API and MCP server don't talk to external sources directly.
+
+## Docker images
+
+The repo doesn't ship a polished Dockerfile per app yet (TODO), but the rough recipe per Node app:
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages ./packages
+COPY apps ./apps
+RUN corepack enable && pnpm install --frozen-lockfile && pnpm build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/apps/api/dist ./dist
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", "dist/main.js"]
+```
+
+The parser image already exists at `services/parser-py/Dockerfile`.
+
+## Database
+
+### Provisioning
+
+Any Postgres 14+ with `pgvector` enabled works. Confirmed on:
+
+- **Neon** — enable pgvector via SQL editor: `CREATE EXTENSION vector;`
+- **Supabase** — enable pgvector in the dashboard (Database → Extensions).
+- **AWS RDS** — pgvector is bundled in Postgres 15.5+ on RDS; enable via parameter group.
+- **Self-hosted** — the `pgvector/pgvector:pg16` image used in `docker/docker-compose.yml`.
+
+After provisioning, run:
+
+```bash
+DATABASE_URL=postgres://... pnpm db:migrate
+```
+
+This is idempotent — safe to re-run on every deploy.
+
+### Connection pooling
+
+The Node clients each create a 10-connection pool by default. For a Postgres instance with ~100 max connections, that supports roughly:
+
+- 5 API replicas
+- 3 worker replicas
+- 2 MCP HTTP replicas
+
+If you go higher, put a pooler in front (PgBouncer in transaction mode, or Neon's built-in pooler) and set `DATABASE_URL` to the pooler endpoint.
+
+### Indexes
+
+The HNSW index on `chunks.embedding` is created with `m=16, ef_construction=64`. Tune at query time by setting `hnsw.ef_search` per session — higher = better recall, slower. The system doesn't tune this automatically; if your retrieval recall is too low, raise the session GUC in your DB connection setup:
+
+```sql
+SET hnsw.ef_search = 100;  -- default 40
+```
+
+## Secrets
+
+DO NOT commit `.env`. The hook in this repo's parent setup blocks `.env` writes to enforce that. Production options, ordered by preference:
+
+1. **Secret Manager** (GCP Secret Manager, AWS Secrets Manager, Vercel Environment Variables): inject as env at container start.
+2. **Kubernetes Secrets** with `secretKeyRef` env entries.
+3. **HashiCorp Vault** with a sidecar injector.
+
+For the API token allow-list (`API_TOKENS`), rotate by:
+
+1. Add a new token to the env: `API_TOKENS=old-token,new-token`.
+2. Roll the API deployment.
+3. Update callers to use the new token.
+4. Remove the old token: `API_TOKENS=new-token`.
+5. Roll the API deployment again.
+
+## Scaling guidance
+
+### Ingestion is bottlenecked by
+
+1. **Embedding API throughput.** Gemini free tier is 1500 req/min; OpenAI is much higher but paid. The worker batches up to 100 chunks per Gemini call, so it can process ~150K chunks/min before saturating the free tier.
+2. **Parser sidecar CPU.** Document parsing (especially OCR via Unstructured) is CPU-bound. Scale parser replicas linearly; one core handles 5–20 docs/min depending on format.
+3. **Source rate limits.** Microsoft Graph: ~10K requests / 10 min per app per tenant. Google Workspace: much higher. The connectors throw `ConnectorTransientError` on 429; pg-boss retries with backoff.
+
+### Retrieval is bottlenecked by
+
+1. **Embedding latency for the query.** ~50–200ms per query depending on provider.
+2. **pgvector ANN search.** Sub-10ms for <1M chunks with HNSW; sub-100ms for <10M. Past that, partition by tenant or move to a dedicated vector store.
+
+### Cost levers (rough order of impact)
+
+- **Use a free embedding provider.** Gemini is free up to its quota; switching from OpenAI saves $0.13 per million embedded tokens.
+- **Embed only changed content.** The content-hash short-circuit ensures unchanged documents skip embedding. Don't trigger full syncs unnecessarily.
+- **Tune chunk size.** Smaller chunks = more embedding calls; larger chunks = fewer but worse retrieval precision. The default 800 tokens / 120 overlap is a reasonable middle.
+- **Tune HNSW ef_search.** Lower = faster, less recall. Find the lowest value that meets your quality bar.
+
+## Monitoring
+
+Endpoints to scrape / probe:
+
+- `GET /health` on API: liveness.
+- `GET /ready` on API: dependency check (DB).
+- pg-boss exposes job stats via SQL: `SELECT * FROM pgboss.job WHERE state IN ('active', 'failed')`.
+- `ingestion_jobs` table is human-readable history of sync runs.
+
+Recommended metrics to track:
+
+- `ingestion_jobs.status='failed'` count over time
+- pg-boss queue depth (`SELECT COUNT(*) FROM pgboss.job WHERE state='created'`)
+- `chunks` row count growth
+- API p95 latency on `/search` and `/ask`
+- Parser sidecar 5xx rate

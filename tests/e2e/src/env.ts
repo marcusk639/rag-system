@@ -1,0 +1,59 @@
+import type { Config } from "@rag/core";
+
+/**
+ * Single source of truth for E2E test environment values.
+ *
+ * Defaults match `docker/docker-compose.yml` so the suite works against a
+ * locally running `pnpm docker:up` stack with no extra env wiring. CI can
+ * override via DATABASE_URL / PARSER_URL.
+ */
+export const TEST_API_TOKEN = "e2e-test-token";
+
+export const env = {
+  databaseUrl:
+    process.env.E2E_DATABASE_URL ??
+    process.env.DATABASE_URL ??
+    "postgres://rag:rag@localhost:5432/rag",
+  parserUrl:
+    process.env.E2E_PARSER_URL ??
+    process.env.PARSER_URL ??
+    "http://localhost:8000",
+  // Dedicated pg-boss schema so a leftover queue from `pnpm dev:worker` runs
+  // doesn't surface jobs into the test suite.
+  pgBossSchema: process.env.E2E_PGBOSS_SCHEMA ?? "pgboss_e2e",
+} as const;
+
+/**
+ * Build a `Config` for the in-process API/Retriever. Generation is left
+ * undefined; the /ask spec injects a fake Generator directly into Deps.
+ */
+export function makeTestConfig(): Config {
+  return {
+    databaseUrl: env.databaseUrl,
+    pgBossSchema: env.pgBossSchema,
+    embedding: {
+      provider: "local",
+      model: "fake-bow-768",
+      dimensions: 768,
+      apiKey: undefined,
+    },
+    parser: {
+      url: env.parserUrl,
+      timeoutMs: 60_000,
+    },
+    api: {
+      host: "127.0.0.1",
+      port: 0, // never bound; we use Fastify inject()
+      tokens: [TEST_API_TOKEN],
+    },
+    mcp: { transport: "stdio", httpPort: 3001 },
+    worker: { concurrency: 1, pollIntervalMs: 2_000 },
+    retrieval: {
+      chunkSize: 800,
+      chunkOverlap: 120,
+      defaultTopK: 8,
+      hybridDenseWeight: 0.7,
+      hybridSparseWeight: 0.3,
+    },
+  };
+}

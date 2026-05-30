@@ -1,0 +1,77 @@
+import { GoogleGenAI } from "@google/genai";
+import type { Embedding, EmbeddingProvider } from "@rag/core";
+import { EmbeddingError } from "@rag/core";
+
+/**
+ * Gemini embedding provider.
+ *
+ * Default model: `text-embedding-004` — 768 dimensions, generous free tier
+ * (1,500 requests/minute on the free quota as of early 2026). For higher
+ * quality (and a paid tier), `gemini-embedding-001` is also supported.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/embeddings
+ */
+export class GeminiEmbeddingProvider implements EmbeddingProvider {
+  readonly name = "gemini";
+  readonly model: string;
+  readonly dimensions: number;
+  private client: GoogleGenAI;
+
+  constructor(opts: { apiKey: string; model?: string; dimensions?: number }) {
+    if (!opts.apiKey) {
+      throw new EmbeddingError("Gemini API key is required");
+    }
+    this.client = new GoogleGenAI({ apiKey: opts.apiKey });
+    this.model = opts.model ?? "text-embedding-004";
+    this.dimensions = opts.dimensions ?? 768;
+  }
+
+  async embed(text: string): Promise<Embedding> {
+    const [vec] = await this.embedBatch([text]);
+    if (!vec) throw new EmbeddingError("Gemini returned no embedding");
+    return vec;
+  }
+
+  async embedBatch(texts: string[]): Promise<Embedding[]> {
+    if (texts.length === 0) return [];
+
+    try {
+      // Gemini's batch endpoint accepts up to 100 inputs per call.
+      const results: Embedding[] = [];
+      const batchSize = 100;
+      for (let i = 0; i < texts.length; i += batchSize) {
+        const slice = texts.slice(i, i + batchSize);
+        const response = await this.client.models.embedContent({
+          model: this.model,
+          contents: slice,
+          config: {
+            outputDimensionality: this.dimensions,
+            taskType: "RETRIEVAL_DOCUMENT",
+          },
+        });
+        const embeddings = response.embeddings ?? [];
+        if (embeddings.length !== slice.length) {
+          throw new EmbeddingError(
+            `Gemini returned ${embeddings.length} embeddings for ${slice.length} inputs`,
+          );
+        }
+        for (const e of embeddings) {
+          const values = e.values ?? [];
+          results.push({
+            vector: values,
+            provider: this.name,
+            model: this.model,
+            dimensions: values.length,
+          });
+        }
+      }
+      return results;
+    } catch (err) {
+      if (err instanceof EmbeddingError) throw err;
+      throw new EmbeddingError(
+        `Gemini embedding failed: ${(err as Error).message}`,
+        err,
+      );
+    }
+  }
+}

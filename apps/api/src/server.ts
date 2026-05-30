@@ -1,0 +1,71 @@
+import { pingDb } from "@rag/db";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
+import {
+  serializerCompiler,
+  validatorCompiler,
+} from "fastify-type-provider-zod";
+import type { Logger } from "pino";
+import type { Config } from "@rag/core";
+import { createAuthHook } from "./auth.js";
+import type { Deps } from "./deps.js";
+import { registerErrorHandler } from "./error-handler.js";
+import { registerAskRoute } from "./routes/ask.js";
+import { registerDocumentRoutes } from "./routes/documents.js";
+import { registerSearchRoute } from "./routes/search.js";
+import { registerSourceRoutes } from "./routes/sources.js";
+
+/**
+ * Build (but do not start) the Fastify application. Exposed as a separate
+ * function so tests can spin up the server in-process without binding a port.
+ */
+export async function buildServer(opts: {
+  config: Config;
+  logger: Logger;
+  deps: Deps;
+}): Promise<FastifyInstance> {
+  const { config, logger, deps } = opts;
+
+  // Fastify v5's `FastifyBaseLogger` adds an `msgPrefix` field that pino's
+  // own `Logger` doesn't declare. The implementations are runtime-compatible —
+  // pino has a `child()` that produces the same shape — so we cast through
+  // the structural intersection rather than mutate the pino logger.
+  const app = Fastify({
+    loggerInstance: logger as unknown as FastifyBaseLogger,
+    // 25 MB body limit — large enough for inline-uploaded documents, small
+    // enough to avoid accidental OOM from a malformed client.
+    bodyLimit: 25 * 1024 * 1024,
+    disableRequestLogging: false,
+  });
+
+  // Zod-aware validation + serialization.
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  // Global error handler — must register BEFORE routes so it catches their throws.
+  registerErrorHandler(app);
+
+  // Bearer-token auth on every route except /health and /ready.
+  app.addHook("onRequest", createAuthHook(config.api.tokens));
+
+  // -------- Liveness/readiness probes --------
+  app.get("/health", async () => ({ status: "ok" }));
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await pingDb(deps.db);
+      return { status: "ready" };
+    } catch (err) {
+      app.log.error({ err }, "readiness check failed");
+      return reply
+        .code(503)
+        .send({ status: "not-ready", error: (err as Error).message });
+    }
+  });
+
+  // -------- Application routes --------
+  await registerSourceRoutes(app, deps);
+  await registerDocumentRoutes(app, deps);
+  await registerSearchRoute(app, deps, config);
+  await registerAskRoute(app, deps, config);
+
+  return app;
+}

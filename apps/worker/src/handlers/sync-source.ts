@@ -1,0 +1,72 @@
+import { createIngestionJob, getSource, updateIngestionJob } from "@rag/db";
+import { runIngestion, type SyncSourcePayload } from "@rag/ingestion";
+import type { WorkerDeps } from "../deps.js";
+
+/**
+ * pg-boss hands the worker a job whose `data` is the SyncSourcePayload we put
+ * on the queue from the API. We:
+ *   1. Resolve the source row from Postgres.
+ *   2. Open an ingestion_jobs history row (status=running).
+ *   3. Build the right connector + delegate to `runIngestion`.
+ *   4. Mark the history row completed/failed accordingly.
+ *
+ * Throwing here is intentional on failure: pg-boss interprets a thrown error
+ * as job failure and applies its retry policy (configured at enqueue time).
+ */
+export async function handleSyncSource(
+  job: { id: string; data: SyncSourcePayload },
+  deps: WorkerDeps,
+): Promise<void> {
+  const { db, logger, parser, chunker, embedder, makeConnector, config } = deps;
+  const log = logger.child({ jobId: job.id, sourceId: job.data.sourceId });
+
+  const source = await getSource(db, job.data.sourceId);
+  if (!source) {
+    log.error("source not found, skipping");
+    return;
+  }
+
+  const historyRow = await createIngestionJob(db, {
+    sourceId: source.id,
+    mode: job.data.mode,
+    status: "running",
+    startedAt: new Date(),
+  });
+
+  try {
+    const connector = makeConnector({
+      id: source.id,
+      kind: source.kind,
+      config: source.config,
+    });
+    await connector.validate();
+
+    const startCursor = job.data.mode === "full" ? null : source.cursor;
+    const result = await runIngestion(
+      source.id,
+      connector,
+      startCursor,
+      { concurrency: config.worker.concurrency, pageSize: 50 },
+      { db, parser, chunker, embedder, logger: log },
+    );
+
+    await updateIngestionJob(db, historyRow.id, {
+      status: "completed",
+      completedAt: new Date(),
+      documentsProcessed: result.documentsProcessed,
+      documentsFailed: result.documentsFailed,
+      chunksCreated: result.chunksCreated,
+    });
+    log.info(result, "sync completed");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await updateIngestionJob(db, historyRow.id, {
+      status: "failed",
+      completedAt: new Date(),
+      error: message,
+    });
+    log.error({ err }, "sync failed");
+    // Re-throw so pg-boss records the job as failed and applies retries.
+    throw err;
+  }
+}

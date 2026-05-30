@@ -1,0 +1,56 @@
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getDocument } from "@rag/db";
+import type { Deps } from "../deps.js";
+
+const inputSchema = {
+  documentId: z
+    .string()
+    .uuid()
+    .describe(
+      "Document id (UUID) — usually obtained from a search_documents result's `document.id` field.",
+    ),
+};
+
+export function registerGetDocument(server: McpServer, deps: Deps): void {
+  server.registerTool(
+    "get_document",
+    {
+      title: "Get document",
+      description:
+        "Fetch the full normalized markdown and metadata for a single document by id. Use this after `search_documents` when a top-ranked chunk looks promising and you need surrounding context (the chunk is typically just ~800 tokens). The structured payload includes id, title, sourceId, mimeType, sizeBytes, sourceModifiedAt, metadata, and the full markdown body. Returns isError when the id does not exist.",
+      inputSchema,
+    },
+    async ({ documentId }) => {
+      const doc = await getDocument(deps.db, documentId);
+      if (!doc) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Document ${documentId} not found.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const summary = `# ${doc.title}\n\n_id_: ${doc.id}\n_sourceId_: ${doc.sourceId}\n_mimeType_: ${doc.mimeType}\n_modified_: ${doc.sourceModifiedAt?.toISOString() ?? "unknown"}\n\n---\n\n${doc.markdown}`;
+      return {
+        content: [{ type: "text", text: summary }],
+        structuredContent: {
+          document: {
+            id: doc.id,
+            sourceId: doc.sourceId,
+            externalId: doc.externalId,
+            title: doc.title,
+            mimeType: doc.mimeType,
+            sizeBytes: doc.sizeBytes,
+            sourceModifiedAt: doc.sourceModifiedAt?.toISOString() ?? null,
+            metadata: doc.metadata,
+            markdown: doc.markdown,
+          },
+        },
+      };
+    },
+  );
+}
