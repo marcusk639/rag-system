@@ -2,6 +2,7 @@ import {
   McpServer,
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AuthorizationScope } from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { Logger } from "pino";
 import type { Deps } from "./deps.js";
@@ -16,21 +17,31 @@ import { registerAsk } from "./tools/ask.js";
  * both transports (stdio and Streamable HTTP). The HTTP transport calls this
  * once per session so each session gets an isolated server, mirroring the
  * pattern in the SDK's official Streamable HTTP example.
+ *
+ * `scope` is the MANDATORY retrieval authorization scope for THIS server
+ * instance, derived from the caller's token (HTTP) or the explicit trusted
+ * decision for stdio. It is threaded into the search/ask tools so they enforce
+ * the principal's allowed sources. HTTP builds one server per session so the
+ * scope is per-token; stdio passes ADMIN_SCOPE (see startStdio / main.ts).
  */
-export function buildServer(opts: { deps: Deps; logger: Logger }): McpServer {
-  const { deps, logger } = opts;
+export function buildServer(opts: {
+  deps: Deps;
+  logger: Logger;
+  scope: AuthorizationScope;
+}): McpServer {
+  const { deps, logger, scope } = opts;
 
   const server = new McpServer({
     name: "rag",
     version: "0.1.0",
   });
 
-  // Tools
-  registerSearchDocuments(server, deps);
+  // Tools — search/ask receive the enforced authorization scope.
+  registerSearchDocuments(server, deps, scope);
   registerGetDocument(server, deps);
   registerListSources(server, deps);
   registerTriggerSync(server, deps);
-  registerAsk(server, deps);
+  registerAsk(server, deps, scope);
 
   // Resource: documents://{id} — agents can read a single document by id
   // without going through the get_document tool. Useful for embedding in

@@ -7,6 +7,12 @@ import express, {
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  principalToScope,
+  resolvePrincipal,
+  type AuthorizationScope,
+  type ScopedPrincipalConfig,
+} from "@rag/core";
 import type { Logger } from "pino";
 
 /**
@@ -33,15 +39,29 @@ export function normalizeSessionId(
 }
 
 export interface HttpTransportOptions {
-  buildServer: () => McpServer;
+  /**
+   * Build a session's McpServer for the given authorization scope. Called once
+   * per MCP session with the scope resolved from THAT session's bearer token,
+   * so each session's search/ask tools are confined to the token's allowed
+   * sources. See @rag/core access-control.
+   */
+  buildServer: (scope: AuthorizationScope) => McpServer;
   port: number;
   logger: Logger;
   /**
-   * Bearer tokens authorized to call /mcp. REQUIRED — the MCP HTTP transport
-   * exposes search, ask, list_sources, trigger_sync; running without auth
-   * lets anyone on the network exfiltrate the entire indexed corpus.
+   * Plain (unscoped) ADMIN bearer tokens authorized to call /mcp. REQUIRED —
+   * the MCP HTTP transport exposes search, ask, list_sources, trigger_sync;
+   * running without auth lets anyone on the network exfiltrate the entire
+   * indexed corpus. A token here resolves to an all-access principal.
    */
   tokens: readonly string[];
+  /**
+   * Scoped principals (opt-in confidentiality boundary). A token here is also
+   * a valid bearer token but is ENFORCED to its `allowedSourceIds` in
+   * retrieval. Scoped wins over `tokens` if a string appears in both (least
+   * privilege). Empty by default.
+   */
+  principals?: readonly ScopedPrincipalConfig[];
   /**
    * Allowed Origin values for CORS. If a browser-based caller sends an
    * Origin header, it must match one of these. Mitigates DNS rebinding
@@ -52,17 +72,26 @@ export interface HttpTransportOptions {
 }
 
 export async function startHttp(opts: HttpTransportOptions): Promise<void> {
-  const { buildServer, port, logger, tokens, allowedOrigins = [] } = opts;
+  const {
+    buildServer,
+    port,
+    logger,
+    tokens,
+    principals = [],
+    allowedOrigins = [],
+  } = opts;
 
-  if (tokens.length === 0) {
+  if (tokens.length === 0 && principals.length === 0) {
     throw new Error(
       "MCP HTTP transport requires at least one bearer token — refusing to start without auth",
     );
   }
 
-  // Pre-hash tokens so per-request comparison is constant-time on equal-length
-  // SHA-256 digests rather than variable-length strings.
-  const hashedTokens = tokens.map((t) =>
+  // Every valid token (admin OR scoped) participates in the constant-time
+  // allow-list. Pre-hash so per-request comparison is constant-time on
+  // equal-length SHA-256 digests rather than variable-length strings.
+  const allTokens = [...tokens, ...principals.map((p) => p.token)];
+  const hashedTokens = allTokens.map((t) =>
     createHash("sha256").update(t).digest(),
   );
   const verifyToken = (presented: string): boolean => {
@@ -72,6 +101,18 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
       if (timingSafeEqual(h, candidate)) ok = true;
     }
     return ok;
+  };
+
+  // Resolve a request's verified bearer token to its retrieval authorization
+  // scope. The `guard` middleware already proved the token is valid; here we
+  // map it to admin (plain token) vs. scoped (API_PRINCIPALS). Fail CLOSED to
+  // an empty scope (zero results) if resolution somehow misses — never fall
+  // back to admin/all for an unrecognized token.
+  const scopeForRequest = (req: Request): AuthorizationScope => {
+    const auth = req.headers.authorization;
+    const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    const principal = resolvePrincipal(token, tokens, principals);
+    return principal ? principalToScope(principal) : { enforcedSourceIds: [] };
   };
 
   const originSet = new Set(allowedOrigins);
@@ -172,7 +213,10 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
           }
         };
 
-        const server = buildServer();
+        // Resolve THIS session's authorization scope from its initialize
+        // request's token, and bind it to the per-session server so all of the
+        // session's search/ask calls are confined to the token's sources.
+        const server = buildServer(scopeForRequest(req));
         await server.connect(transport);
       }
 

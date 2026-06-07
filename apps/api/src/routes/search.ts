@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
+import { scopeFromRequest } from "./authz.js";
 
 /**
  * Metadata filter: each key matches against `documents.metadata->>key`. A
@@ -56,7 +57,10 @@ export async function registerSearchRoute(
       ...(filter ? { filter } : {}),
     };
 
-    const results = await deps.retriever.search(rq);
+    // MANDATORY confidentiality boundary: the principal's enforced source-id
+    // scope (admin => all; scoped => only its sources; missing => deny all).
+    // The optional caller `sourceIds` above narrows WITHIN this scope.
+    const results = await deps.retriever.search(rq, scopeFromRequest(request));
     // PII boundary: strip non-allowlisted metadata fields (author/from/to/
     // subject/extra) before the results leave the API. See @rag/core
     // metadata-policy. Retrieval/filtering above used the full metadata.

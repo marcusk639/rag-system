@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
+import { scopeFromRequest } from "./authz.js";
 
 // Bounded metadata filter — same shape and limits as POST /search.
 // See packages/db/src/queries.ts hybridSearch for how keys/values land in SQL.
@@ -56,7 +57,11 @@ export async function registerAskRoute(
       ...(filter ? { filter } : {}),
     };
 
-    const retrieved = await deps.retriever.search(rq);
+    // MANDATORY confidentiality boundary — same enforced scope as /search.
+    const retrieved = await deps.retriever.search(
+      rq,
+      scopeFromRequest(request),
+    );
 
     // If nothing came back, short-circuit — the model would just hallucinate.
     if (retrieved.length === 0) {

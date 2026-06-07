@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ADMIN_SCOPE } from "@rag/core";
 import { Retriever } from "@rag/rag";
 import { FakeConnector } from "../fakes/fake-connector.js";
 import { plainTextDoc } from "../fakes/factories.js";
@@ -60,10 +61,13 @@ describe("E2E: hybrid retrieval", () => {
     ]);
     await runOneIngestion(db, sourceId, connector);
 
-    const results = await retriever.search({
-      query: "espresso extraction pressure",
-      topK: 3,
-    });
+    const results = await retriever.search(
+      {
+        query: "espresso extraction pressure",
+        topK: 3,
+      },
+      ADMIN_SCOPE,
+    );
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]!.document.title).toBe("Espresso Pulling");
@@ -84,7 +88,10 @@ describe("E2E: hybrid retrieval", () => {
     ]);
     await runOneIngestion(db, sourceId, connector);
 
-    const results = await retriever.search({ query: "green tea", topK: 5 });
+    const results = await retriever.search(
+      { query: "green tea", topK: 5 },
+      ADMIN_SCOPE,
+    );
     expect(results.length).toBeGreaterThan(0);
     for (const r of results) {
       expect(typeof r.denseScore).toBe("number");
@@ -123,25 +130,85 @@ describe("E2E: hybrid retrieval", () => {
       ]),
     );
 
-    const onlyA = await retriever.search({
-      query: "quantum mechanics",
-      topK: 10,
-      sourceIds: [sourceA],
-    });
+    const onlyA = await retriever.search(
+      {
+        query: "quantum mechanics",
+        topK: 10,
+        sourceIds: [sourceA],
+      },
+      ADMIN_SCOPE,
+    );
     expect(onlyA.length).toBeGreaterThan(0);
     for (const r of onlyA) {
       expect(r.document.sourceId).toBe(sourceA);
     }
 
-    const onlyB = await retriever.search({
-      query: "quantum mechanics",
-      topK: 10,
-      sourceIds: [sourceB],
-    });
+    const onlyB = await retriever.search(
+      {
+        query: "quantum mechanics",
+        topK: 10,
+        sourceIds: [sourceB],
+      },
+      ADMIN_SCOPE,
+    );
     expect(onlyB.length).toBeGreaterThan(0);
     for (const r of onlyB) {
       expect(r.document.sourceId).toBe(sourceB);
     }
+  });
+
+  it("ENFORCES the principal scope: a scoped principal sees only its sources", async () => {
+    const sourceA = sourceId;
+    const sourceB = await createCustomSource(db, "retrieval-b");
+
+    await runOneIngestion(
+      db,
+      sourceA,
+      new FakeConnector([
+        plainTextDoc({
+          externalId: "a-doc",
+          title: "From A",
+          text: "Source A talks about quantum mechanics and Schrodinger equations.",
+        }),
+      ]),
+    );
+    await runOneIngestion(
+      db,
+      sourceB,
+      new FakeConnector([
+        plainTextDoc({
+          externalId: "b-doc",
+          title: "From B",
+          text: "Source B talks about quantum mechanics and uncertainty principles.",
+        }),
+      ]),
+    );
+
+    // Principal scoped to ONLY source A — must never see B, even with no caller
+    // filter and a query that matches both.
+    const scopedToA = await retriever.search(
+      { query: "quantum mechanics", topK: 10 },
+      { enforcedSourceIds: [sourceA] },
+    );
+    expect(scopedToA.length).toBeGreaterThan(0);
+    for (const r of scopedToA) {
+      expect(r.document.sourceId).toBe(sourceA);
+    }
+
+    // A caller filter for B while scoped to A is disjoint => zero rows (fail
+    // closed); the caller cannot widen beyond its scope.
+    const scopedAaskingB = await retriever.search(
+      { query: "quantum mechanics", topK: 10, sourceIds: [sourceB] },
+      { enforcedSourceIds: [sourceA] },
+    );
+    expect(scopedAaskingB).toEqual([]);
+
+    // Empty scope => fail closed regardless of query.
+    const denied = await retriever.search(
+      { query: "quantum mechanics", topK: 10 },
+      { enforcedSourceIds: [] },
+    );
+    expect(denied).toEqual([]);
   });
 
   it("returns an empty array for a query that matches nothing", async () => {
@@ -157,10 +224,13 @@ describe("E2E: hybrid retrieval", () => {
       ]),
     );
 
-    const results = await retriever.search({
-      query: "xyzpdq nonsenseword zzzzz",
-      topK: 5,
-    });
+    const results = await retriever.search(
+      {
+        query: "xyzpdq nonsenseword zzzzz",
+        topK: 5,
+      },
+      ADMIN_SCOPE,
+    );
     // The dense side will always rank everything, but if our gating is
     // permissive we want to confirm we never crash on a zero-sparse query.
     expect(Array.isArray(results)).toBe(true);

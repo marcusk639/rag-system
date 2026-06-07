@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type RetrievalResult, sanitizeRetrievalResults } from "@rag/core";
+import {
+  type AuthorizationScope,
+  type RetrievalResult,
+  sanitizeRetrievalResults,
+} from "@rag/core";
 import type { Deps } from "../deps.js";
 import { filterSchema } from "./filter.js";
 
@@ -50,7 +54,11 @@ function formatResults(results: RetrievalResult[]): string {
     .join("\n\n");
 }
 
-export function registerSearchDocuments(server: McpServer, deps: Deps): void {
+export function registerSearchDocuments(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "search_documents",
     {
@@ -60,12 +68,18 @@ export function registerSearchDocuments(server: McpServer, deps: Deps): void {
       inputSchema,
     },
     async ({ query, topK, sourceIds, filter }) => {
-      const results = await deps.retriever.search({
-        query,
-        topK: topK ?? deps.config.retrieval.defaultTopK,
-        sourceIds,
-        filter,
-      });
+      // MANDATORY confidentiality boundary: the session's enforced scope
+      // (admin for stdio/admin-token, source-scoped for a scoped token). The
+      // optional caller `sourceIds` narrows WITHIN this scope.
+      const results = await deps.retriever.search(
+        {
+          query,
+          topK: topK ?? deps.config.retrieval.defaultTopK,
+          sourceIds,
+          filter,
+        },
+        scope,
+      );
       // PII boundary: the same metadata leak via MCP is the same incident as
       // via the HTTP API. Strip non-allowlisted metadata (author/from/to/
       // subject/extra) from the structured payload. The text excerpt above

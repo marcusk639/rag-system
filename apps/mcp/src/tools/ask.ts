@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AuthorizationScope } from "@rag/core";
 import type { Deps } from "../deps.js";
 import { filterSchema } from "./filter.js";
 
@@ -51,7 +52,11 @@ function renderAnswer(
   return `${answer}\n\nSources:\n${block}`;
 }
 
-export function registerAsk(server: McpServer, deps: Deps): void {
+export function registerAsk(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "ask",
     {
@@ -73,12 +78,16 @@ export function registerAsk(server: McpServer, deps: Deps): void {
         };
       }
 
-      const results = await deps.retriever.search({
-        query: question,
-        topK: topK ?? deps.config.retrieval.defaultTopK,
-        sourceIds,
-        filter,
-      });
+      // MANDATORY confidentiality boundary — same enforced scope as search.
+      const results = await deps.retriever.search(
+        {
+          query: question,
+          topK: topK ?? deps.config.retrieval.defaultTopK,
+          sourceIds,
+          filter,
+        },
+        scope,
+      );
 
       if (results.length === 0) {
         return {

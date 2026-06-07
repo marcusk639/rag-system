@@ -1,4 +1,4 @@
-import { loadConfig } from "@rag/core";
+import { ADMIN_SCOPE, loadConfig } from "@rag/core";
 import {
   assertEmbeddingDimensions,
   assertRequiredIndexes,
@@ -55,9 +55,18 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
   if (config.mcp.transport === "stdio") {
-    const server = buildServer({ deps, logger });
+    // EXPLICIT ADMIN DECISION: the stdio transport is a local, single-user,
+    // trusted channel — the client SPAWNS this process over stdin/stdout and
+    // there is no token to scope against. We therefore grant the stdio session
+    // an ADMIN / all-access retrieval scope (unrestricted). This is the only
+    // sanctioned unscoped path; the network-facing HTTP transport always
+    // resolves a per-token scope. If stdio ever becomes multi-tenant or
+    // network-exposed, this MUST be replaced with a real principal.
+    const server = buildServer({ deps, logger, scope: ADMIN_SCOPE });
     await startStdio(server);
-    logger.info("MCP stdio server ready");
+    logger.info(
+      "MCP stdio server ready (admin/all-access scope — trusted local channel)",
+    );
     return;
   }
 
@@ -71,10 +80,14 @@ async function main(): Promise<void> {
     .filter(Boolean);
 
   await startHttp({
-    buildServer: () => buildServer({ deps, logger }),
+    // Per-session: the transport resolves the session token to a scope and
+    // hands it in here, confining that session's search/ask tools to the
+    // token's allowed sources.
+    buildServer: (scope) => buildServer({ deps, logger, scope }),
     port: config.mcp.httpPort,
     logger,
     tokens: config.api.tokens,
+    principals: config.api.principals,
     allowedOrigins,
   });
   logger.info(

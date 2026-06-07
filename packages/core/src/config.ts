@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parsePrincipalsConfig } from "./access-control.js";
 
 /**
  * Validated environment-derived configuration. Each runtime (api/mcp/worker)
@@ -24,7 +25,25 @@ export const Config = z.object({
   api: z.object({
     host: z.string().default("0.0.0.0"),
     port: z.number().int().positive().default(3000),
+    /**
+     * Plain (unscoped) bearer tokens. Each resolves to an ADMIN / all-access
+     * principal (unrestricted retrieval) — backward-compatible with the
+     * pre-ACL behavior. Reserve these for admin/service callers; use
+     * `principals` to wall off scoped staff. See @rag/core access-control.
+     */
     tokens: z.array(z.string()).min(1),
+    /**
+     * Scoped principals (opt-in confidentiality boundary). Any token here is
+     * ENFORCED to its `allowedSourceIds` in retrieval and CANNOT see anything
+     * else — scoped wins over `tokens` if a string appears in both (least
+     * privilege). Sourced from the `API_PRINCIPALS` JSON env. Empty by default.
+     */
+    principals: z.array(
+      z.object({
+        token: z.string().min(1),
+        allowedSourceIds: z.array(z.string()),
+      }),
+    ),
   }),
 
   mcp: z.object({
@@ -124,6 +143,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
+      // Throws loudly on malformed API_PRINCIPALS so a misconfig is caught at
+      // startup rather than silently re-opening the corpus-wide read.
+      principals: parsePrincipalsConfig(env.API_PRINCIPALS),
     },
     mcp: {
       transport: env.MCP_TRANSPORT,

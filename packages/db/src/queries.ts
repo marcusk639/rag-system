@@ -188,6 +188,20 @@ interface HybridSearchOptions {
    */
   candidatePoolMultiplier?: number;
   sourceIds?: string[];
+  /**
+   * MANDATORY confidentiality boundary (per-principal source-id ACL).
+   *   - `null`  => admin / unrestricted (no enforced WHERE restriction).
+   *   - `[]`    => fail closed: return ZERO rows (short-circuited before the DB).
+   *   - `[...]` => results are ALWAYS restricted to `doc.source_id IN (...)`,
+   *               ANDed on top of (and independent from) the optional caller
+   *               `sourceIds` convenience filter above.
+   *
+   * This is a required field (not optional) so a route cannot forget it — the
+   * effective scope is computed in @rag/core `effectiveSourceFilter` from the
+   * caller's principal. Passing `[]` is the fail-closed default for a principal
+   * with no readable sources; never pass `null` for an untrusted caller.
+   */
+  enforcedSourceIds: string[] | null;
   /** JSON path → value(s) filter against documents.metadata */
   metadataFilter?: Record<string, string | string[]>;
   weights?: { dense: number; sparse: number };
@@ -217,6 +231,15 @@ export async function hybridSearch(
     throw new Error("queryEmbedding contains non-finite values");
   }
 
+  // MANDATORY ACL fail-closed short-circuit. A principal scoped to an empty
+  // set (or a caller filter that is disjoint from the principal's scope, after
+  // intersection upstream) may read NOTHING — return before touching the DB.
+  // `null` means admin/unrestricted and is the ONLY way to skip the enforced
+  // source filter below.
+  if (opts.enforcedSourceIds !== null && opts.enforcedSourceIds.length === 0) {
+    return [];
+  }
+
   const topK = opts.topK;
   // Pool size — see comments on `candidatePoolMultiplier`. Default 8× because
   // filters now run as a post-filter; selective filters demand more candidates.
@@ -242,6 +265,20 @@ export async function hybridSearch(
         sql`, `,
       )})`
     : sql``;
+
+  // MANDATORY ACL filter — SEPARATE from the optional caller `sourceFilter`
+  // above and always ANDed in. `null` === admin/unrestricted (no fragment).
+  // A non-empty array restricts to the principal's allowed sources; the empty
+  // case was already short-circuited to `[]` before the DB call. Built with the
+  // same `sql.join` / `::uuid` parameterization the comment above explains, so
+  // it's injection-safe.
+  const enforcedSourceFilter =
+    opts.enforcedSourceIds && opts.enforcedSourceIds.length > 0
+      ? sql`AND doc.source_id IN (${sql.join(
+          opts.enforcedSourceIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})`
+      : sql``;
 
   const metadataConditions = Object.entries(opts.metadataFilter ?? {}).map(
     ([key, value]) => {
@@ -345,6 +382,7 @@ export async function hybridSearch(
       JOIN documents doc ON doc.id = c.document_id
       JOIN sources src ON src.id = doc.source_id
       WHERE TRUE
+      ${enforcedSourceFilter}
       ${sourceFilter}
       ${sql.join(metadataConditions, sql` `)}
       ORDER BY f.rrf_score DESC
