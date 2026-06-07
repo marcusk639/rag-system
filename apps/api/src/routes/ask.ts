@@ -1,4 +1,8 @@
-import type { Config, RetrievalQuery } from "@rag/core";
+import {
+  type Config,
+  type RetrievalQuery,
+  sanitizeRetrievalResults,
+} from "@rag/core";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -60,16 +64,21 @@ export async function registerAskRoute(
         answer:
           "The available documents do not contain enough information to answer that.",
         citations: [],
-        retrieved,
+        retrieved: [],
       };
     }
 
+    // Generation runs against the FULL retrieved results (it never echoes raw
+    // metadata to the caller — only answer text + citations). We only sanitize
+    // the `retrieved` array we serialize back to the client.
     const result = await deps.generator.answer(question, retrieved);
 
     return {
       answer: result.answer,
       citations: result.citations,
-      retrieved,
+      // PII boundary: strip non-allowlisted metadata before returning to the
+      // caller. See @rag/core metadata-policy.
+      retrieved: sanitizeRetrievalResults(retrieved),
     };
   });
 }

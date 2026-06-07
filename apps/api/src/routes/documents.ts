@@ -1,4 +1,8 @@
-import { NotFoundError } from "@rag/core";
+import {
+  type DocumentMetadata,
+  NotFoundError,
+  sanitizeMetadata,
+} from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -21,7 +25,13 @@ export async function registerDocumentRoutes(
       const row = await getDocument(deps.db, request.params.id);
       if (!row)
         throw new NotFoundError(`Document ${request.params.id} not found`);
-      return row;
+      // PII boundary: the stored `metadata` jsonb carries email author/from/
+      // to/subject and connector `extra`. Apply the allowlist before returning
+      // the row to the caller. See @rag/core metadata-policy.
+      return {
+        ...row,
+        metadata: sanitizeMetadata(row.metadata as DocumentMetadata),
+      };
     },
   );
 }

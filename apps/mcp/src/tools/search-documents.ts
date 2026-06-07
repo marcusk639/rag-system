@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { RetrievalResult } from "@rag/core";
+import { type RetrievalResult, sanitizeRetrievalResults } from "@rag/core";
 import type { Deps } from "../deps.js";
 import { filterSchema } from "./filter.js";
 
@@ -66,9 +66,13 @@ export function registerSearchDocuments(server: McpServer, deps: Deps): void {
         sourceIds,
         filter,
       });
+      // PII boundary: the same metadata leak via MCP is the same incident as
+      // via the HTTP API. Strip non-allowlisted metadata (author/from/to/
+      // subject/extra) from the structured payload. The text excerpt above
+      // already only uses title/heading/page. See @rag/core metadata-policy.
       return {
         content: [{ type: "text", text: formatResults(results) }],
-        structuredContent: { results },
+        structuredContent: { results: sanitizeRetrievalResults(results) },
       };
     },
   );

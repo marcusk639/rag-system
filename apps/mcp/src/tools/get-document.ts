@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type DocumentMetadata, sanitizeMetadata } from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { Deps } from "../deps.js";
 
@@ -46,7 +47,9 @@ export function registerGetDocument(server: McpServer, deps: Deps): void {
             mimeType: doc.mimeType,
             sizeBytes: doc.sizeBytes,
             sourceModifiedAt: doc.sourceModifiedAt?.toISOString() ?? null,
-            metadata: doc.metadata,
+            // PII boundary: strip non-allowlisted metadata (author/from/to/
+            // subject/extra) before returning. See @rag/core metadata-policy.
+            metadata: sanitizeMetadata(doc.metadata as DocumentMetadata),
             markdown: doc.markdown,
           },
         },

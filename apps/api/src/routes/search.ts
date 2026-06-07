@@ -1,4 +1,8 @@
-import type { Config, RetrievalQuery } from "@rag/core";
+import {
+  type Config,
+  type RetrievalQuery,
+  sanitizeRetrievalResults,
+} from "@rag/core";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -53,6 +57,9 @@ export async function registerSearchRoute(
     };
 
     const results = await deps.retriever.search(rq);
-    return { results };
+    // PII boundary: strip non-allowlisted metadata fields (author/from/to/
+    // subject/extra) before the results leave the API. See @rag/core
+    // metadata-policy. Retrieval/filtering above used the full metadata.
+    return { results: sanitizeRetrievalResults(results) };
   });
 }
