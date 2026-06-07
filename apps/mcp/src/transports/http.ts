@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import {
+  DENY_ALL_SCOPE,
   principalToScope,
   resolvePrincipal,
   type AuthorizationScope,
@@ -112,7 +113,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     const auth = req.headers.authorization;
     const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
     const principal = resolvePrincipal(token, tokens, principals);
-    return principal ? principalToScope(principal) : { enforcedSourceIds: [] };
+    return principal ? principalToScope(principal) : DENY_ALL_SCOPE;
   };
 
   const originSet = new Set(allowedOrigins);

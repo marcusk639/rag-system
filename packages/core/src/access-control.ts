@@ -55,6 +55,13 @@ export interface AuthorizationScope {
 /** The unrestricted (admin) scope — explicit, for stdio/local/trusted callers. */
 export const ADMIN_SCOPE: AuthorizationScope = { enforcedSourceIds: null };
 
+/**
+ * The deny-all / fail-closed scope — distinct from ADMIN_SCOPE (null). An empty
+ * `enforcedSourceIds` means "may read NOTHING" (zero rows), the safe failure for
+ * a confidentiality boundary when no principal resolves.
+ */
+export const DENY_ALL_SCOPE: AuthorizationScope = { enforcedSourceIds: [] };
+
 /** A single scoped-principal entry from the `API_PRINCIPALS` config. */
 export interface ScopedPrincipalConfig {
   token: string;
@@ -91,7 +98,7 @@ export function parsePrincipalsConfig(
     );
   }
 
-  return parsed.map((entry, i) => {
+  const principals = parsed.map((entry, i) => {
     if (
       typeof entry !== "object" ||
       entry === null ||
@@ -109,6 +116,24 @@ export function parsePrincipalsConfig(
     const e = entry as ScopedPrincipalConfig;
     return { token: e.token, allowedSourceIds: e.allowedSourceIds };
   });
+
+  // Fail LOUDLY on a duplicate token. A repeated token is a silent footgun on a
+  // security-config surface: only the first entry would ever win in
+  // `resolvePrincipal`, so the second `allowedSourceIds` is silently ignored —
+  // an admin who pastes the same token under two different scopes would not be
+  // warned. Catch it at startup instead.
+  const seen = new Set<string>();
+  principals.forEach((p, i) => {
+    if (seen.has(p.token)) {
+      throw new Error(
+        `API_PRINCIPALS contains a duplicate token (entry ${i}). ` +
+          `Each token must appear at most once.`,
+      );
+    }
+    seen.add(p.token);
+  });
+
+  return principals;
 }
 
 /**

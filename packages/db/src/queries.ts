@@ -187,6 +187,12 @@ interface HybridSearchOptions {
    * unfiltered pool to absorb selectivity. 8× is safe for topK ≤ 50.
    */
   candidatePoolMultiplier?: number;
+  /**
+   * Optional caller-narrowing filter, retained for direct hybridSearch callers.
+   * NOTE: Retriever folds caller-narrowing into `enforcedSourceIds` via
+   * `effectiveSourceFilter` — this field is NOT the access-control enforcement
+   * path; do not rely on it for ACL.
+   */
   sourceIds?: string[];
   /**
    * MANDATORY confidentiality boundary (per-principal source-id ACL).

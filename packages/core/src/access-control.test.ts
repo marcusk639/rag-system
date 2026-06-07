@@ -47,6 +47,14 @@ describe("parsePrincipalsConfig", () => {
       ),
     ).toThrow(/API_PRINCIPALS/);
   });
+
+  it("throws on a duplicate token (fail loudly — a silent dup would let only the first win)", () => {
+    const json = JSON.stringify([
+      { token: "tok-dup", allowedSourceIds: ["s1"] },
+      { token: "tok-dup", allowedSourceIds: ["s2"] },
+    ]);
+    expect(() => parsePrincipalsConfig(json)).toThrow(/duplicate token/);
+  });
 });
 
 describe("resolvePrincipal", () => {
@@ -82,6 +90,19 @@ describe("resolvePrincipal", () => {
       [{ token: "dual", allowedSourceIds: ["s9"] }],
     );
     expect(p).toEqual({ kind: "scoped", allowedSourceIds: ["s9"] });
+  });
+
+  it("resolves two distinct tokens to two DISTINCT scopes (multi-tenant guarantee)", () => {
+    const principals = [
+      { token: "tokenA", allowedSourceIds: ["s1"] },
+      { token: "tokenB", allowedSourceIds: ["s2"] },
+    ];
+    const pA = resolvePrincipal("tokenA", [], principals);
+    const pB = resolvePrincipal("tokenB", [], principals);
+    expect(pA && principalToScope(pA)).toEqual({ enforcedSourceIds: ["s1"] });
+    expect(pB && principalToScope(pB)).toEqual({ enforcedSourceIds: ["s2"] });
+    // Distinct tokens must never collapse to the same scope.
+    expect(principalToScope(pA!)).not.toEqual(principalToScope(pB!));
   });
 });
 
