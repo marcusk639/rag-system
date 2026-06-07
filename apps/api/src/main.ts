@@ -1,5 +1,6 @@
 import pino from "pino";
 import { loadConfig } from "@rag/core";
+import { assertEmbeddingDimensions } from "@rag/db";
 import { buildDeps } from "./deps.js";
 import { buildServer } from "./server.js";
 
@@ -10,6 +11,9 @@ import { buildServer } from "./server.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  // Fail fast before building deps / embedding the first /ask query: the
+  // configured provider's vector size must match the chunks.embedding column.
+  assertEmbeddingDimensions(config.embedding.dimensions);
   const logger = pino({
     level: process.env.LOG_LEVEL ?? "info",
     base: { service: "rag-api" },

@@ -1,4 +1,5 @@
 import { loadConfig } from "@rag/core";
+import { assertEmbeddingDimensions } from "@rag/db";
 import pino, { type Logger } from "pino";
 import { buildServer } from "./server.js";
 import { buildDeps } from "./deps.js";
@@ -16,6 +17,9 @@ import { startHttp } from "./transports/http.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  // Fail fast before building deps / embedding any retrieval query: the
+  // configured provider's vector size must match the chunks.embedding column.
+  assertEmbeddingDimensions(config.embedding.dimensions);
 
   const logger: Logger =
     config.mcp.transport === "stdio"

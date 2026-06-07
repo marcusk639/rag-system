@@ -13,6 +13,7 @@ import {
   pgEnum,
   customType,
 } from "drizzle-orm/pg-core";
+import { EMBEDDING_COLUMN_DIMENSIONS } from "./embedding-dimensions.js";
 
 // ----------------------------------------------------------------------------
 // tsvector custom type — Drizzle has no native tsvector primitive, so we
@@ -149,7 +150,9 @@ export const chunks = pgTable(
      * Keeping this nullable would mean dense retrieval silently skips chunks
      * whose embedding step failed without any other signal.
      */
-    embedding: vector("embedding", { dimensions: 768 }).notNull(),
+    embedding: vector("embedding", {
+      dimensions: EMBEDDING_COLUMN_DIMENSIONS,
+    }).notNull(),
     embeddingProvider: text("embedding_provider").notNull(),
     embeddingModel: text("embedding_model").notNull(),
     /** tsvector for BM25-style sparse retrieval — auto-populated by trigger */

@@ -1,4 +1,5 @@
 import { loadConfig } from "@rag/core";
+import { assertEmbeddingDimensions } from "@rag/db";
 import { JOB_NAMES, type SyncSourcePayload } from "@rag/ingestion";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
@@ -25,6 +26,10 @@ let shuttingDown = false;
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  // Fail fast before building deps / embedding any documents: the configured
+  // provider's vector size must match the chunks.embedding column. Otherwise a
+  // mismatch only surfaces at the first INSERT, mid-sync, after credits spent.
+  assertEmbeddingDimensions(config.embedding.dimensions);
   deps = await buildDeps(config, logger);
   const builtDeps = deps;
 
