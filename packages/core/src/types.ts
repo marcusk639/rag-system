@@ -71,17 +71,6 @@ export interface SourceDocument {
 // Parsed document — output of the parser sidecar
 // ============================================================================
 
-export interface ParsedDocument {
-  /** Cleaned markdown representation of the document */
-  markdown: string;
-  /** Detected/normalized title (may differ from source title) */
-  title: string;
-  /** Structured tables extracted from the document */
-  tables: ParsedTable[];
-  /** Metadata extracted by the parser (overrides/augments source metadata) */
-  metadata: DocumentMetadata;
-}
-
 /**
  * Routing label assigned by the parser per spreadsheet sheet. Drives downstream
  * choices about chunking (row-grouping vs. semantic), text-to-SQL eligibility,
@@ -95,30 +84,52 @@ export interface ParsedDocument {
  *                        and treat the whole sheet as one logical section.
  *  - `freeform`        — todo lists, plans, irregular layouts. Best-effort.
  */
-export type SheetType =
-  | "tabular"
-  | "narrative"
-  | "financial_model"
-  | "freeform";
+export const SheetType = z.enum([
+  "tabular",
+  "narrative",
+  "financial_model",
+  "freeform",
+]);
+export type SheetType = z.infer<typeof SheetType>;
 
-export interface ParsedTable {
+export const ParsedTableSchema = z.object({
   /** Markdown rendering of the table — embedded in `markdown` for retrieval */
-  markdown: string;
+  markdown: z.string(),
   /** Optional caption/title near the table */
-  caption?: string;
+  caption: z.string().optional(),
   /** Sheet name for spreadsheet sources; undefined for tables embedded in other docs */
-  sheetName?: string;
+  sheetName: z.string().optional(),
   /** Routing label for downstream chunking + retrieval (spreadsheets only) */
-  sheetType?: SheetType;
+  sheetType: SheetType.optional(),
   /** Header row(s), one entry per column. Empty for non-spreadsheet tables. */
-  headers?: string[];
+  headers: z.array(z.string()).optional(),
   /** Data rows. Each inner array has `headers.length` entries (right-padded with "") */
-  rows?: string[][];
+  rows: z.array(z.array(z.string())).optional(),
   /** Convenience for callers that don't want to count `rows.length` */
-  rowCount?: number;
+  rowCount: z.number().int().nonnegative().optional(),
   /** Convenience for callers that don't want to count `headers.length` */
-  columnCount?: number;
-}
+  columnCount: z.number().int().nonnegative().optional(),
+});
+export type ParsedTable = z.infer<typeof ParsedTableSchema>;
+
+/**
+ * Zod schema for the parser sidecar's response. Mirrors `ParsedDocument`
+ * exactly and is the validation gate at the TS↔Python parser boundary —
+ * `HttpParserClient` `.parse()`s the sidecar JSON through this instead of an
+ * unchecked `as` cast, so a malformed response fails loudly instead of
+ * silently corrupting downstream chunks.
+ */
+export const ParsedDocumentSchema = z.object({
+  /** Cleaned markdown representation of the document */
+  markdown: z.string(),
+  /** Detected/normalized title (may differ from source title) */
+  title: z.string(),
+  /** Structured tables extracted from the document */
+  tables: z.array(ParsedTableSchema),
+  /** Metadata extracted by the parser (overrides/augments source metadata) */
+  metadata: DocumentMetadata,
+});
+export type ParsedDocument = z.infer<typeof ParsedDocumentSchema>;
 
 // ============================================================================
 // Chunk — a slice of a document ready to embed

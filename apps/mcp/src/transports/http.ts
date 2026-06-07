@@ -19,6 +19,19 @@ import type { Logger } from "pino";
  * per-connection request state on the server object. `buildServer` is called
  * lazily on the initialize request.
  */
+/**
+ * Normalize the `mcp-session-id` header. Node/Express types a header as
+ * `string | string[] | undefined`; a repeated header arrives as `string[]`.
+ * Casting it `as string | undefined` silently drops that case, so a duplicated
+ * header would make every request look like a brand-new session. Collapse to
+ * the first value instead.
+ */
+export function normalizeSessionId(
+  raw: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
 export interface HttpTransportOptions {
   buildServer: () => McpServer;
   port: number;
@@ -107,7 +120,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   app.post("/mcp", async (req: Request, res: Response) => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const sessionId = normalizeSessionId(req.headers["mcp-session-id"]);
     try {
       let transport: StreamableHTTPServerTransport | undefined = sessionId
         ? transports.get(sessionId)
@@ -180,7 +193,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     req: Request,
     res: Response,
   ): StreamableHTTPServerTransport | null => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const sessionId = normalizeSessionId(req.headers["mcp-session-id"]);
     if (!sessionId) {
       res.status(400).send("Missing mcp-session-id header");
       return null;
