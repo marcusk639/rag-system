@@ -1,5 +1,9 @@
 import { loadConfig } from "@rag/core";
-import { assertEmbeddingDimensions } from "@rag/db";
+import {
+  assertEmbeddingDimensions,
+  assertRequiredIndexes,
+  createIndexExistenceRunner,
+} from "@rag/db";
 import { JOB_NAMES, type SyncSourcePayload } from "@rag/ingestion";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
@@ -32,6 +36,12 @@ async function main(): Promise<void> {
   assertEmbeddingDimensions(config.embedding.dimensions);
   deps = await buildDeps(config, logger);
   const builtDeps = deps;
+
+  // Fail fast before processing any jobs: the HNSW + GIN search indexes (owned
+  // by 0000_init.sql, invisible to Drizzle's model) must exist. If a stray
+  // regenerate dropped them, retrieval would silently degrade to sequential
+  // scans with no error — so refuse to start rather than serve slow results.
+  await assertRequiredIndexes(createIndexExistenceRunner(builtDeps.db));
 
   // pg-boss v10 renamed the worker-pool knobs:
   //   batchSize       — how many jobs a single poll pulls (was `teamSize`)

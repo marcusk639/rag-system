@@ -1,5 +1,9 @@
 import { loadConfig } from "@rag/core";
-import { assertEmbeddingDimensions } from "@rag/db";
+import {
+  assertEmbeddingDimensions,
+  assertRequiredIndexes,
+  createIndexExistenceRunner,
+} from "@rag/db";
 import pino, { type Logger } from "pino";
 import { buildServer } from "./server.js";
 import { buildDeps } from "./deps.js";
@@ -30,6 +34,13 @@ async function main(): Promise<void> {
       : pino({ level: process.env.LOG_LEVEL ?? "info" });
 
   const deps = await buildDeps(config, logger);
+
+  // Fail fast before serving any tool calls: the HNSW + GIN search indexes
+  // (owned by 0000_init.sql, invisible to Drizzle's model) must exist. The
+  // search/ask tools query the corpus, and a stray regenerate that dropped
+  // these indexes would silently degrade retrieval to sequential scans with no
+  // error — so refuse to start instead.
+  await assertRequiredIndexes(createIndexExistenceRunner(deps.db));
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Shutting down MCP server");

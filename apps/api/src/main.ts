@@ -1,6 +1,10 @@
 import pino from "pino";
 import { loadConfig } from "@rag/core";
-import { assertEmbeddingDimensions } from "@rag/db";
+import {
+  assertEmbeddingDimensions,
+  assertRequiredIndexes,
+  createIndexExistenceRunner,
+} from "@rag/db";
 import { buildDeps } from "./deps.js";
 import { buildServer } from "./server.js";
 
@@ -20,6 +24,13 @@ async function main(): Promise<void> {
   });
 
   const deps = await buildDeps(config, logger);
+
+  // Fail fast before serving traffic: the HNSW + GIN search indexes (owned by
+  // 0000_init.sql, invisible to Drizzle's model) must exist. If a stray
+  // regenerate dropped them, /ask + /search would silently degrade to
+  // sequential scans with no error — so refuse to start instead.
+  await assertRequiredIndexes(createIndexExistenceRunner(deps.db));
+
   const app = await buildServer({ config, logger, deps });
 
   await app.listen({ host: config.api.host, port: config.api.port });
