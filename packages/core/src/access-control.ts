@@ -200,6 +200,32 @@ export function principalToScope(principal: Principal): AuthorizationScope {
  * Returns `null` only for the genuine admin-unrestricted case. Any non-null
  * array is passed verbatim to `hybridSearch`'s mandatory `enforcedSourceIds`.
  */
+/**
+ * Pure per-document scope check for the FETCH-BY-ID boundaries (REST
+ * `GET /documents/:id`, the MCP `get_document` tool, and the `documents://{id}`
+ * resource). Unlike `effectiveSourceFilter` (which narrows a search's WHERE
+ * clause), this answers a single yes/no: may THIS principal read a document
+ * that belongs to `sourceId`?
+ *
+ *   - `enforcedSourceIds === null` (admin / unrestricted) => ALWAYS allowed.
+ *   - `enforcedSourceIds === []`   (fail closed)           => NOTHING allowed.
+ *   - `enforcedSourceIds === [..]` (scoped)                => allowed only when
+ *     `sourceId` is in the set.
+ *
+ * Callers MUST treat a `false` result as NOT FOUND (return the same response a
+ * genuinely-missing id returns) so a forbidden document is indistinguishable
+ * from one that does not exist — never reveal its existence or its source.
+ */
+export function isSourceAllowed(
+  scope: AuthorizationScope,
+  sourceId: string,
+): boolean {
+  // Admin / unrestricted sees everything.
+  if (scope.enforcedSourceIds === null) return true;
+  // Scoped (including the empty fail-closed set): allowed iff in the set.
+  return scope.enforcedSourceIds.includes(sourceId);
+}
+
 export function effectiveSourceFilter(
   callerSourceIds: readonly string[] | undefined,
   enforcedSourceIds: readonly string[] | null,

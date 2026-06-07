@@ -2,7 +2,7 @@ import {
   McpServer,
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { AuthorizationScope } from "@rag/core";
+import { type AuthorizationScope, isSourceAllowed } from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { Logger } from "pino";
 import type { Deps } from "./deps.js";
@@ -38,7 +38,7 @@ export function buildServer(opts: {
 
   // Tools — search/ask receive the enforced authorization scope.
   registerSearchDocuments(server, deps, scope);
-  registerGetDocument(server, deps);
+  registerGetDocument(server, deps, scope);
   registerListSources(server, deps);
   registerTriggerSync(server, deps);
   registerAsk(server, deps, scope);
@@ -61,7 +61,12 @@ export function buildServer(opts: {
         throw new Error("documents:// resource requires an id");
       }
       const doc = await getDocument(deps.db, docId);
-      if (!doc) {
+      // Confidentiality boundary (P1b): a scoped session must not read — or even
+      // confirm the existence of — a document outside its enforced source set.
+      // Mirror the missing-id path EXACTLY (same thrown "not found") so the
+      // forbidden case is indistinguishable and the markdown body is not
+      // returned.
+      if (!doc || !isSourceAllowed(scope, doc.sourceId)) {
         throw new Error(`document ${docId} not found`);
       }
       return {

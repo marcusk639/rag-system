@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ADMIN_SCOPE,
   computeEnforcedSourceIds,
+  DENY_ALL_SCOPE,
   effectiveSourceFilter,
+  isSourceAllowed,
   parsePrincipalsConfig,
   principalToScope,
   resolvePrincipal,
+  type AuthorizationScope,
   type Principal,
 } from "./access-control.js";
 
@@ -163,5 +166,28 @@ describe("effectiveSourceFilter (caller filter ∩ enforced set)", () => {
   it("does not let a caller widen beyond the enforced set", () => {
     // caller asks for s1+s2+s3, but only s1 is in scope
     expect(effectiveSourceFilter(["s1", "s2", "s3"], ["s1"])).toEqual(["s1"]);
+  });
+});
+
+describe("isSourceAllowed", () => {
+  it("admin (null scope) allows any source", () => {
+    expect(isSourceAllowed(ADMIN_SCOPE, "s1")).toBe(true);
+    expect(isSourceAllowed(ADMIN_SCOPE, "anything-at-all")).toBe(true);
+  });
+
+  it("scoped allows a source within the enforced set", () => {
+    const scope: AuthorizationScope = { enforcedSourceIds: ["s1", "s2"] };
+    expect(isSourceAllowed(scope, "s1")).toBe(true);
+    expect(isSourceAllowed(scope, "s2")).toBe(true);
+  });
+
+  it("scoped denies a source outside the enforced set", () => {
+    const scope: AuthorizationScope = { enforcedSourceIds: ["s1", "s2"] };
+    expect(isSourceAllowed(scope, "s3")).toBe(false);
+  });
+
+  it("empty enforced set (deny-all / fail closed) denies everything", () => {
+    expect(isSourceAllowed(DENY_ALL_SCOPE, "s1")).toBe(false);
+    expect(isSourceAllowed({ enforcedSourceIds: [] }, "anything")).toBe(false);
   });
 });

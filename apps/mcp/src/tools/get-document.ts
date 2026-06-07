@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type DocumentMetadata, sanitizeMetadata } from "@rag/core";
+import {
+  type AuthorizationScope,
+  type DocumentMetadata,
+  isSourceAllowed,
+  sanitizeMetadata,
+} from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { Deps } from "../deps.js";
 
@@ -13,7 +18,11 @@ const inputSchema = {
     ),
 };
 
-export function registerGetDocument(server: McpServer, deps: Deps): void {
+export function registerGetDocument(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "get_document",
     {
@@ -24,7 +33,12 @@ export function registerGetDocument(server: McpServer, deps: Deps): void {
     },
     async ({ documentId }) => {
       const doc = await getDocument(deps.db, documentId);
-      if (!doc) {
+      // Confidentiality boundary (P1b): a scoped session must not read — or even
+      // confirm the existence of — a document outside its enforced source set.
+      // Return the SAME not-found result a missing id returns so the forbidden
+      // case is indistinguishable, and NEVER build the summary below (which
+      // would embed doc.sourceId and the full doc.markdown body).
+      if (!doc || !isSourceAllowed(scope, doc.sourceId)) {
         return {
           content: [
             {
