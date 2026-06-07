@@ -44,3 +44,6 @@ coverage/
 
 # Drizzle
 drizzle/meta/_journal.json.bak
+
+# Git worktrees (superpowers)
+.worktrees/
