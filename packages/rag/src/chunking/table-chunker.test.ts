@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { encode } from "gpt-tokenizer";
 import type { ParsedTable } from "@rag/core";
 import { TableChunker } from "./table-chunker.js";
+import { MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 function makeTable(
   partial: Partial<ParsedTable> & Pick<ParsedTable, "markdown">,
@@ -204,6 +206,31 @@ describe("TableChunker", () => {
         // The overlap rows from the previous chunk must appear in the next chunk.
         expect(chunks[i]!.text).toContain(row);
       }
+    }
+  });
+
+  it("clamps a pathologically wide row to the hard embedding token cap", () => {
+    // A single row whose cells are enormous — far beyond Gemini's 2048-token
+    // embedding input limit. The chunker emits oversized rows alone rather than
+    // dropping data, so without the clamp this chunk would blow past the cap.
+    const chunker = new TableChunker({ chunkSize: 200, rowOverlap: 0 });
+    const hugeCell = "lorem ipsum dolor sit amet ".repeat(2000); // ~10k tokens
+    const table = makeTable({
+      markdown: "",
+      sheetName: "Wide",
+      sheetType: "tabular",
+      headers: HEADERS,
+      rows: [
+        ["2026-01-01", hugeCell, "100", "paid"],
+        ["2026-01-02", "Customer", "200", "paid"],
+      ],
+    });
+    const chunks = chunker.chunk({ table, startOrdinal: 0 })!;
+    for (const c of chunks) {
+      expect(encode(c.text).length).toBeLessThanOrEqual(MAX_EMBEDDING_TOKENS);
+      // tokenCount metadata must reflect the clamped text, not the original.
+      expect(c.tokenCount).toBeLessThanOrEqual(MAX_EMBEDDING_TOKENS);
+      expect(c.tokenCount).toBe(encode(c.text).length);
     }
   });
 

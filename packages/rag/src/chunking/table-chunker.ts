@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { encode } from "gpt-tokenizer";
 import type { Chunk, ParsedTable } from "@rag/core";
+import { clampToTokenLimit } from "./token-clamp.js";
 
 /**
  * Row-grouped chunker for structured tables emitted by the spreadsheet path
@@ -173,10 +174,14 @@ function makeChunk(args: {
   ordinal: number;
   sheetName: string | undefined;
 }): Chunk {
+  // Last-resort safety net: an oversized row is emitted alone (see chunk()),
+  // which can exceed the hard embedding token cap. Clamp it token-aware before
+  // it can reach embedBatch (see token-clamp.ts).
+  const text = clampToTokenLimit(args.text);
   return {
-    hash: sha256(`${args.sheetName ?? ""}::${args.text}`),
-    text: args.text,
-    tokenCount: countTokens(args.text),
+    hash: sha256(`${args.sheetName ?? ""}::${text}`),
+    text,
+    tokenCount: countTokens(text),
     ordinal: args.ordinal,
     headingPath: args.sheetName ? [args.sheetName] : [],
   };

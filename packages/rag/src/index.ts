@@ -20,6 +20,10 @@ export {
   CompositeChunker,
   type CompositeChunkerOptions,
 } from "./chunking/composite-chunker.js";
+export {
+  MAX_EMBEDDING_TOKENS,
+  clampToTokenLimit,
+} from "./chunking/token-clamp.js";
 
 // Retrieval
 export { Retriever } from "./retrieval/retriever.js";
