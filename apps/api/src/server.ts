@@ -55,9 +55,11 @@ export async function buildServer(opts: {
       return { status: "ready" };
     } catch (err) {
       app.log.error({ err }, "readiness check failed");
+      // Do not echo the raw error — pg connection errors include the
+      // DATABASE_URL (with credentials). The detail is logged server-side above.
       return reply
         .code(503)
-        .send({ status: "not-ready", error: (err as Error).message });
+        .send({ status: "not-ready", error: "database unavailable" });
     }
   });
 

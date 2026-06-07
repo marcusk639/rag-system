@@ -56,7 +56,7 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 
 ## Adding a new connector
 
-1. Implement the `Connector` interface from `@rag/core` (`list`, `fetch`, `delta` methods).
+1. Implement the `Connector` interface from `@rag/core` (`validate`, `list`, `fetch` methods; delta sync is driven by the `cursor` passed to `list()`, not a separate method).
 2. Add a subdirectory under `packages/connectors/src/<name>/`.
 3. Register it in `packages/connectors/src/index.ts`.
 4. Document OAuth/credential setup in `docs/CONNECTORS.md`.

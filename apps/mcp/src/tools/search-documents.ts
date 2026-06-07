@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RetrievalResult } from "@rag/core";
 import type { Deps } from "../deps.js";
+import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 const EXCERPT_CHARS = 300;
@@ -21,8 +22,7 @@ const inputSchema = {
     .describe(
       "Restrict the search to specific source ids (from list_sources). Omit to search all sources.",
     ),
-  filter: z
-    .record(z.union([z.string(), z.array(z.string())]))
+  filter: filterSchema
     .optional()
     .describe(
       'Metadata filter applied to document.metadata. AND across keys, OR across values per key. Example: {"author":"alice","path":["Marketing/2024","Marketing/2025"]}.',

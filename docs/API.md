@@ -65,13 +65,18 @@ Register a new source for ingestion. The `config` blob is opaque to the API — 
 | `name`   | string (1–120)                                                 | yes      | Human-readable; shown in citations / dashboards          |
 | `config` | object                                                         | yes      | Connector-specific; see [CONNECTORS.md](./CONNECTORS.md) |
 
-**Response 201**: the created `Source` row.
+**Response 201**: the created `Source` row, with `config` omitted (see note below).
+
+> **Note:** All source responses omit the `config` blob. It may contain
+> connector-specific values (site IDs, folder IDs, queries, OAuth subjects)
+> and operator-supplied credential-like values, so it is never echoed back —
+> on create (`POST`) or read (`GET`).
 
 ---
 
 ### `GET /sources`
 
-**Response 200**:
+**Response 200** (note: `config` is omitted):
 
 ```json
 {
@@ -80,7 +85,6 @@ Register a new source for ingestion. The `config` blob is opaque to the API — 
       "id": "uuid",
       "kind": "sharepoint",
       "name": "Marketing site",
-      "config": { ... },
       "cursor": null,
       "lastSyncedAt": "2026-02-27T15:00:00Z",
       "createdAt": "...",
@@ -94,7 +98,7 @@ Register a new source for ingestion. The `config` blob is opaque to the API — 
 
 ### `GET /sources/:id`
 
-**Response 200**: the Source row.
+**Response 200**: the Source row (with `config` omitted).
 **Response 404**: source not found.
 
 ---

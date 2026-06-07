@@ -33,7 +33,10 @@ services:
     container_name: rag-parser
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # The parser has no authentication. Bind to loopback only so it is not
+      # reachable from other hosts on the network. The Node services reach it
+      # via the compose network (PARSER_URL=http://parser:8000), not this mapping.
+      - "127.0.0.1:8000:8000"
     environment:
       PYTHONUNBUFFERED: "1"
       # MarkItDown can optionally call an LLM for image-to-text. Leave blank to disable.

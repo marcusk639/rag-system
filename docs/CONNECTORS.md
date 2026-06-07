@@ -151,7 +151,8 @@ Same app registration as SharePoint. Add this Application permission:
 {
   "userId": "alice@contoso.com", // UPN or object id of the mailbox
   "folderId": "AAMkAGI...", // optional — restrict to a folder
-  "filter": "isRead eq false" // optional OData $filter
+  "filter": "isRead eq false", // optional OData $filter
+  "includeAttachments": true // default true — attachments become their own documents (same as Gmail)
 }
 ```
 

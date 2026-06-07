@@ -120,7 +120,7 @@ export const documents = pgTable(
 // is a pgvector type; dimension is 768 to match Gemini text-embedding-004.
 //
 // IMPORTANT: if you change embedding model dimensions, this column needs to
-// be re-typed and the HNSW index rebuilt. See migration file 0001_init.sql
+// be re-typed and the HNSW index rebuilt. See migration file 0000_init.sql
 // for the manual statements (Drizzle can't yet diff vector dimensions cleanly).
 // ----------------------------------------------------------------------------
 export const chunks = pgTable(

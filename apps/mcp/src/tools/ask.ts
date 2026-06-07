@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Deps } from "../deps.js";
+import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 
@@ -24,8 +25,7 @@ const inputSchema = {
     .describe(
       "Restrict retrieval to specific source ids (from list_sources). Omit to search all sources.",
     ),
-  filter: z
-    .record(z.union([z.string(), z.array(z.string())]))
+  filter: filterSchema
     .optional()
     .describe(
       "Metadata filter applied to document.metadata. AND across keys, OR across values per key.",

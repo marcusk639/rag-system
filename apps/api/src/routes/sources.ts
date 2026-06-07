@@ -70,7 +70,9 @@ export async function registerSourceRoutes(
         name: body.name,
         config: body.config,
       });
-      return reply.code(201).send(row);
+      // Strip `config` from the create response too — it may carry
+      // credential-like values, and GET routes already sanitize it.
+      return reply.code(201).send(sanitizeSource(row));
     },
   );
 
