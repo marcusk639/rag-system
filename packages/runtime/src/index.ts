@@ -1,0 +1,105 @@
+import type { Config } from "@rag/core";
+import { createDb, type Db } from "@rag/db";
+import { createQueue } from "@rag/ingestion";
+import {
+  Retriever,
+  createEmbeddingProvider,
+  createGenerator,
+  type Generator,
+} from "@rag/rag";
+import type { Logger } from "pino";
+
+/**
+ * Queue handle (pg-boss). Derived from `createQueue`'s return type so the
+ * runtime layer doesn't take a direct dependency on `pg-boss` — same pattern
+ * the MCP/services layers use.
+ */
+export type Queue = Awaited<ReturnType<typeof createQueue>>;
+
+export type Embedder = ReturnType<typeof createEmbeddingProvider>;
+
+/**
+ * The shared core dependency graph: DB pool, embedding provider, retriever,
+ * queue, optional generator, and a single hardened `close()`. Every app
+ * (api/mcp/worker) builds this once and then layers its own transport- or
+ * worker-specific extras on top.
+ */
+export interface CoreDeps {
+  db: Db;
+  embedder: Embedder;
+  retriever: Retriever;
+  queue: Queue;
+  /** Null when `config.generation` is not configured. */
+  generator: Generator | null;
+  /** Drain pg-boss (graceful) then the DB pool. Idempotent. */
+  close: () => Promise<void>;
+}
+
+/**
+ * Build the dependency graph every app shares. Wiring copied verbatim from the
+ * former per-app `deps.ts` files (api was the cleanest core-only graph); the
+ * `close()` is the worker's hardened variant (re-entrancy guard + per-resource
+ * try/catch with error logging) so all three surfaces shut down identically.
+ *
+ * The generator is always instantiated when configured — there is no opt-out
+ * flag. The worker simply ignores it; the cost of the unused instance is
+ * negligible and avoiding it would mean an options-bag we explicitly don't want.
+ */
+export async function buildCoreDeps(
+  config: Config,
+  logger: Logger,
+): Promise<CoreDeps> {
+  const { db, close: closeDb } = createDb(config.databaseUrl);
+
+  const embedder = createEmbeddingProvider(config.embedding);
+
+  const retriever = new Retriever(db, embedder, {
+    topK: config.retrieval.defaultTopK,
+    denseWeight: config.retrieval.hybridDenseWeight,
+    sparseWeight: config.retrieval.hybridSparseWeight,
+  });
+
+  const queue = await createQueue({
+    databaseUrl: config.databaseUrl,
+    schema: config.pgBossSchema,
+  });
+
+  // Generation reuses the embedding provider's API key — same vendor in
+  // practice (Gemini embedding + Gemini generation, OpenAI + OpenAI).
+  let generator: Generator | null = null;
+  if (config.generation) {
+    const apiKey = config.embedding.apiKey;
+    if (!apiKey) {
+      logger.warn(
+        { provider: config.generation.provider },
+        "generation configured but no API key on embedding config — generation disabled",
+      );
+    } else {
+      generator = createGenerator({
+        provider: config.generation.provider,
+        model: config.generation.model,
+        apiKey,
+      });
+    }
+  }
+
+  let closed = false;
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    // Stop pg-boss first so it stops handing out new jobs and lets in-flight
+    // ones finish (graceful: true). Then end the DB pool.
+    try {
+      await queue.stop({ graceful: true });
+    } catch (err) {
+      logger.error({ err }, "error stopping pg-boss");
+    }
+    try {
+      await closeDb();
+    } catch (err) {
+      logger.error({ err }, "error closing db pool");
+    }
+  };
+
+  return { db, embedder, retriever, queue, generator, close };
+}

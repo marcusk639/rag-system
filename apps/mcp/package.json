@@ -16,6 +16,7 @@
     "@rag/db": "workspace:*",
     "@rag/ingestion": "workspace:*",
     "@rag/rag": "workspace:*",
+    "@rag/runtime": "workspace:*",
     "@rag/services": "workspace:*",
     "express": "^4.21.2",
     "pino": "^9.5.0",

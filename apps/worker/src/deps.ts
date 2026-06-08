@@ -1,24 +1,17 @@
-import type { Config } from "@rag/core";
-import { createDb, type Db } from "@rag/db";
-import {
-  createEmbeddingProvider,
-  HttpParserClient,
-  CompositeChunker,
-} from "@rag/rag";
-import { createQueue } from "@rag/ingestion";
-// NOTE: `@rag/connectors` is being built in parallel. The factory signature
-// below matches what was agreed in the worker spec:
+import type { Config, Connector } from "@rag/core";
+import type { Db } from "@rag/db";
+import { HttpParserClient, CompositeChunker } from "@rag/rag";
+import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
+// NOTE: The connector factory signature is:
 //   createConnector(
 //     { id, kind, config },
 //     { microsoft?, google? },
 //     logger,
 //   ): Connector
-// If the connectors package lands with a different signature, this import
-// (and the `makeConnector` adapter below) is the single point to reconcile.
+// This import (and the `makeConnector` adapter below) is the single point to
+// reconcile if the connectors package signature changes.
 import { createConnector } from "@rag/connectors";
-import type { Connector } from "@rag/core";
 import type { Logger } from "pino";
-import type PgBoss from "pg-boss";
 
 /**
  * Long-lived dependencies built once at worker startup and reused across
@@ -32,8 +25,8 @@ export interface WorkerDeps {
   db: Db;
   parser: HttpParserClient;
   chunker: CompositeChunker;
-  embedder: ReturnType<typeof createEmbeddingProvider>;
-  queue: PgBoss;
+  embedder: Embedder;
+  queue: Queue;
   /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
@@ -52,7 +45,9 @@ export async function buildDeps(
   config: Config,
   logger: Logger,
 ): Promise<WorkerDeps> {
-  const { db, close: closeDb } = createDb(config.databaseUrl);
+  // Shared core graph (db/embedder/queue/close + an unused generator). Worker-
+  // only resources (parser, chunker, connector factory) are layered on below.
+  const { db, embedder, queue, close } = await buildCoreDeps(config, logger);
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -72,13 +67,6 @@ export async function buildDeps(
     },
   });
 
-  const embedder = createEmbeddingProvider(config.embedding);
-
-  const queue = await createQueue({
-    databaseUrl: config.databaseUrl,
-    schema: config.pgBossSchema,
-  });
-
   const makeConnector: WorkerDeps["makeConnector"] = (source) =>
     createConnector(
       {
@@ -91,24 +79,6 @@ export async function buildDeps(
       { microsoft: config.microsoft, google: config.google },
       logger,
     );
-
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    // Stop pg-boss first so it stops handing out new jobs and lets in-flight
-    // ones finish (graceful: true). Then end the DB pool.
-    try {
-      await queue.stop({ graceful: true });
-    } catch (err) {
-      logger.error({ err }, "error stopping pg-boss");
-    }
-    try {
-      await closeDb();
-    } catch (err) {
-      logger.error({ err }, "error closing db pool");
-    }
-  };
 
   return {
     config,

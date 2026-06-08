@@ -38,6 +38,9 @@ importers:
       '@rag/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@rag/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@rag/services':
         specifier: workspace:*
         version: link:../../packages/services
@@ -84,6 +87,9 @@ importers:
       '@rag/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@rag/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@rag/services':
         specifier: workspace:*
         version: link:../../packages/services
@@ -124,6 +130,9 @@ importers:
       '@rag/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@rag/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       pg-boss:
         specifier: ^10.1.6
         version: 10.4.2
@@ -295,6 +304,31 @@ importers:
       undici:
         specifier: ^7.2.0
         version: 7.26.0
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  packages/runtime:
+    dependencies:
+      '@rag/core':
+        specifier: workspace:*
+        version: link:../core
+      '@rag/db':
+        specifier: workspace:*
+        version: link:../db
+      '@rag/ingestion':
+        specifier: workspace:*
+        version: link:../ingestion
+      '@rag/rag':
+        specifier: workspace:*
+        version: link:../rag
+      pino:
+        specifier: ^9.5.0
+        version: 9.14.0
     devDependencies:
       typescript:
         specifier: ^5.7.2
