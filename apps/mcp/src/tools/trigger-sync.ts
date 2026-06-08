@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { enqueueSync } from "@rag/ingestion";
 import { getSource } from "@rag/db";
+import { triggerSync } from "@rag/services";
 import type { Deps } from "../deps.js";
 
 const inputSchema = {
@@ -29,6 +29,9 @@ export function registerTriggerSync(server: McpServer, deps: Deps): void {
       inputSchema,
     },
     async ({ sourceId, mode }) => {
+      // Resolve the source up front purely for a friendly name in the success
+      // message (display concern). triggerSync re-checks existence and is the
+      // sole writer of ingestion_jobs (C2a).
       const source = await getSource(deps.db, sourceId);
       if (!source) {
         return {
@@ -37,24 +40,28 @@ export function registerTriggerSync(server: McpServer, deps: Deps): void {
         };
       }
       try {
-        const jobId = await enqueueSync(deps.queue, {
-          sourceId,
-          mode: mode ?? "incremental",
-        });
+        const {
+          jobId,
+          ingestionId,
+          mode: resolvedMode,
+        } = await triggerSync(deps, { sourceId, mode: mode ?? "incremental" });
         return {
           content: [
             {
               type: "text",
-              text: `Enqueued ${mode ?? "incremental"} sync for "${source.name}" (jobId=${jobId}). The worker will process it shortly; poll list_sources to see when lastSyncedAt updates.`,
+              text: `Enqueued ${resolvedMode} sync for "${source.name}" (jobId=${jobId}, ingestionId=${ingestionId}). The worker will process it shortly; poll list_sources to see when lastSyncedAt updates.`,
             },
           ],
           structuredContent: {
             jobId,
+            ingestionId,
             sourceId,
-            mode: mode ?? "incremental",
+            mode: resolvedMode,
           },
         };
       } catch (err) {
+        // Includes SyncAlreadyRunningError (duplicate sync) — surfaced as a
+        // tool error rather than a thrown 500.
         const message = err instanceof Error ? err.message : String(err);
         return {
           content: [

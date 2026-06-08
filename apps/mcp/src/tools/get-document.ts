@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getDocument } from "@rag/db";
+import { NotFoundError } from "@rag/core";
+import { getDocumentById } from "@rag/services";
 import type { Deps } from "../deps.js";
 
 const inputSchema = {
@@ -22,17 +23,22 @@ export function registerGetDocument(server: McpServer, deps: Deps): void {
       inputSchema,
     },
     async ({ documentId }) => {
-      const doc = await getDocument(deps.db, documentId);
-      if (!doc) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Document ${documentId} not found.`,
-            },
-          ],
-          isError: true,
-        };
+      let doc;
+      try {
+        doc = await getDocumentById(deps, documentId);
+      } catch (err) {
+        if (err instanceof NotFoundError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Document ${documentId} not found.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
       }
       const summary = `# ${doc.title}\n\n_id_: ${doc.id}\n_sourceId_: ${doc.sourceId}\n_mimeType_: ${doc.mimeType}\n_modified_: ${doc.sourceModifiedAt?.toISOString() ?? "unknown"}\n\n---\n\n${doc.markdown}`;
       return {

@@ -1,4 +1,5 @@
-import type { Config, RetrievalQuery } from "@rag/core";
+import type { Config } from "@rag/core";
+import { searchDocuments } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -41,18 +42,13 @@ export async function registerSearchRoute(
 ): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  // POST /search — retrieval only (no LLM)
+  // POST /search — retrieval only (no LLM). Thin adapter: validate → service.
   typed.post("/search", { schema: { body: SearchBody } }, async (request) => {
-    const { query, topK, sourceIds, filter } = request.body;
-
-    const rq: RetrievalQuery = {
-      query,
-      topK: topK ?? config.retrieval.defaultTopK,
-      ...(sourceIds ? { sourceIds } : {}),
-      ...(filter ? { filter } : {}),
-    };
-
-    const results = await deps.retriever.search(rq);
+    const results = await searchDocuments(
+      deps,
+      request.body,
+      config.retrieval.defaultTopK,
+    );
     return { results };
   });
 }

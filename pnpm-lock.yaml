@@ -38,6 +38,9 @@ importers:
       '@rag/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@rag/services':
+        specifier: workspace:*
+        version: link:../../packages/services
       fastify:
         specifier: ^5.2.1
         version: 5.8.5
@@ -81,6 +84,9 @@ importers:
       '@rag/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@rag/services':
+        specifier: workspace:*
+        version: link:../../packages/services
       express:
         specifier: ^4.21.2
         version: 4.22.2
@@ -289,6 +295,28 @@ importers:
       undici:
         specifier: ^7.2.0
         version: 7.26.0
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  packages/services:
+    dependencies:
+      '@rag/core':
+        specifier: workspace:*
+        version: link:../core
+      '@rag/db':
+        specifier: workspace:*
+        version: link:../db
+      '@rag/ingestion':
+        specifier: workspace:*
+        version: link:../ingestion
+      '@rag/rag':
+        specifier: workspace:*
+        version: link:../rag
     devDependencies:
       typescript:
         specifier: ^5.7.2

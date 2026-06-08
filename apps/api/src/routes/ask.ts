@@ -1,4 +1,5 @@
-import type { Config, RetrievalQuery } from "@rag/core";
+import type { Config } from "@rag/core";
+import { askQuestion } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -31,45 +32,11 @@ export async function registerAskRoute(
 ): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  // POST /ask — retrieval + generation
-  typed.post("/ask", { schema: { body: AskBody } }, async (request, reply) => {
-    if (!deps.generator) {
-      return reply.code(503).send({
-        error: {
-          code: "GENERATION_NOT_CONFIGURED",
-          message:
-            "Generation is not configured. Set GENERATION_PROVIDER and GENERATION_MODEL to enable /ask.",
-        },
-      });
-    }
-
-    const { question, topK, sourceIds, filter } = request.body;
-
-    const rq: RetrievalQuery = {
-      query: question,
-      topK: topK ?? config.retrieval.defaultTopK,
-      ...(sourceIds ? { sourceIds } : {}),
-      ...(filter ? { filter } : {}),
-    };
-
-    const retrieved = await deps.retriever.search(rq);
-
-    // If nothing came back, short-circuit — the model would just hallucinate.
-    if (retrieved.length === 0) {
-      return {
-        answer:
-          "The available documents do not contain enough information to answer that.",
-        citations: [],
-        retrieved,
-      };
-    }
-
-    const result = await deps.generator.answer(question, retrieved);
-
-    return {
-      answer: result.answer,
-      citations: result.citations,
-      retrieved,
-    };
+  // POST /ask — retrieval + generation. Thin adapter: validate → service.
+  // The generator-null guard and empty-results short-circuit live in
+  // `askQuestion`; GenerationNotConfiguredError maps to 503 via the central
+  // error handler (STATUS_BY_CODE).
+  typed.post("/ask", { schema: { body: AskBody } }, async (request) => {
+    return askQuestion(deps, request.body, config.retrieval.defaultTopK);
   });
 }

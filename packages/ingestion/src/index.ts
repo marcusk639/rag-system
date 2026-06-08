@@ -11,3 +11,4 @@ export {
   type SyncSourcePayload,
   type QueueOptions,
 } from "./queue.js";
+export { SyncAlreadyRunningError } from "./errors.js";
