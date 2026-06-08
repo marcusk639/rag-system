@@ -10,6 +10,7 @@ import {
   type NewDocument,
   type NewIngestionJob,
   type NewSource,
+  type Source,
 } from "./schema.js";
 
 // ============================================================================
@@ -401,4 +402,22 @@ export async function updateIngestionJob(
   patch: Partial<NewIngestionJob>,
 ) {
   await db.update(ingestionJobs).set(patch).where(eq(ingestionJobs.id, id));
+}
+
+// ============================================================================
+// Public projections
+// ============================================================================
+
+/**
+ * Strip the raw `config` blob before a source is returned over the wire. The
+ * config carries connector-specific values (site/folder ids, queries, OAuth
+ * impersonation subjects) and operator-supplied credential-like values that
+ * must never be echoed to a read-token holder.
+ *
+ * Single-sourced here so every transport (HTTP routes, MCP `list_sources`)
+ * sanitizes identically and the projection can't drift.
+ */
+export function toPublicSource(row: Source): Omit<Source, "config"> {
+  const { config: _config, ...safe } = row;
+  return safe;
 }

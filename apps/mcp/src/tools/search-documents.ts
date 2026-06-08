@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RetrievalResult } from "@rag/core";
+import { filterSchema } from "@rag/core";
 import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
-import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 const EXCERPT_CHARS = 300;

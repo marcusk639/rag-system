@@ -1,26 +1,10 @@
 import { NotFoundError } from "@rag/core";
-import { createSource, getSource, type Source } from "@rag/db";
+import { createSource, getSource, toPublicSource } from "@rag/db";
 import { listPublicSources, triggerSync } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
-
-/**
- * Drop the raw `config` blob before returning a source over the wire. The
- * config contains connector-specific values (SharePoint site IDs, Drive
- * folder IDs, Gmail queries, OAuth impersonation subjects) — leaking these
- * to anyone with a read token both exposes source topology to potential
- * attackers and risks surfacing operator-supplied credential-like values
- * that should never have been stored there.
- *
- * Source creation still accepts the full config (POST /sources); we just
- * never echo it back in list/get responses.
- */
-function sanitizeSource(row: Source): Omit<Source, "config"> {
-  const { config: _config, ...safe } = row;
-  return safe;
-}
 
 const SourceKindSchema = z.enum([
   "sharepoint",
@@ -66,7 +50,7 @@ export async function registerSourceRoutes(
       });
       // Strip `config` from the create response too — it may carry
       // credential-like values, and GET routes already sanitize it.
-      return reply.code(201).send(sanitizeSource(row));
+      return reply.code(201).send(toPublicSource(row));
     },
   );
 
@@ -84,7 +68,7 @@ export async function registerSourceRoutes(
       const row = await getSource(deps.db, request.params.id);
       if (!row)
         throw new NotFoundError(`Source ${request.params.id} not found`);
-      return sanitizeSource(row);
+      return toPublicSource(row);
     },
   );
 

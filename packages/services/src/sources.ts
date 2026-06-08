@@ -3,23 +3,11 @@ import {
   createIngestionJob,
   getSource,
   listSources,
+  toPublicSource,
   type Source,
 } from "@rag/db";
 import { enqueueSync } from "@rag/ingestion";
 import type { ServiceDeps } from "./deps.js";
-
-/**
- * Drop the raw `config` blob before returning a source over the wire. The
- * config carries connector-specific values (site/folder ids, queries, OAuth
- * impersonation subjects) that should never be echoed to a read-token holder.
- *
- * Inlined here for Phase 1; Phase 3 promotes a shared `toPublicSource` in
- * `@rag/db` and both API and MCP import that instead.
- */
-function sanitizeSource(row: Source): Omit<Source, "config"> {
-  const { config: _config, ...safe } = row;
-  return safe;
-}
 
 export interface TriggerSyncInput {
   sourceId: string;
@@ -76,5 +64,5 @@ export async function listPublicSources(
   deps: ServiceDeps,
 ): Promise<Omit<Source, "config">[]> {
   const rows = await listSources(deps.db);
-  return rows.map(sanitizeSource);
+  return rows.map(toPublicSource);
 }

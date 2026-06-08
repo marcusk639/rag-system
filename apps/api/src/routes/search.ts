@@ -1,38 +1,18 @@
 import type { Config } from "@rag/core";
+import { filterSchema } from "@rag/core";
 import { searchDocuments } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 
-/**
- * Metadata filter: each key matches against `documents.metadata->>key`. A
- * string value is exact-match; an array is OR-matched (any of the values).
- *
- * Bounded to prevent query amplification: an attacker with a valid token
- * could otherwise send hundreds of keys, each with hundreds of values,
- * causing the hybrid-search query to balloon into an N-way OR scan.
- */
-const FilterValue = z.union([
-  z.string().max(256),
-  z.array(z.string().max(256)).max(50),
-]);
-// 20-key cap stops query amplification — z.record has no `.max()` on its
-// key count, so we apply it via `.refine()`. With per-value bounds already
-// in place, 20 keys × 50 values × 256 chars is the worst case (256 KB of
-// filter data), well below the body-size limit and the planner's tolerance.
-const MAX_FILTER_KEYS = 20;
-const FilterSchema = z
-  .record(z.string().max(64), FilterValue)
-  .refine((obj) => Object.keys(obj).length <= MAX_FILTER_KEYS, {
-    message: `filter accepts at most ${MAX_FILTER_KEYS} keys`,
-  });
-
 const SearchBody = z.object({
   query: z.string().min(1).max(1000),
   topK: z.number().int().positive().max(100).optional(),
   sourceIds: z.array(z.string().uuid()).optional(),
-  filter: FilterSchema.optional(),
+  // Shared bounded metadata filter (@rag/core/validation) — same caps on
+  // /search, /ask, and the MCP tools.
+  filter: filterSchema.optional(),
 });
 
 export async function registerSearchRoute(
