@@ -29,12 +29,12 @@ commits are still recoverable via `git reflog` / the hashes above.
 
 ## TL;DR for the next session
 
-Phases **1–3 are DONE, verified, and committed**. Resume at **Phase 5** (pure refactor, no
-external deps) or **Phase 4** (needs the parser running). Then **Phase 6** (final verification)
-once Docker/DB are available. The working tree is clean — `git log` shows the three phase commits
-on top of `0d051d7`.
+Phases **1–3 and 5 are DONE, verified, and committed**. The only work left is **Phase 4**
+(needs the parser running + npm registry) and **Phase 6** (final verification — needs Docker/DB).
+Both are blocked without the local stack. `git log` shows the four phase commits on top of `0d051d7`.
 
 ```
+4e49f1e  refactor: shared connector cursor codec + paginate utility                 (Phase 5)
 98d6166  refactor: single-source filter schema, token verifier, source sanitizer   (Phase 3)
 c9279ce  refactor: unify composition root into buildCoreDeps                        (Phase 2)
 78aa9d0  fix: make triggerSync the sole ingestion_jobs writer (C2a) + @rag/services  (Phase 1)
@@ -81,26 +81,26 @@ retriever, queue, generator, close }`. Uses the worker's hardened `close()` (re-
 
 ## What REMAINS
 
-### ▶ Phase 5 — connector cursor codec + paginate (RESUME HERE — no external deps)
+### ✅ Phase 5 — connector cursor codec + paginate (DONE — `4e49f1e`)
 
-Pure refactor; verifiable by typecheck + greps even without live services (but the e2e behavior
-check needs live connectors — see plan §Phase 5 verification).
-
-- Add `packages/connectors/src/util/cursor.ts` → `makeCursorCodec<T>(name, normalize)`. Base on
-  the **Outlook** codec (`outlook/index.ts`, ~`:64-77`) — cleanest. Throw
-  `ValidationError("invalid <name> cursor", err)` on parse failure.
-- Add `packages/connectors/src/util/paginate.ts` → `paginate({ maxItems, fetchPage })` owning the
-  accumulate-until-`maxItems` loop, clamp, and `{ documents, nextCursor, done }` envelope. Model
-  `done` on **Outlook's explicit `feedExhausted`** (decouple "done" from "zero docs this page").
-- Refactor all 4 connectors to use both utilities; keep each `fetchPage` body + source-specific
-  token/API models. **No `BaseConnector`. Keep `T` per connector** (don't unify cursor shapes).
-- File sizes for reference: sharepoint 303, gdrive 373, gmail 448, outlook 360 lines.
-- `done`-computation drift to collapse: SharePoint `current===null && drives.length===0`;
-  GDrive `mode==="delta" && pageToken===startPageToken && docs===0`; Gmail `mode==="delta" &&
-docs===0 && pageToken===null`; Outlook explicit `feedExhausted`.
-- Verify greps: `grep -rn "Buffer.from(JSON.stringify" packages/connectors/src/*/index.ts` → none;
-  `done` computed only in `util/paginate.ts`.
-- Suggested commit: `refactor: shared connector cursor codec + paginate utility`.
+- `packages/connectors/src/util/cursor.ts` → `makeCursorCodec<T>(name, normalize)`: single
+  base64(JSON) encode/decode; per-connector defaulting in `normalize`; malformed cursors throw
+  `ValidationError("invalid <name> cursor", err)`.
+- `packages/connectors/src/util/paginate.ts` → `paginate({ maxItems, cursor, encode, fetchPage })`
+  owns the accumulate-until-`maxItems` loop, the clamp, and the `{ documents, nextCursor, done }`
+  envelope. Each connector implements only `fetchPage(cursor, remaining)` → `ConnectorPage<T>`
+  (`{ documents, cursor, done }`).
+- All 4 connectors refactored; `T` kept per connector (only codec/paging mechanics shared, no
+  `BaseConnector`). GDrive/Gmail mode-split became `fetchInitialPage`/`fetchDeltaPage`; the
+  initial→delta flip now happens mid-`list()` (paginate keeps draining) — strictly more docs/call,
+  still terminating.
+- `done` unified on Outlook's feed-exhaustion semantics (decoupled from "zero docs this page");
+  the three ad-hoc done formulas are gone. SharePoint's surviving `const done` is its per-page
+  feed-exhaustion signal (drive-queue empty) returned to `paginate` — correct, not the old
+  list-level formula.
+- **Verified:** typecheck green workspace-wide; `@rag/connectors` builds; greps clean
+  (no per-connector `Buffer.from(JSON.stringify` in `*/index.ts`; codec in one place). Behavioral
+  e2e against live connectors still deferred to Phase 6 (needs the stack).
 
 ### ▶ Phase 4 — parser types (BLOCKED on running parser)
 
