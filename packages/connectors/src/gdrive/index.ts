@@ -8,6 +8,8 @@ import {
   ValidationError,
 } from "@rag/core";
 import { mapApiError } from "../util/errors.js";
+import { makeCursorCodec } from "../util/cursor.js";
+import { paginate, type ConnectorPage } from "../util/paginate.js";
 import { createDriveClient, type GoogleCredentials } from "./client.js";
 import { GDriveConfigSchema, type GDriveConfig } from "./config.js";
 
@@ -29,31 +31,17 @@ interface GDriveCursor {
   startPageToken: string | null;
 }
 
-function emptyCursor(): GDriveCursor {
-  return { mode: "initial", pageToken: null, startPageToken: null };
-}
-
-function encodeCursor(c: GDriveCursor): string {
-  return Buffer.from(JSON.stringify(c), "utf8").toString("base64");
-}
-
-function decodeCursor(raw: string): GDriveCursor {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, "base64").toString("utf8"),
-    ) as Partial<GDriveCursor>;
-    if (parsed.mode !== "initial" && parsed.mode !== "delta") {
-      throw new Error(`invalid mode: ${String(parsed.mode)}`);
-    }
-    return {
-      mode: parsed.mode,
-      pageToken: parsed.pageToken ?? null,
-      startPageToken: parsed.startPageToken ?? null,
-    };
-  } catch (err) {
-    throw new ValidationError("invalid gdrive cursor", err);
+const cursorCodec = makeCursorCodec<GDriveCursor>("gdrive", (parsed) => {
+  const p = parsed as Partial<GDriveCursor>;
+  if (p.mode !== "initial" && p.mode !== "delta") {
+    throw new Error(`invalid mode: ${String(p.mode)}`);
   }
-}
+  return {
+    mode: p.mode,
+    pageToken: p.pageToken ?? null,
+    startPageToken: p.startPageToken ?? null,
+  };
+});
 
 /** Workspace native MIME types we know how to export. */
 const WORKSPACE_EXPORTS: Record<string, { mime: string; ext: string }> = {
@@ -108,29 +96,23 @@ export class GDriveConnector implements Connector {
   }
 
   async list(options: ConnectorListOptions = {}): Promise<ConnectorListResult> {
-    const maxItems = Math.max(1, options.maxItems ?? 50);
-    const cursor = options.cursor
-      ? decodeCursor(options.cursor)
-      : await this.bootstrapCursor();
+    return paginate<GDriveCursor>({
+      maxItems: options.maxItems ?? 50,
+      cursor: options.cursor
+        ? cursorCodec.decode(options.cursor)
+        : await this.bootstrapCursor(),
+      encode: cursorCodec.encode,
+      fetchPage: (cursor, remaining) => this.fetchPage(cursor, remaining),
+    });
+  }
 
-    const documents: SourceDocument[] = [];
-
-    if (cursor.mode === "initial") {
-      await this.runInitial(cursor, documents, maxItems);
-    } else {
-      await this.runDelta(cursor, documents, maxItems);
-    }
-
-    const done =
-      cursor.mode === "delta" &&
-      cursor.pageToken === cursor.startPageToken &&
-      documents.length === 0;
-
-    return {
-      documents,
-      nextCursor: encodeCursor(cursor),
-      done,
-    };
+  private fetchPage(
+    cursor: GDriveCursor,
+    remaining: number,
+  ): Promise<ConnectorPage<GDriveCursor>> {
+    return cursor.mode === "initial"
+      ? this.fetchInitialPage(cursor, remaining)
+      : this.fetchDeltaPage(cursor, remaining);
   }
 
   async fetch(externalId: string): Promise<SourceDocument> {
@@ -173,90 +155,113 @@ export class GDriveConnector implements Connector {
     return { mode: "initial", pageToken: null, startPageToken };
   }
 
-  private async runInitial(
+  /**
+   * One `files.list` page of the initial scan. Never reports `done` — when the
+   * scan completes it flips the cursor to delta mode, and `paginate` continues
+   * draining the change feed (which owns the terminal `done`).
+   */
+  private async fetchInitialPage(
     cursor: GDriveCursor,
-    out: SourceDocument[],
-    maxItems: number,
-  ): Promise<void> {
-    while (out.length < maxItems) {
-      let res: { data: drive_v3.Schema$FileList };
-      try {
-        res = await this.drive.files.list({
-          q: this.buildListQuery(),
-          fields: `nextPageToken, files(${FILE_FIELDS})`,
-          pageSize: Math.min(100, Math.max(10, maxItems - out.length)),
-          pageToken: cursor.pageToken ?? undefined,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-        });
-      } catch (err) {
-        mapApiError(err, "gdrive files.list");
-      }
-
-      for (const file of res.data.files ?? []) {
-        if (out.length >= maxItems) break;
-        const doc = await this.materialize(file);
-        if (doc) out.push(doc);
-      }
-
-      const next = res.data.nextPageToken ?? null;
-      cursor.pageToken = next;
-      if (!next) {
-        // Initial scan complete; flip to delta mode using the token we captured
-        // at the very beginning of the sync.
-        cursor.mode = "delta";
-        cursor.pageToken = cursor.startPageToken;
-        return;
-      }
+    remaining: number,
+  ): Promise<ConnectorPage<GDriveCursor>> {
+    let res: { data: drive_v3.Schema$FileList };
+    try {
+      res = await this.drive.files.list({
+        q: this.buildListQuery(),
+        fields: `nextPageToken, files(${FILE_FIELDS})`,
+        pageSize: Math.min(100, Math.max(10, remaining)),
+        pageToken: cursor.pageToken ?? undefined,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+    } catch (err) {
+      mapApiError(err, "gdrive files.list");
     }
+
+    const documents: SourceDocument[] = [];
+    for (const file of res.data.files ?? []) {
+      if (documents.length >= remaining) break;
+      const doc = await this.materialize(file);
+      if (doc) documents.push(doc);
+    }
+
+    const next = res.data.nextPageToken ?? null;
+    if (!next) {
+      // Initial scan complete; flip to delta mode using the token we captured
+      // at the very beginning of the sync.
+      return {
+        documents,
+        cursor: {
+          mode: "delta",
+          pageToken: cursor.startPageToken,
+          startPageToken: cursor.startPageToken,
+        },
+        done: false,
+      };
+    }
+    return {
+      documents,
+      cursor: { ...cursor, pageToken: next },
+      done: false,
+    };
   }
 
-  private async runDelta(
+  /** One `changes.list` page of delta sync. `done` when the feed has drained. */
+  private async fetchDeltaPage(
     cursor: GDriveCursor,
-    out: SourceDocument[],
-    maxItems: number,
-  ): Promise<void> {
+    remaining: number,
+  ): Promise<ConnectorPage<GDriveCursor>> {
     if (!cursor.pageToken) {
-      // Should never happen, but guard anyway.
+      // Should never happen, but guard anyway: reseed an initial scan.
       this.logger.warn("gdrive delta missing pageToken; reseeding");
       const fresh = await this.bootstrapCursor();
-      Object.assign(cursor, fresh);
-      return;
+      return { documents: [], cursor: fresh, done: false };
     }
 
-    while (out.length < maxItems) {
-      let res: { data: drive_v3.Schema$ChangeList };
-      try {
-        res = await this.drive.changes.list({
-          pageToken: cursor.pageToken,
-          fields: `nextPageToken, newStartPageToken, changes(removed,fileId,file(${FILE_FIELDS}))`,
-          pageSize: Math.min(100, Math.max(10, maxItems - out.length)),
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-          includeRemoved: false,
-        });
-      } catch (err) {
-        mapApiError(err, "gdrive changes.list");
-      }
-
-      for (const change of res.data.changes ?? []) {
-        if (out.length >= maxItems) break;
-        if (change.removed) continue;
-        if (!change.file) continue;
-        const doc = await this.materialize(change.file);
-        if (doc) out.push(doc);
-      }
-
-      if (res.data.nextPageToken) {
-        cursor.pageToken = res.data.nextPageToken;
-        continue;
-      }
-      if (res.data.newStartPageToken) {
-        cursor.pageToken = res.data.newStartPageToken;
-        cursor.startPageToken = res.data.newStartPageToken;
-      }
-      return;
+    let res: { data: drive_v3.Schema$ChangeList };
+    try {
+      res = await this.drive.changes.list({
+        pageToken: cursor.pageToken,
+        fields: `nextPageToken, newStartPageToken, changes(removed,fileId,file(${FILE_FIELDS}))`,
+        pageSize: Math.min(100, Math.max(10, remaining)),
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+        includeRemoved: false,
+      });
+    } catch (err) {
+      mapApiError(err, "gdrive changes.list");
     }
+
+    const documents: SourceDocument[] = [];
+    for (const change of res.data.changes ?? []) {
+      if (documents.length >= remaining) break;
+      if (change.removed) continue;
+      if (!change.file) continue;
+      const doc = await this.materialize(change.file);
+      if (doc) documents.push(doc);
+    }
+
+    if (res.data.nextPageToken) {
+      return {
+        documents,
+        cursor: { ...cursor, pageToken: res.data.nextPageToken },
+        done: false,
+      };
+    }
+    // No nextPageToken — change feed drained for now. Advance to the new start
+    // token when Drive supplies one; otherwise keep the (drained) token.
+    if (res.data.newStartPageToken) {
+      return {
+        documents,
+        cursor: {
+          mode: "delta",
+          pageToken: res.data.newStartPageToken,
+          startPageToken: res.data.newStartPageToken,
+        },
+        done: true,
+      };
+    }
+    return { documents, cursor: { ...cursor }, done: true };
   }
 
   private buildListQuery(): string {
