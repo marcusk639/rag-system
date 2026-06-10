@@ -40,12 +40,19 @@ c9279ce  refactor: unify composition root into buildCoreDeps                    
 78aa9d0  fix: make triggerSync the sole ingestion_jobs writer (C2a) + @rag/services  (Phase 1)
 ```
 
-## Environment prerequisites to resume (none were available this session)
+## Environment prerequisites to resume
 
-- `pnpm docker:up` (Postgres + Python parser) — **required for Phase 4 generation, Phase 6 C2a
-  DB regression, and app boot/shutdown checks.**
-- Network/registry access — **required to add the `openapi-typescript` dev dep in Phase 4.**
-- Live connector credentials (SharePoint/GDrive/Gmail/Outlook) — for the Phase 5 e2e safety net.
+**Docker is now installed (2026-06-09):** Colima + docker CLI 29.5.3 + compose v2 (5.1.4), via
+`brew install colima docker docker-compose`. The compose plugin is symlinked into
+`~/.docker/cli-plugins/docker-compose`. The active docker context is `colima`.
+
+- **On resume, start the engine first:** `colima start` (the VM stops on reboot / `colima stop`).
+  Verify with `docker ps`. Then `pnpm docker:up` (builds the parser image, pulls Postgres+pgvector),
+  then `pnpm db:migrate`.
+- Network/registry access — needed to add the `openapi-typescript` dev dep in Phase 4
+  (`pnpm add -D -w openapi-typescript`). Registry was reachable on 2026-06-09.
+- Live connector credentials (SharePoint/GDrive/Gmail/Outlook) — only for the optional Phase 5 e2e
+  safety net; not needed for Phase 4 or the Phase 6 C2a/boot checks.
 - Bootstrap each session: `pnpm install && pnpm build` (the workspace `dist/` outputs must exist
   or `@rag/*` type resolution fails during typecheck).
 
