@@ -27,7 +27,20 @@ c9279ce  refactor: unify composition root into buildCoreDeps                    
 This branch is **local only — not pushed**. Don't lose it; if `git branch` doesn't list it, the
 commits are still recoverable via `git reflog` / the hashes above.
 
-## TL;DR for the next session
+## ✅ ALL PHASES COMPLETE (2026-06-10)
+
+**All six phases are DONE, verified, and committed.** Phase 4 (`f1ee05e`, generated parser types)
+and Phase 6 (`3950c37`, final verification + docs) landed on 2026-06-10 against the live local
+stack. Phase 6 verification results: workspace typecheck + 21 unit tests green; C2a single-writer
+proven structurally (worker has zero `createIngestionJob`) and at runtime (one sync → one row);
+single-owner + anti-pattern greps clean; all three apps (api/mcp/worker) boot and shut down
+gracefully through `buildCoreDeps`/`close()`; MCP Origin allowlist + token requirement intact.
+Two non-blocking follow-ups recorded in `docs/ISSUES-AND-OPTIMIZATIONS.md` §11 (orphaned-`pending`
+on duplicate trigger; `ParsedDocument.metadata` typed `Record<string, never>`).
+
+The historical resume detail below is retained for context.
+
+## TL;DR (historical)
 
 Phases **1–3 and 5 are DONE, verified, and committed**. The only work left is **Phase 4**
 (needs the parser running + npm registry) and **Phase 6** (final verification — needs Docker/DB).
