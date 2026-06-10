@@ -171,7 +171,7 @@ function escapeCell(cell: string): string {
 function makeChunk(args: {
   text: string;
   ordinal: number;
-  sheetName: string | undefined;
+  sheetName: string | null | undefined;
 }): Chunk {
   return {
     hash: sha256(`${args.sheetName ?? ""}::${args.text}`),

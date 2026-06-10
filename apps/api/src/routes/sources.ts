@@ -1,32 +1,10 @@
 import { NotFoundError } from "@rag/core";
-import {
-  createIngestionJob,
-  createSource,
-  getSource,
-  listSources,
-  type Source,
-} from "@rag/db";
-import { enqueueSync } from "@rag/ingestion";
+import { createSource, getSource, toPublicSource } from "@rag/db";
+import { listPublicSources, triggerSync } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
-
-/**
- * Drop the raw `config` blob before returning a source over the wire. The
- * config contains connector-specific values (SharePoint site IDs, Drive
- * folder IDs, Gmail queries, OAuth impersonation subjects) — leaking these
- * to anyone with a read token both exposes source topology to potential
- * attackers and risks surfacing operator-supplied credential-like values
- * that should never have been stored there.
- *
- * Source creation still accepts the full config (POST /sources); we just
- * never echo it back in list/get responses.
- */
-function sanitizeSource(row: Source): Omit<Source, "config"> {
-  const { config: _config, ...safe } = row;
-  return safe;
-}
 
 const SourceKindSchema = z.enum([
   "sharepoint",
@@ -72,14 +50,14 @@ export async function registerSourceRoutes(
       });
       // Strip `config` from the create response too — it may carry
       // credential-like values, and GET routes already sanitize it.
-      return reply.code(201).send(sanitizeSource(row));
+      return reply.code(201).send(toPublicSource(row));
     },
   );
 
-  // GET /sources — list
+  // GET /sources — list (config-stripped by the service).
   typed.get("/sources", async () => {
-    const rows = await listSources(deps.db);
-    return { sources: rows.map(sanitizeSource) };
+    const sources = await listPublicSources(deps);
+    return { sources };
   });
 
   // GET /sources/:id — one
@@ -90,7 +68,7 @@ export async function registerSourceRoutes(
       const row = await getSource(deps.db, request.params.id);
       if (!row)
         throw new NotFoundError(`Source ${request.params.id} not found`);
-      return sanitizeSource(row);
+      return toPublicSource(row);
     },
   );
 
@@ -107,29 +85,23 @@ export async function registerSourceRoutes(
       const { id } = request.params;
       const { mode } = request.body;
 
-      const source = await getSource(deps.db, id);
-      if (!source) throw new NotFoundError(`Source ${id} not found`);
-
-      // Record the run in our human-readable history table.
-      const ingestionRow = await createIngestionJob(deps.db, {
-        sourceId: id,
-        mode,
-        status: "pending",
-      });
-
-      // Hand off to pg-boss for async execution.
-      const jobId = await enqueueSync(deps.queue, { sourceId: id, mode });
+      // triggerSync is the sole writer of ingestion_jobs (C2a fix): it creates
+      // exactly one row and threads its id into the queue payload. NotFoundError
+      // (unknown source) and SyncAlreadyRunningError (duplicate) propagate to the
+      // central error handler → 404 / 409.
+      const result = await triggerSync(deps, { sourceId: id, mode });
 
       request.log.info(
-        { sourceId: id, mode, jobId, ingestionId: ingestionRow.id },
+        {
+          sourceId: id,
+          mode,
+          jobId: result.jobId,
+          ingestionId: result.ingestionId,
+        },
         "sync enqueued",
       );
 
-      return reply.code(202).send({
-        jobId,
-        ingestionId: ingestionRow.id,
-        mode,
-      });
+      return reply.code(202).send(result);
     },
   );
 }

@@ -1,4 +1,5 @@
 import PgBoss from "pg-boss";
+import { SyncAlreadyRunningError } from "./errors.js";
 
 /**
  * Thin wrapper around pg-boss. We define the job names + payload shapes once
@@ -13,6 +14,12 @@ export interface SyncSourcePayload {
   sourceId: string;
   /** "full" forces cursor=null (re-enumerate everything), "incremental" uses stored cursor */
   mode: "full" | "incremental";
+  /**
+   * Id of the `ingestion_jobs` history row created by the producer
+   * (`triggerSync`). The worker updates *this* row through its lifecycle
+   * instead of creating its own — keeping `triggerSync` the sole writer.
+   */
+  ingestionId: string;
 }
 
 export interface QueueOptions {
@@ -51,9 +58,7 @@ export async function enqueueSync(
     expireInHours: 6,
   });
   if (!id) {
-    throw new Error(
-      `enqueueSync: pg-boss rejected (likely duplicate sync running for ${payload.sourceId})`,
-    );
+    throw new SyncAlreadyRunningError(payload.sourceId);
   }
   return id;
 }

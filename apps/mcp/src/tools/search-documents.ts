@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RetrievalResult } from "@rag/core";
+import { filterSchema } from "@rag/core";
+import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
-import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 const EXCERPT_CHARS = 300;
@@ -60,12 +61,11 @@ export function registerSearchDocuments(server: McpServer, deps: Deps): void {
       inputSchema,
     },
     async ({ query, topK, sourceIds, filter }) => {
-      const results = await deps.retriever.search({
-        query,
-        topK: topK ?? deps.config.retrieval.defaultTopK,
-        sourceIds,
-        filter,
-      });
+      const results = await searchDocuments(
+        deps,
+        { query, topK, sourceIds, filter },
+        deps.config.retrieval.defaultTopK,
+      );
       return {
         content: [{ type: "text", text: formatResults(results) }],
         structuredContent: { results },

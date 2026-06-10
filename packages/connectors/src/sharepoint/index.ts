@@ -6,6 +6,8 @@ import {
   type SourceDocument,
   ValidationError,
 } from "@rag/core";
+import { makeCursorCodec } from "../util/cursor.js";
+import { paginate, type ConnectorPage } from "../util/paginate.js";
 import { GraphClient, type GraphCredentials } from "./client.js";
 import { SharePointConfigSchema, type SharePointConfig } from "./config.js";
 
@@ -64,24 +66,17 @@ function emptyCursor(): SharePointCursor {
   return { drives: [], current: null, deltas: {} };
 }
 
-function encodeCursor(cursor: SharePointCursor): string {
-  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64");
-}
-
-function decodeCursor(raw: string): SharePointCursor {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, "base64").toString("utf8"),
-    ) as Partial<SharePointCursor>;
+const cursorCodec = makeCursorCodec<SharePointCursor>(
+  "sharepoint",
+  (parsed) => {
+    const p = parsed as Partial<SharePointCursor>;
     return {
-      drives: Array.isArray(parsed.drives) ? parsed.drives : [],
-      current: parsed.current ?? null,
-      deltas: parsed.deltas ?? {},
+      drives: Array.isArray(p.drives) ? p.drives : [],
+      current: p.current ?? null,
+      deltas: p.deltas ?? {},
     };
-  } catch (err) {
-    throw new ValidationError("invalid sharepoint cursor", err);
-  }
-}
+  },
+);
 
 export class SharePointConnector implements Connector {
   readonly kind = "sharepoint";
@@ -115,43 +110,49 @@ export class SharePointConnector implements Connector {
   }
 
   async list(options: ConnectorListOptions = {}): Promise<ConnectorListResult> {
-    const maxItems = Math.max(1, options.maxItems ?? 50);
+    return paginate<SharePointCursor>({
+      maxItems: options.maxItems ?? 50,
+      cursor: options.cursor
+        ? cursorCodec.decode(options.cursor)
+        : await this.bootstrapCursor(),
+      encode: cursorCodec.encode,
+      fetchPage: (cursor, remaining) => this.fetchPage(cursor, remaining),
+    });
+  }
 
-    const cursor = options.cursor
-      ? decodeCursor(options.cursor)
-      : await this.bootstrapCursor();
+  /**
+   * Fetch one page from the in-flight drive (pulling the next drive off the
+   * queue when none is active). The feed is exhausted only when no drive is in
+   * flight AND the queue is empty.
+   */
+  private async fetchPage(
+    cursor: SharePointCursor,
+    remaining: number,
+  ): Promise<ConnectorPage<SharePointCursor>> {
+    // Pull the next drive off the queue when we don't have one in flight.
+    if (!cursor.current) {
+      const nextDriveId = cursor.drives.shift();
+      if (!nextDriveId) {
+        return { documents: [], cursor, done: true };
+      }
+      const resume = cursor.deltas[nextDriveId];
+      cursor.current = { driveId: nextDriveId, next: resume ?? null };
+    }
+
+    const { driveId, next } = cursor.current;
+    const url = next ?? this.initialDeltaUrl(driveId);
+    const page = await this.graph.getJson<DeltaResponse>(url);
 
     const documents: SourceDocument[] = [];
+    for (const item of page.value) {
+      if (documents.length >= remaining) break;
+      const doc = await this.toSourceDocument(driveId, item);
+      if (doc) documents.push(doc);
+    }
 
-    while (documents.length < maxItems) {
-      // Pull the next drive off the queue when we don't have one in flight.
-      if (!cursor.current) {
-        const nextDriveId = cursor.drives.shift();
-        if (!nextDriveId) break; // nothing left to walk this call
-
-        const resume = cursor.deltas[nextDriveId];
-        cursor.current = {
-          driveId: nextDriveId,
-          next: resume ?? null,
-        };
-      }
-
-      const { driveId, next } = cursor.current;
-      const url = next ?? this.initialDeltaUrl(driveId);
-      const page = await this.graph.getJson<DeltaResponse>(url);
-
-      for (const item of page.value) {
-        if (documents.length >= maxItems) break;
-        const doc = await this.toSourceDocument(driveId, item);
-        if (doc) documents.push(doc);
-      }
-
-      if (page["@odata.nextLink"]) {
-        cursor.current = { driveId, next: page["@odata.nextLink"] };
-        // Loop again — same drive, next page.
-        continue;
-      }
-
+    if (page["@odata.nextLink"]) {
+      cursor.current = { driveId, next: page["@odata.nextLink"] };
+    } else {
       if (page["@odata.deltaLink"]) {
         cursor.deltas[driveId] = page["@odata.deltaLink"];
       }
@@ -159,11 +160,7 @@ export class SharePointConnector implements Connector {
     }
 
     const done = cursor.current === null && cursor.drives.length === 0;
-    return {
-      documents,
-      nextCursor: encodeCursor(cursor),
-      done,
-    };
+    return { documents, cursor, done };
   }
 
   async fetch(externalId: string): Promise<SourceDocument> {

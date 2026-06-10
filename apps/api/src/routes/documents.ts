@@ -1,5 +1,4 @@
-import { NotFoundError } from "@rag/core";
-import { getDocument } from "@rag/db";
+import { getDocumentById } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -13,15 +12,13 @@ export async function registerDocumentRoutes(
 ): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  // GET /documents/:id — return the full document row (parsed markdown + metadata)
+  // GET /documents/:id — return the full document row (parsed markdown +
+  // metadata). Thin adapter: getDocumentById throws NotFoundError → 404.
   typed.get(
     "/documents/:id",
     { schema: { params: IdParams } },
     async (request) => {
-      const row = await getDocument(deps.db, request.params.id);
-      if (!row)
-        throw new NotFoundError(`Document ${request.params.id} not found`);
-      return row;
+      return getDocumentById(deps, request.params.id);
     },
   );
 }

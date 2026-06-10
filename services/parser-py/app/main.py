@@ -93,7 +93,14 @@ class ParsedDocument(_CamelModel):
     title: str
     markdown: str
     tables: list[ParsedTable] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    # `dict[str, Any]` alone makes Pydantic emit a bare `{"type": "object"}`
+    # with no `additionalProperties`, which openapi-typescript renders as the
+    # useless `Record<string, never>`. Forcing `additionalProperties` makes the
+    # generator emit `{ [key: string]: unknown }` instead.
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"additionalProperties": True},
+    )
 
 
 # ----------------------------------------------------------------------------

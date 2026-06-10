@@ -1,4 +1,5 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { createTokenVerifier } from "@rag/core";
 import express, {
   type NextFunction,
   type Request,
@@ -47,19 +48,9 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     );
   }
 
-  // Pre-hash tokens so per-request comparison is constant-time on equal-length
-  // SHA-256 digests rather than variable-length strings.
-  const hashedTokens = tokens.map((t) =>
-    createHash("sha256").update(t).digest(),
-  );
-  const verifyToken = (presented: string): boolean => {
-    const h = createHash("sha256").update(presented).digest();
-    let ok = false;
-    for (const candidate of hashedTokens) {
-      if (timingSafeEqual(h, candidate)) ok = true;
-    }
-    return ok;
-  };
+  // Shared constant-time verifier (@rag/core/auth) — same implementation the
+  // HTTP API uses. Tokens are pre-hashed once inside the factory.
+  const verifyToken = createTokenVerifier(tokens);
 
   const originSet = new Set(allowedOrigins);
 

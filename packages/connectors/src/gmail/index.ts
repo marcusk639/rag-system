@@ -10,6 +10,8 @@ import {
 } from "@rag/core";
 import { mapApiError } from "../util/errors.js";
 import { htmlToText } from "../util/html.js";
+import { makeCursorCodec } from "../util/cursor.js";
+import { paginate, type ConnectorPage } from "../util/paginate.js";
 import { createGmailClient, type GoogleCredentials } from "./client.js";
 import { GmailConfigSchema, type GmailConfig } from "./config.js";
 import { collectPart, headersToMap, parseAddressList, toIso } from "./parse.js";
@@ -35,27 +37,17 @@ function emptyCursor(): GmailCursor {
   return { mode: "initial", pageToken: null, historyId: null };
 }
 
-function encodeCursor(c: GmailCursor): string {
-  return Buffer.from(JSON.stringify(c), "utf8").toString("base64");
-}
-
-function decodeCursor(raw: string): GmailCursor {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, "base64").toString("utf8"),
-    ) as Partial<GmailCursor>;
-    if (parsed.mode !== "initial" && parsed.mode !== "delta") {
-      throw new Error(`invalid mode: ${String(parsed.mode)}`);
-    }
-    return {
-      mode: parsed.mode,
-      pageToken: parsed.pageToken ?? null,
-      historyId: parsed.historyId ?? null,
-    };
-  } catch (err) {
-    throw new ValidationError("invalid gmail cursor", err);
+const cursorCodec = makeCursorCodec<GmailCursor>("gmail", (parsed) => {
+  const p = parsed as Partial<GmailCursor>;
+  if (p.mode !== "initial" && p.mode !== "delta") {
+    throw new Error(`invalid mode: ${String(p.mode)}`);
   }
-}
+  return {
+    mode: p.mode,
+    pageToken: p.pageToken ?? null,
+    historyId: p.historyId ?? null,
+  };
+});
 
 export class GmailConnector implements Connector {
   readonly kind = "gmail";
@@ -90,28 +82,23 @@ export class GmailConnector implements Connector {
   }
 
   async list(options: ConnectorListOptions = {}): Promise<ConnectorListResult> {
-    const maxItems = Math.max(1, options.maxItems ?? 25);
-    const cursor = options.cursor
-      ? decodeCursor(options.cursor)
-      : emptyCursor();
-    const documents: SourceDocument[] = [];
+    return paginate<GmailCursor>({
+      maxItems: options.maxItems ?? 25,
+      cursor: options.cursor
+        ? cursorCodec.decode(options.cursor)
+        : emptyCursor(),
+      encode: cursorCodec.encode,
+      fetchPage: (cursor, remaining) => this.fetchPage(cursor, remaining),
+    });
+  }
 
-    if (cursor.mode === "initial") {
-      await this.runInitial(cursor, documents, maxItems);
-    } else {
-      await this.runDelta(cursor, documents, maxItems);
-    }
-
-    const done =
-      cursor.mode === "delta" &&
-      documents.length === 0 &&
-      cursor.pageToken === null;
-
-    return {
-      documents,
-      nextCursor: encodeCursor(cursor),
-      done,
-    };
+  private fetchPage(
+    cursor: GmailCursor,
+    remaining: number,
+  ): Promise<ConnectorPage<GmailCursor>> {
+    return cursor.mode === "initial"
+      ? this.fetchInitialPage(cursor, remaining)
+      : this.fetchDeltaPage(cursor, remaining);
   }
 
   async fetch(externalId: string): Promise<SourceDocument> {
@@ -144,131 +131,146 @@ export class GmailConnector implements Connector {
   // Internals
   // --------------------------------------------------------------------------
 
-  private async runInitial(
+  /**
+   * One `messages.list` page of the initial scan. Never reports `done` — when
+   * the scan completes it flips the cursor to delta mode, and `paginate`
+   * continues draining the history feed (which owns the terminal `done`).
+   */
+  private async fetchInitialPage(
     cursor: GmailCursor,
-    out: SourceDocument[],
-    maxItems: number,
-  ): Promise<void> {
-    while (out.length < maxItems) {
-      let res: { data: gmail_v1.Schema$ListMessagesResponse };
-      try {
-        res = await this.gmail.users.messages.list({
-          userId: this.config.userId,
-          labelIds: this.config.labelIds,
-          q: this.config.query,
-          pageToken: cursor.pageToken ?? undefined,
-          maxResults: Math.min(100, Math.max(10, maxItems - out.length)),
-        });
-      } catch (err) {
-        mapApiError(err, "gmail messages.list");
-      }
+    remaining: number,
+  ): Promise<ConnectorPage<GmailCursor>> {
+    let res: { data: gmail_v1.Schema$ListMessagesResponse };
+    try {
+      res = await this.gmail.users.messages.list({
+        userId: this.config.userId,
+        labelIds: this.config.labelIds,
+        q: this.config.query,
+        pageToken: cursor.pageToken ?? undefined,
+        maxResults: Math.min(100, Math.max(10, remaining)),
+      });
+    } catch (err) {
+      mapApiError(err, "gmail messages.list");
+    }
 
-      for (const stub of res.data.messages ?? []) {
-        if (out.length >= maxItems) break;
-        if (!stub.id) continue;
-        const full = await this.loadMessage(stub.id);
-        const doc = await this.buildMessageDocument(full);
-        out.push(doc);
-        if (full.historyId) {
-          // Track the highest historyId we encounter so delta sync resumes correctly.
-          if (
-            !cursor.historyId ||
-            BigInt(full.historyId) > BigInt(cursor.historyId)
-          ) {
-            cursor.historyId = full.historyId;
-          }
-        }
-        if (this.config.includeAttachments) {
-          for (const att of this.extractAttachments(full)) {
-            if (out.length >= maxItems) break;
-            const adoc = await this.buildAttachmentDocument(full, att);
-            if (adoc) out.push(adoc);
-          }
+    const documents: SourceDocument[] = [];
+    let historyId = cursor.historyId;
+    for (const stub of res.data.messages ?? []) {
+      if (documents.length >= remaining) break;
+      if (!stub.id) continue;
+      const full = await this.loadMessage(stub.id);
+      documents.push(this.buildMessageDocument(full));
+      if (full.historyId) {
+        // Track the highest historyId we encounter so delta sync resumes correctly.
+        if (!historyId || BigInt(full.historyId) > BigInt(historyId)) {
+          historyId = full.historyId;
         }
       }
-
-      cursor.pageToken = res.data.nextPageToken ?? null;
-      if (!cursor.pageToken) {
-        cursor.mode = "delta";
-        // If we never observed a historyId, fall back to the mailbox profile's.
-        if (!cursor.historyId) {
-          try {
-            const profile = await this.gmail.users.getProfile({
-              userId: this.config.userId,
-            });
-            cursor.historyId = profile.data.historyId ?? null;
-          } catch (err) {
-            mapApiError(err, "gmail getProfile");
-          }
+      if (this.config.includeAttachments) {
+        for (const att of this.extractAttachments(full)) {
+          if (documents.length >= remaining) break;
+          const adoc = await this.buildAttachmentDocument(full, att);
+          if (adoc) documents.push(adoc);
         }
-        return;
       }
     }
+
+    const nextPageToken = res.data.nextPageToken ?? null;
+    if (nextPageToken) {
+      return {
+        documents,
+        cursor: { mode: "initial", pageToken: nextPageToken, historyId },
+        done: false,
+      };
+    }
+
+    // Initial scan complete; flip to delta mode. If we never observed a
+    // historyId, fall back to the mailbox profile's.
+    if (!historyId) {
+      try {
+        const profile = await this.gmail.users.getProfile({
+          userId: this.config.userId,
+        });
+        historyId = profile.data.historyId ?? null;
+      } catch (err) {
+        mapApiError(err, "gmail getProfile");
+      }
+    }
+    return {
+      documents,
+      cursor: { mode: "delta", pageToken: null, historyId },
+      done: false,
+    };
   }
 
-  private async runDelta(
+  /** One `history.list` page of delta sync. `done` when the feed has drained. */
+  private async fetchDeltaPage(
     cursor: GmailCursor,
-    out: SourceDocument[],
-    maxItems: number,
-  ): Promise<void> {
+    remaining: number,
+  ): Promise<ConnectorPage<GmailCursor>> {
     if (!cursor.historyId) {
       this.logger.warn("gmail delta missing historyId; restarting initial");
-      cursor.mode = "initial";
-      cursor.pageToken = null;
-      return;
+      return {
+        documents: [],
+        cursor: { mode: "initial", pageToken: null, historyId: null },
+        done: false,
+      };
     }
 
-    while (out.length < maxItems) {
-      let res: { data: gmail_v1.Schema$ListHistoryResponse };
+    let res: { data: gmail_v1.Schema$ListHistoryResponse };
+    try {
+      res = await this.gmail.users.history.list({
+        userId: this.config.userId,
+        startHistoryId: cursor.historyId,
+        labelId: this.config.labelIds?.[0],
+        historyTypes: ["messageAdded", "labelAdded"],
+        pageToken: cursor.pageToken ?? undefined,
+        maxResults: Math.min(100, Math.max(10, remaining)),
+      });
+    } catch (err) {
+      mapApiError(err, "gmail history.list");
+    }
+
+    const seenIds = new Set<string>();
+    for (const entry of res.data.history ?? []) {
+      for (const added of entry.messagesAdded ?? []) {
+        const id = added.message?.id;
+        if (id) seenIds.add(id);
+      }
+      for (const lbl of entry.labelsAdded ?? []) {
+        const id = lbl.message?.id;
+        if (id) seenIds.add(id);
+      }
+    }
+
+    const documents: SourceDocument[] = [];
+    for (const id of seenIds) {
+      if (documents.length >= remaining) break;
+      let full: gmail_v1.Schema$Message;
       try {
-        res = await this.gmail.users.history.list({
-          userId: this.config.userId,
-          startHistoryId: cursor.historyId,
-          labelId: this.config.labelIds?.[0],
-          historyTypes: ["messageAdded", "labelAdded"],
-          pageToken: cursor.pageToken ?? undefined,
-          maxResults: Math.min(100, Math.max(10, maxItems - out.length)),
-        });
+        full = await this.loadMessage(id);
       } catch (err) {
-        mapApiError(err, "gmail history.list");
+        // Message may have been deleted between history page and now.
+        this.logger.debug({ err, id }, "gmail message disappeared, skipping");
+        continue;
       }
-
-      const seenIds = new Set<string>();
-      for (const entry of res.data.history ?? []) {
-        for (const added of entry.messagesAdded ?? []) {
-          const id = added.message?.id;
-          if (id) seenIds.add(id);
-        }
-        for (const lbl of entry.labelsAdded ?? []) {
-          const id = lbl.message?.id;
-          if (id) seenIds.add(id);
+      documents.push(this.buildMessageDocument(full));
+      if (this.config.includeAttachments) {
+        for (const att of this.extractAttachments(full)) {
+          if (documents.length >= remaining) break;
+          const adoc = await this.buildAttachmentDocument(full, att);
+          if (adoc) documents.push(adoc);
         }
       }
-
-      for (const id of seenIds) {
-        if (out.length >= maxItems) break;
-        let full: gmail_v1.Schema$Message;
-        try {
-          full = await this.loadMessage(id);
-        } catch (err) {
-          // Message may have been deleted between history page and now.
-          this.logger.debug({ err, id }, "gmail message disappeared, skipping");
-          continue;
-        }
-        out.push(await this.buildMessageDocument(full));
-        if (this.config.includeAttachments) {
-          for (const att of this.extractAttachments(full)) {
-            if (out.length >= maxItems) break;
-            const adoc = await this.buildAttachmentDocument(full, att);
-            if (adoc) out.push(adoc);
-          }
-        }
-      }
-
-      if (res.data.historyId) cursor.historyId = res.data.historyId;
-      cursor.pageToken = res.data.nextPageToken ?? null;
-      if (!cursor.pageToken) return;
     }
+
+    const historyId = res.data.historyId ?? cursor.historyId;
+    const nextPageToken = res.data.nextPageToken ?? null;
+    return {
+      documents,
+      cursor: { mode: "delta", pageToken: nextPageToken, historyId },
+      done: nextPageToken === null,
+    };
   }
 
   private async loadMessage(

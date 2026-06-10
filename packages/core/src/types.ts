@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "./parser-types.generated.js";
 
 // ============================================================================
 // Source — an external system the ingestion pipeline can pull from
@@ -71,16 +72,12 @@ export interface SourceDocument {
 // Parsed document — output of the parser sidecar
 // ============================================================================
 
-export interface ParsedDocument {
-  /** Cleaned markdown representation of the document */
-  markdown: string;
-  /** Detected/normalized title (may differ from source title) */
-  title: string;
-  /** Structured tables extracted from the document */
-  tables: ParsedTable[];
-  /** Metadata extracted by the parser (overrides/augments source metadata) */
-  metadata: DocumentMetadata;
-}
+/**
+ * Output of the parser sidecar. Single-sourced from the parser's Pydantic
+ * models via the generated OpenAPI types — DO NOT hand-edit. Regenerate with
+ * `pnpm gen:parser-types` (requires the parser container to be up).
+ */
+export type ParsedDocument = components["schemas"]["ParsedDocument"];
 
 /**
  * Routing label assigned by the parser per spreadsheet sheet. Drives downstream
@@ -94,31 +91,16 @@ export interface ParsedDocument {
  *  - `financial_model` — small, dense, formula-heavy. Embed COMPUTED values
  *                        and treat the whole sheet as one logical section.
  *  - `freeform`        — todo lists, plans, irregular layouts. Best-effort.
+ *
+ * Derived from the generated `ParsedTable.sheetType` to stay single-sourced.
  */
-export type SheetType =
-  | "tabular"
-  | "narrative"
-  | "financial_model"
-  | "freeform";
+export type SheetType = NonNullable<ParsedTable["sheetType"]>;
 
-export interface ParsedTable {
-  /** Markdown rendering of the table — embedded in `markdown` for retrieval */
-  markdown: string;
-  /** Optional caption/title near the table */
-  caption?: string;
-  /** Sheet name for spreadsheet sources; undefined for tables embedded in other docs */
-  sheetName?: string;
-  /** Routing label for downstream chunking + retrieval (spreadsheets only) */
-  sheetType?: SheetType;
-  /** Header row(s), one entry per column. Empty for non-spreadsheet tables. */
-  headers?: string[];
-  /** Data rows. Each inner array has `headers.length` entries (right-padded with "") */
-  rows?: string[][];
-  /** Convenience for callers that don't want to count `rows.length` */
-  rowCount?: number;
-  /** Convenience for callers that don't want to count `headers.length` */
-  columnCount?: number;
-}
+/**
+ * A structured table extracted from a document. Single-sourced from the
+ * parser's Pydantic models via the generated OpenAPI types — DO NOT hand-edit.
+ */
+export type ParsedTable = components["schemas"]["ParsedTable"];
 
 // ============================================================================
 // Chunk — a slice of a document ready to embed
