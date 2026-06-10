@@ -22,7 +22,16 @@ export async function handleSyncSource(
 
   const source = await getSource(db, job.data.sourceId);
   if (!source) {
-    log.error("source not found, skipping");
+    // The source was deleted between enqueue and execution. Close out the
+    // history row (created by `triggerSync`) so it doesn't sit `pending`
+    // forever — pg-boss otherwise marks the job completed and nothing else
+    // ever touches this row again.
+    log.error("source not found, marking ingestion job failed");
+    await updateIngestionJob(db, job.data.ingestionId, {
+      status: "failed",
+      completedAt: new Date(),
+      error: "source not found",
+    });
     return;
   }
 
