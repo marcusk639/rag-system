@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { filterSchema } from "./validation.js";
 import type { components } from "./parser-types.generated.js";
 
 // ============================================================================
@@ -143,8 +144,12 @@ export interface Embedding {
 export interface RetrievalQuery {
   query: string;
   topK: number;
-  /** Optional metadata filter: AND across keys, OR across array values per key */
-  filter?: Record<string, string | string[]>;
+  /**
+   * Optional metadata filter: AND across keys, OR across array values per key.
+   * Derived from the bounded `filterSchema` so the DoS caps are the only
+   * representable shape past the HTTP/MCP boundary — not an unbounded record.
+   */
+  filter?: z.infer<typeof filterSchema>;
   /** Restrict to specific source IDs */
   sourceIds?: string[];
   /** Override hybrid weights for this query */

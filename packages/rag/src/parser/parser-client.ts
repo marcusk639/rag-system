@@ -3,6 +3,22 @@ import type { ParsedDocument, Parser } from "@rag/core";
 import { ParserError } from "@rag/core";
 
 /**
+ * The parser's `metadata` is a free-form bag on the wire; the generated type is
+ * only a compile-time claim. Validate it's at least a plain JSON object at this
+ * system boundary (repo rule) so downstream code can trust the structural shape
+ * — a primitive or array here would silently corrupt the merged document row.
+ */
+function asMetadataObject(value: unknown): Record<string, unknown> {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ParserError(
+      `Parser returned non-object metadata: ${JSON.stringify(value).slice(0, 200)}`,
+    );
+  }
+  return value as Record<string, unknown>;
+}
+
+/**
  * Client for the Python parser sidecar. Wraps the HTTP boundary so the rest
  * of the system uses a clean `Parser` interface.
  */
@@ -50,7 +66,7 @@ export class HttpParserClient implements Parser {
       title: json.title,
       markdown: json.markdown,
       tables: json.tables ?? [],
-      metadata: json.metadata ?? {},
+      metadata: asMetadataObject(json.metadata),
     };
   }
 }
