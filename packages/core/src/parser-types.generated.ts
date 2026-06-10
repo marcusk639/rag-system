@@ -81,7 +81,9 @@ export interface components {
             /** Tables */
             tables?: components["schemas"]["ParsedTable"][];
             /** Metadata */
-            metadata?: Record<string, never>;
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         /** ParsedTable */
         ParsedTable: {

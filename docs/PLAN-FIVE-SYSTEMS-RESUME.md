@@ -36,7 +36,8 @@ proven structurally (worker has zero `createIngestionJob`) and at runtime (one s
 single-owner + anti-pattern greps clean; all three apps (api/mcp/worker) boot and shut down
 gracefully through `buildCoreDeps`/`close()`; MCP Origin allowlist + token requirement intact.
 Two non-blocking follow-ups recorded in `docs/ISSUES-AND-OPTIMIZATIONS.md` §11 (orphaned-`pending`
-on duplicate trigger; `ParsedDocument.metadata` typed `Record<string, never>`).
+on duplicate trigger; `ParsedDocument.metadata` typed `Record<string, never>`) were both
+**resolved 2026-06-10** — see §11 for details.
 
 The historical resume detail below is retained for context.
 

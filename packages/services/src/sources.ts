@@ -1,6 +1,7 @@
 import { NotFoundError } from "@rag/core";
 import {
   createIngestionJob,
+  deleteIngestionJob,
   getSource,
   listSources,
   toPublicSource,
@@ -46,12 +47,21 @@ export async function triggerSync(
   });
 
   // Hand off to pg-boss for async execution, carrying the history row id so
-  // the worker updates it rather than creating its own.
-  const jobId = await enqueueSync(deps.queue, {
-    sourceId: input.sourceId,
-    mode: input.mode,
-    ingestionId: ingestionRow.id,
-  });
+  // the worker updates it rather than creating its own. If the hand-off fails
+  // — most commonly a duplicate sync rejected by pg-boss's singleton guard
+  // (`SyncAlreadyRunningError`) — the row we just created is for a sync that
+  // will never run, so delete it rather than leave an orphaned `pending`.
+  let jobId: string;
+  try {
+    jobId = await enqueueSync(deps.queue, {
+      sourceId: input.sourceId,
+      mode: input.mode,
+      ingestionId: ingestionRow.id,
+    });
+  } catch (err) {
+    await deleteIngestionJob(deps.db, ingestionRow.id);
+    throw err;
+  }
 
   return { jobId, ingestionId: ingestionRow.id, mode: input.mode };
 }

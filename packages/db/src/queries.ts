@@ -404,6 +404,16 @@ export async function updateIngestionJob(
   await db.update(ingestionJobs).set(patch).where(eq(ingestionJobs.id, id));
 }
 
+/**
+ * Delete an ingestion-job history row by id. Used to clean up a `pending` row
+ * that was created optimistically but whose queue hand-off failed (e.g. a
+ * duplicate sync rejected by the pg-boss singleton guard), so no orphaned
+ * `pending` rows linger for syncs that never ran.
+ */
+export async function deleteIngestionJob(db: Db, id: string) {
+  await db.delete(ingestionJobs).where(eq(ingestionJobs.id, id));
+}
+
 // ============================================================================
 // Public projections
 // ============================================================================

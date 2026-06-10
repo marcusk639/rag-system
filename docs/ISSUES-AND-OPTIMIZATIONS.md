@@ -379,10 +379,10 @@ A consolidation pass landed in `refactor/five-systems-unification`, collapsing d
 - **Connector utilities** — shared `paginate()` + `makeCursorCodec()` (see OPT-A2).
 - **Parser types generated** — Pydantic → OpenAPI → `parser-types.generated.ts`; the hand-written `ParsedTable`/`ParsedDocument` drift is gone.
 
-**Follow-ups surfaced during verification:**
+**Follow-ups surfaced during verification — both resolved 2026-06-10:**
 
-- 🟡 **Orphaned `pending` on duplicate trigger.** `triggerSync` creates the `ingestion_jobs` row _before_ `enqueueSync`'s pg-boss singleton guard runs, so a duplicate trigger that the singleton rejects leaves a stranded `pending` row. (Pre-existing ordering; not part of the C2a worker-double-write fix.) Fix: enqueue first, or mark the row `failed`/delete it in the `SyncAlreadyRunningError` path.
-- 🟡 **`ParsedDocument.metadata` typed as `Record<string, never>`.** The parser's OpenAPI declares `metadata` as a bare `{"type":"object"}` (Pydantic `dict[str, Any]` emits no `additionalProperties`), so the generated TS type is effectively empty-object. Runtime-safe today, but misleading; fix at the source by giving the Pydantic field an explicit `additionalProperties` so the generator emits `Record<string, unknown>`.
+- ✅ **Orphaned `pending` on duplicate trigger.** `triggerSync` (`@rag/services`) now wraps `enqueueSync` in a try/catch: if the hand-off fails (most commonly a duplicate rejected by pg-boss's singleton guard, `SyncAlreadyRunningError`), it deletes the `pending` row it just created via the new `deleteIngestionJob` (`@rag/db`) and rethrows — so a rejected duplicate leaves no trace and the in-flight sync's row is untouched. Covered by `packages/services/src/sources.test.ts`.
+- ✅ **`ParsedDocument.metadata` typed as `Record<string, never>`.** The Pydantic field now sets `json_schema_extra={"additionalProperties": True}`, so the parser's OpenAPI emits `additionalProperties: true` and the regenerated `parser-types.generated.ts` types `metadata` as `{ [key: string]: unknown }` instead of empty-object.
 
 ## 12. A note on measuring any of this
 
