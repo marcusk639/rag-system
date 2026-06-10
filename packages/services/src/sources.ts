@@ -5,9 +5,10 @@ import {
   getSource,
   listSources,
   toPublicSource,
+  updateIngestionJob,
   type Source,
 } from "@rag/db";
-import { enqueueSync } from "@rag/ingestion";
+import { enqueueSync, SyncAlreadyRunningError } from "@rag/ingestion";
 import type { ServiceDeps } from "./deps.js";
 
 export interface TriggerSyncInput {
@@ -47,10 +48,7 @@ export async function triggerSync(
   });
 
   // Hand off to pg-boss for async execution, carrying the history row id so
-  // the worker updates it rather than creating its own. If the hand-off fails
-  // — most commonly a duplicate sync rejected by pg-boss's singleton guard
-  // (`SyncAlreadyRunningError`) — the row we just created is for a sync that
-  // will never run, so delete it rather than leave an orphaned `pending`.
+  // the worker updates it rather than creating its own.
   let jobId: string;
   try {
     jobId = await enqueueSync(deps.queue, {
@@ -59,7 +57,20 @@ export async function triggerSync(
       ingestionId: ingestionRow.id,
     });
   } catch (err) {
-    await deleteIngestionJob(deps.db, ingestionRow.id);
+    // The row we just created is for a sync that will never run. A duplicate
+    // rejected by pg-boss's singleton guard leaves no real attempt, so delete
+    // the row (the in-flight sync owns its own). Any other enqueue failure is
+    // a genuine attempt that failed — mark it `failed` so it stays auditable
+    // rather than stuck `pending`. Cleanup must never mask the original error.
+    try {
+      if (err instanceof SyncAlreadyRunningError) {
+        await deleteIngestionJob(deps.db, ingestionRow.id);
+      } else {
+        await updateIngestionJob(deps.db, ingestionRow.id, { status: "failed" });
+      }
+    } catch {
+      // Swallow cleanup failure; the original enqueue error is what matters.
+    }
     throw err;
   }
 
