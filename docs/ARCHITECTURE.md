@@ -66,9 +66,20 @@ sources                  │  • Gmail             │       │
                                               or apps/mcp trigger_sync
 ```
 
+## Internal package layers
+
+Beyond the runnable `apps/*`, the workspace is layered so each cross-cutting concern has exactly one owner:
+
+- **`@rag/core`** — contracts only: interfaces, the env-validated `Config`, shared validation (`filterSchema` + DoS caps), the constant-time token verifier, and the parser types **generated** from the Python sidecar's OpenAPI schema (`parser-types.generated.ts`, via `pnpm gen:parser-types`). Depends on nothing else in the workspace.
+- **`@rag/runtime`** — the single composition root. `buildCoreDeps(config, logger)` wires `{ db, embedder, retriever, queue, generator, close }` once; all three apps call it and layer only their own extras (the worker adds parser/chunker/connector-factory). `close()` is the hardened, idempotent shutdown path shared by every surface.
+- **`@rag/services`** — transport-agnostic business logic for the five operations (`searchDocuments`, `askQuestion`, `triggerSync`, `getDocumentById`, `listPublicSources`). HTTP routes and MCP tools are thin adapters that parse input, call a service, and format the response. `triggerSync` is the **sole writer** of `ingestion_jobs`.
+- **`@rag/connectors`** — the four connectors share a `paginate()` loop + `makeCursorCodec()` (one base64-JSON cursor codec, one `done`-flag definition) instead of a base class.
+
+This keeps the apps as thin I/O adapters and makes each invariant — one `ingestion_jobs` writer, one filter schema, one token verifier, one cursor codec — impossible to drift.
+
 ## Data flow: one document, end to end
 
-1. **Trigger.** Someone (a cron, a `POST /sources/:id/sync` call, an MCP `trigger_sync`) enqueues a `rag.sync_source` job in pg-boss.
+1. **Trigger.** A `POST /sources/:id/sync` call or an MCP `trigger_sync` invokes `triggerSync()` in `@rag/services` — the **sole writer** of the `ingestion_jobs` history row. It creates exactly one `pending` row and enqueues a `rag.sync_source` job in pg-boss carrying that row's `ingestionId`. The worker only _transitions_ that row (`running` → `completed`/`failed`); it never creates one.
 2. **Worker picks up.** A worker process running `apps/worker` polls pg-boss, claims the job, and constructs the right connector via `createConnector(source, env)`.
 3. **Connector enumerates.** `connector.list({ cursor: source.cursor })` returns a page of `SourceDocument`s plus the next cursor. For Microsoft Graph this is a delta link; for Drive it's a page token; for Gmail it's a history id.
 4. **Parser converts.** For each document, the TS worker POSTs the raw bytes to the Python sidecar's `/parse` endpoint. The sidecar tries MarkItDown first (fast, broad format support), falls back to Unstructured (slower, OCR-capable) on failure. Returns `{ markdown, title, tables, metadata }`.

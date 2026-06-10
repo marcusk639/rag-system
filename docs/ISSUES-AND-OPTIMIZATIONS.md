@@ -131,7 +131,9 @@ export function registerConnector(kind: string, entry: ...) { REGISTRY.set(kind,
 
 Each connector self-registers in its own module; `createConnector` looks up the map and resolves credentials by the declared `credential` tag. Adding a connector becomes **"add a folder + one `registerConnector` call"** — no shared `switch` edit, and the credential-resolution boilerplate (the repeated `if (!creds) throw` blocks) collapses into one place. This also lets `custom` connectors register at runtime instead of throwing (`factory.ts:82`).
 
-### 🟢 OPT-A2 — Extract a `BaseConnector` to kill the per-connector boilerplate
+### 🟡 OPT-A2 — Extract a `BaseConnector` to kill the per-connector boilerplate
+
+> **✅ Partially shipped (five-systems unification):** the `paginate()` helper + `makeCursorCodec()` now live in `packages/connectors/src/util/{paginate,cursor}.ts`, and all four connectors implement only a per-page `fetchPage`. The abstract `BaseConnector` was **deliberately not** introduced — composition via those two utilities removes the boilerplate without an inheritance tree. Registry (A1) and creation-time config validation (A4) remain open.
 
 The four connectors repeat the same scaffolding: parse config via Zod in the constructor, encode/decode an opaque cursor, run a "while documents < maxItems, page through a delta feed" loop, skip folders/deletes/oversize, and map provider fields → `DocumentMetadata`. SharePoint's `list()` (`sharepoint/index.ts:115-167`) is almost entirely generic queue-walking; only `initialDeltaUrl`, `toSourceDocument`, and the cursor shape are provider-specific.
 
@@ -321,12 +323,12 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Connector extensibility (the "easy to add sources" goal)
 
-| Item                                                                        | Effort |
-| --------------------------------------------------------------------------- | ------ |
-| OPT-A1 — connector registry (kills the `switch`)                            | M      |
-| OPT-A2 — `BaseConnector` / `paginate()` to remove per-connector boilerplate | M      |
-| OPT-A4 — validate config at source creation                                 | S      |
-| OPT-A3 — open `SourceKind` for custom kinds                                 | S      |
+| Item                                                                                   | Effort |
+| -------------------------------------------------------------------------------------- | ------ |
+| OPT-A1 — connector registry (kills the `switch`)                                       | M      |
+| OPT-A2 — ✅ `paginate()` + cursor codec shipped; `BaseConnector` intentionally skipped | —      |
+| OPT-A4 — validate config at source creation                                            | S      |
+| OPT-A3 — open `SourceKind` for custom kinds                                            | S      |
 
 ### SharePoint & pipeline throughput
 
@@ -365,6 +367,22 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 | OPT-E4 — per-source credential references (multi-client)         | M      |
 
 ---
+
+### ✅ Completed — five-systems unification (2026-06)
+
+A consolidation pass landed in `refactor/five-systems-unification`, collapsing duplicated logic into single owners (prefer deletion over abstraction; one path over configurable paths):
+
+- **C2a — duplicate `ingestion_jobs` write fixed.** `triggerSync` (`@rag/services`) is now the sole creator of the history row; the worker only transitions it (`running` → `completed`/`failed`). Verified structurally (`grep` finds `createIngestionJob` only in `@rag/db` + its single `@rag/services` caller, none in the worker) and at runtime (one sync → exactly one row).
+- **`@rag/services`** — the five operations are transport-agnostic; HTTP routes + MCP tools are thin adapters.
+- **`@rag/runtime`** — one `buildCoreDeps()` composition root + one hardened idempotent `close()`; all three apps boot and shut down through it (verified live).
+- **Validation/security single-sourced** — one `filterSchema` + DoS caps, one constant-time token verifier, one `toPublicSource` stripper. MCP Origin allowlist + zero-token refusal kept.
+- **Connector utilities** — shared `paginate()` + `makeCursorCodec()` (see OPT-A2).
+- **Parser types generated** — Pydantic → OpenAPI → `parser-types.generated.ts`; the hand-written `ParsedTable`/`ParsedDocument` drift is gone.
+
+**Follow-ups surfaced during verification:**
+
+- 🟡 **Orphaned `pending` on duplicate trigger.** `triggerSync` creates the `ingestion_jobs` row _before_ `enqueueSync`'s pg-boss singleton guard runs, so a duplicate trigger that the singleton rejects leaves a stranded `pending` row. (Pre-existing ordering; not part of the C2a worker-double-write fix.) Fix: enqueue first, or mark the row `failed`/delete it in the `SyncAlreadyRunningError` path.
+- 🟡 **`ParsedDocument.metadata` typed as `Record<string, never>`.** The parser's OpenAPI declares `metadata` as a bare `{"type":"object"}` (Pydantic `dict[str, Any]` emits no `additionalProperties`), so the generated TS type is effectively empty-object. Runtime-safe today, but misleading; fix at the source by giving the Pydantic field an explicit `additionalProperties` so the generator emits `Record<string, unknown>`.
 
 ## 12. A note on measuring any of this
 
