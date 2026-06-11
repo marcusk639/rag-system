@@ -15,6 +15,8 @@ export interface Deps {
   retriever: Retriever;
   /** Null when `config.generation` is not configured — /ask returns 503 in that case. */
   generator: Generator | null;
+  /** Threaded to the service layer so it can capture failures server-side. */
+  logger: Logger;
   close: () => Promise<void>;
 }
 
@@ -24,5 +26,5 @@ export async function buildDeps(config: Config, logger: Logger): Promise<Deps> {
     config,
     logger,
   );
-  return { db, queue, retriever, generator, close };
+  return { db, queue, retriever, generator, logger, close };
 }
