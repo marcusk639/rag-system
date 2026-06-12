@@ -8,6 +8,8 @@ import {
   ValidationError,
 } from "@rag/core";
 import { htmlToText } from "../util/html.js";
+import { makeCursorCodec } from "../util/cursor.js";
+import { paginate, type ConnectorPage } from "../util/paginate.js";
 import { GraphClient, type GraphCredentials } from "./client.js";
 import { OutlookConfigSchema, type OutlookConfig } from "./config.js";
 
@@ -61,20 +63,9 @@ interface OutlookCursor {
   link: string | null;
 }
 
-function encodeCursor(c: OutlookCursor): string {
-  return Buffer.from(JSON.stringify(c), "utf8").toString("base64");
-}
-
-function decodeCursor(raw: string): OutlookCursor {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, "base64").toString("utf8"),
-    ) as Partial<OutlookCursor>;
-    return { link: parsed.link ?? null };
-  } catch (err) {
-    throw new ValidationError("invalid outlook cursor", err);
-  }
-}
+const cursorCodec = makeCursorCodec<OutlookCursor>("outlook", (parsed) => ({
+  link: (parsed as Partial<OutlookCursor>).link ?? null,
+}));
 
 export class OutlookConnector implements Connector {
   readonly kind = "outlook";
@@ -107,56 +98,58 @@ export class OutlookConnector implements Connector {
   }
 
   async list(options: ConnectorListOptions = {}): Promise<ConnectorListResult> {
-    const maxItems = Math.max(1, options.maxItems ?? 25);
-    const cursor = options.cursor
-      ? decodeCursor(options.cursor)
-      : { link: this.initialDeltaUrl() };
+    return paginate<OutlookCursor>({
+      maxItems: options.maxItems ?? 25,
+      cursor: options.cursor
+        ? cursorCodec.decode(options.cursor)
+        : { link: this.initialDeltaUrl() },
+      encode: cursorCodec.encode,
+      fetchPage: (cursor, remaining) => this.fetchPage(cursor, remaining),
+    });
+  }
 
+  /** Fetch one Graph delta page, advancing the cursor's deltaLink/nextLink. */
+  private async fetchPage(
+    cursor: OutlookCursor,
+    remaining: number,
+  ): Promise<ConnectorPage<OutlookCursor>> {
     const documents: SourceDocument[] = [];
-    // Track feed state explicitly so `done` reflects whether the connector
-    // has more to return, NOT whether this particular page happened to yield
-    // any documents. (Pages of only drafts/removals are still real pages.)
-    let feedExhausted = false;
-
-    while (documents.length < maxItems) {
-      if (!cursor.link) {
-        feedExhausted = true;
-        break;
-      }
-      const page = await this.graph.getJson<DeltaResponse<OutlookMessage>>(
-        cursor.link,
-      );
-
-      for (const msg of page.value) {
-        if (documents.length >= maxItems) break;
-        if (msg["@removed"]) continue;
-        if (msg.isDraft) continue;
-        const doc = this.buildMessageDocument(msg);
-        if (doc) documents.push(doc);
-        if (this.config.includeAttachments && msg.hasAttachments) {
-          for (const att of await this.fetchAttachments(msg.id)) {
-            if (documents.length >= maxItems) break;
-            const adoc = this.buildAttachmentDocument(msg, att);
-            if (adoc) documents.push(adoc);
-          }
-        }
-      }
-
-      if (page["@odata.nextLink"]) {
-        cursor.link = page["@odata.nextLink"];
-        continue;
-      }
-      // No nextLink — we've reached end-of-feed. Save the deltaLink (or null)
-      // so the next sync starts from here, and mark the feed as exhausted.
-      cursor.link = page["@odata.deltaLink"] ?? null;
-      feedExhausted = true;
-      break;
+    if (!cursor.link) {
+      return { documents, cursor, done: true };
     }
 
+    const page = await this.graph.getJson<DeltaResponse<OutlookMessage>>(
+      cursor.link,
+    );
+
+    for (const msg of page.value) {
+      if (documents.length >= remaining) break;
+      if (msg["@removed"]) continue;
+      if (msg.isDraft) continue;
+      const doc = this.buildMessageDocument(msg);
+      if (doc) documents.push(doc);
+      if (this.config.includeAttachments && msg.hasAttachments) {
+        for (const att of await this.fetchAttachments(msg.id)) {
+          if (documents.length >= remaining) break;
+          const adoc = this.buildAttachmentDocument(msg, att);
+          if (adoc) documents.push(adoc);
+        }
+      }
+    }
+
+    if (page["@odata.nextLink"]) {
+      return {
+        documents,
+        cursor: { link: page["@odata.nextLink"] },
+        done: false,
+      };
+    }
+    // No nextLink — end-of-feed. Save the deltaLink (or null) so the next sync
+    // resumes from here, and report the feed as exhausted.
     return {
       documents,
-      nextCursor: encodeCursor(cursor),
-      done: feedExhausted,
+      cursor: { link: page["@odata.deltaLink"] ?? null },
+      done: true,
     };
   }
 

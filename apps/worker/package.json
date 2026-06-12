@@ -16,6 +16,7 @@
     "@rag/db": "workspace:*",
     "@rag/ingestion": "workspace:*",
     "@rag/rag": "workspace:*",
+    "@rag/runtime": "workspace:*",
     "pg-boss": "^10.1.6",
     "pino": "^9.5.0"
   },

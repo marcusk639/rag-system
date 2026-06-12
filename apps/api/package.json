@@ -26,6 +26,8 @@
     "@rag/db": "workspace:*",
     "@rag/ingestion": "workspace:*",
     "@rag/rag": "workspace:*",
+    "@rag/runtime": "workspace:*",
+    "@rag/services": "workspace:*",
     "fastify": "^5.2.1",
     "fastify-type-provider-zod": "^4.0.2",
     "pg-boss": "^10.1.5",

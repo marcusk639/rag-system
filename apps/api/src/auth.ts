@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  createTokenVerifier,
   resolvePrincipal,
   type Principal,
   type ScopedPrincipalConfig,
@@ -25,45 +25,26 @@ declare module "fastify" {
 }
 
 /**
- * Constant-time comparison of presented token against the allow-list.
- *
- * We hash both sides to a fixed-length SHA-256 digest before `timingSafeEqual`
- * so neither length nor content leaks through timing. `Set.has(token)` is
- * a hash lookup but the underlying string compare inside V8's hashmap is
- * not guaranteed constant-time — over a low-latency network an attacker
- * could in principle infer a valid token character-by-character.
- */
-function verifyToken(presented: string, allowed: Buffer[]): boolean {
-  const presentedHash = createHash("sha256").update(presented).digest();
-  let ok = false;
-  for (const candidate of allowed) {
-    // Iterate every candidate even after a match so the total work doesn't
-    // shrink for valid tokens — keeps the timing profile flat.
-    if (timingSafeEqual(presentedHash, candidate)) ok = true;
-  }
-  return ok;
-}
-
-/**
  * Build a Fastify `onRequest` hook that enforces `Authorization: Bearer <token>`
- * against the configured token allow-list using constant-time comparison, then
- * resolves the token to a `Principal` and decorates it onto the request.
+ * against the configured token allow-list using the shared constant-time
+ * verifier (@rag/core/auth), then resolves the token to a `Principal` and
+ * decorates it onto the request.
  *
  * `tokens` are plain (unscoped) ADMIN tokens; `principals` are scoped tokens.
- * A token is valid if it is in EITHER list (both feed the constant-time
- * allow-list). Identity resolution then maps it to admin vs. scoped — scoped
- * wins for least privilege. See @rag/core access-control for the policy.
+ * A token is valid if it is in EITHER list (both feed the shared constant-time
+ * verifier). Identity resolution then maps it to admin vs. scoped — scoped wins
+ * for least privilege. See @rag/core access-control for the policy.
  */
 export function createAuthHook(
   tokens: readonly string[],
   principals: readonly ScopedPrincipalConfig[] = [],
 ) {
-  // Every valid token (admin OR scoped) participates in the constant-time
-  // allow-list. Pre-hash once at startup.
-  const allTokens = [...tokens, ...principals.map((p) => p.token)];
-  const hashedTokens = allTokens.map((t) =>
-    createHash("sha256").update(t).digest(),
-  );
+  // Every valid token (admin OR scoped) feeds the shared constant-time verifier,
+  // which pre-hashes the allow-list once at startup.
+  const verifyToken = createTokenVerifier([
+    ...tokens,
+    ...principals.map((p) => p.token),
+  ]);
 
   return async function authHook(
     request: FastifyRequest,
@@ -83,7 +64,7 @@ export function createAuthHook(
     }
 
     const token = header.slice("Bearer ".length).trim();
-    if (!verifyToken(token, hashedTokens)) {
+    if (!verifyToken(token)) {
       await reply.code(401).send({
         error: { code: "UNAUTHORIZED", message: "Invalid bearer token" },
       });

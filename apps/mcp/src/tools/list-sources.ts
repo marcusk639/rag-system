@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { listSources } from "@rag/db";
+import { listPublicSources } from "@rag/services";
 import type { Deps } from "../deps.js";
 
 export function registerListSources(server: McpServer, deps: Deps): void {
@@ -12,7 +12,9 @@ export function registerListSources(server: McpServer, deps: Deps): void {
       inputSchema: {},
     },
     async () => {
-      const rows = await listSources(deps.db);
+      // listPublicSources strips the `config` blob; we project to the
+      // agent-facing fields the tool has always returned.
+      const rows = await listPublicSources(deps);
       const sources = rows.map((s) => ({
         id: s.id,
         kind: s.kind,

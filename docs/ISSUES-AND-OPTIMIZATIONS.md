@@ -131,7 +131,9 @@ export function registerConnector(kind: string, entry: ...) { REGISTRY.set(kind,
 
 Each connector self-registers in its own module; `createConnector` looks up the map and resolves credentials by the declared `credential` tag. Adding a connector becomes **"add a folder + one `registerConnector` call"** — no shared `switch` edit, and the credential-resolution boilerplate (the repeated `if (!creds) throw` blocks) collapses into one place. This also lets `custom` connectors register at runtime instead of throwing (`factory.ts:82`).
 
-### 🟢 OPT-A2 — Extract a `BaseConnector` to kill the per-connector boilerplate
+### 🟡 OPT-A2 — Extract a `BaseConnector` to kill the per-connector boilerplate
+
+> **✅ Partially shipped (five-systems unification):** the `paginate()` helper + `makeCursorCodec()` now live in `packages/connectors/src/util/{paginate,cursor}.ts`, and all four connectors implement only a per-page `fetchPage`. The abstract `BaseConnector` was **deliberately not** introduced — composition via those two utilities removes the boilerplate without an inheritance tree. Registry (A1) and creation-time config validation (A4) remain open.
 
 The four connectors repeat the same scaffolding: parse config via Zod in the constructor, encode/decode an opaque cursor, run a "while documents < maxItems, page through a delta feed" loop, skip folders/deletes/oversize, and map provider fields → `DocumentMetadata`. SharePoint's `list()` (`sharepoint/index.ts:115-167`) is almost entirely generic queue-walking; only `initialDeltaUrl`, `toSourceDocument`, and the cursor shape are provider-specific.
 
@@ -321,12 +323,12 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Connector extensibility (the "easy to add sources" goal)
 
-| Item                                                                        | Effort |
-| --------------------------------------------------------------------------- | ------ |
-| OPT-A1 — connector registry (kills the `switch`)                            | M      |
-| OPT-A2 — `BaseConnector` / `paginate()` to remove per-connector boilerplate | M      |
-| OPT-A4 — validate config at source creation                                 | S      |
-| OPT-A3 — open `SourceKind` for custom kinds                                 | S      |
+| Item                                                                                   | Effort |
+| -------------------------------------------------------------------------------------- | ------ |
+| OPT-A1 — connector registry (kills the `switch`)                                       | M      |
+| OPT-A2 — ✅ `paginate()` + cursor codec shipped; `BaseConnector` intentionally skipped | —      |
+| OPT-A4 — validate config at source creation                                            | S      |
+| OPT-A3 — open `SourceKind` for custom kinds                                            | S      |
 
 ### SharePoint & pipeline throughput
 
@@ -365,6 +367,46 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 | OPT-E4 — per-source credential references (multi-client)         | M      |
 
 ---
+
+### ✅ Completed — five-systems unification (2026-06)
+
+A consolidation pass landed in `refactor/five-systems-unification`, collapsing duplicated logic into single owners (prefer deletion over abstraction; one path over configurable paths):
+
+- **C2a — duplicate `ingestion_jobs` write fixed.** `triggerSync` (`@rag/services`) is now the sole creator of the history row; the worker only transitions it (`running` → `completed`/`failed`). Verified structurally (`grep` finds `createIngestionJob` only in `@rag/db` + its single `@rag/services` caller, none in the worker) and at runtime (one sync → exactly one row).
+- **`@rag/services`** — the five operations are transport-agnostic; HTTP routes + MCP tools are thin adapters.
+- **`@rag/runtime`** — one `buildCoreDeps()` composition root + one hardened idempotent `close()`; all three apps boot and shut down through it (verified live).
+- **Validation/security single-sourced** — one `filterSchema` + DoS caps, one constant-time token verifier, one `toPublicSource` stripper. MCP Origin allowlist + zero-token refusal kept.
+- **Connector utilities** — shared `paginate()` + `makeCursorCodec()` (see OPT-A2).
+- **Parser types generated** — Pydantic → OpenAPI → `parser-types.generated.ts`; the hand-written `ParsedTable`/`ParsedDocument` drift is gone.
+
+**Follow-ups surfaced during verification — both resolved 2026-06-10:**
+
+- ✅ **Orphaned `pending` on duplicate trigger.** `triggerSync` (`@rag/services`) now wraps `enqueueSync` in a try/catch: if the hand-off fails (most commonly a duplicate rejected by pg-boss's singleton guard, `SyncAlreadyRunningError`), it deletes the `pending` row it just created via the new `deleteIngestionJob` (`@rag/db`) and rethrows — so a rejected duplicate leaves no trace and the in-flight sync's row is untouched. Covered by `packages/services/src/sources.test.ts`.
+- ✅ **`ParsedDocument.metadata` typed as `Record<string, never>`.** The Pydantic field now sets `json_schema_extra={"additionalProperties": True}`, so the parser's OpenAPI emits `additionalProperties: true` and the regenerated `parser-types.generated.ts` types `metadata` as `{ [key: string]: unknown }` instead of empty-object.
+
+### PR-review backlog (PR #3, multi-agent review 2026-06-10) — OPEN
+
+A 4-agent review (code / tests / error-handling / type-design) of the full PR ran after the two follow-ups above. One genuine regression was found and **already fixed** (commit `ba1971c`: `triggerSync` now only deletes the row on `SyncAlreadyRunningError`, marks genuine enqueue failures `failed`, and guards cleanup so it can't mask the original error; `sources.test.ts` expanded to 5 branches). The items below are the **remaining, not-yet-addressed** findings. None block merge; grouped by risk. Pick up here next session.
+
+**Cheap + safe — ✅ ALL RESOLVED (2026-06-10, this session):**
+
+1. ✅ **Test: cursor codec** — added `packages/connectors/src/util/cursor.test.ts` (8 tests): encode→decode round-trip deep-equal + opaque-base64 assertion; tamper rejection for non-base64, valid-base64-non-JSON, and `normalize`-rejects — each a `ValidationError("invalid <name> cursor")` with the original error attached as `cause`; gmail (`{mode:"initial"}`→nulled tokens) and outlook (`{}`→`{link:null}`) `normalize` defaulting.
+2. ✅ **Test: `paginate`** — added `packages/connectors/src/util/paginate.test.ts` (5 tests): the regression guard (`{documents:[], done:false}` does NOT terminate the walk); terminate on `done:true`; `maxItems<=0` clamps to 1; over-filling page truncated to `maxItems`; `remaining` shrinks `[3,2,1]` and `encode` applied to the final cursor.
+3. ✅ **Test: `filterSchema` DoS caps** — added `packages/core/src/validation.test.ts` (12 tests): at-limit accept / one-over reject for all four caps (`MAX_FILTER_KEYS`, `MAX_FILTER_KEY_LEN`, `MAX_FILTER_VALUE_LEN`, `MAX_FILTER_VALUES_PER_KEY`); `string` and `string[]` value shapes; over-length value inside an array rejected; non-string values rejected.
+4. ✅ **Worker marks row `failed` on deleted source** — `apps/worker/src/handlers/sync-source.ts`. The `source not found` branch now calls `updateIngestionJob(db, job.data.ingestionId, { status: "failed", completedAt, error: "source not found" })` before returning, so the row no longer sits `pending` forever once pg-boss marks the job completed.
+5. ✅ **`askQuestion` narrowed to non-null-generator `AskDeps`** — `packages/services/src/ask.ts`. Added exported `AskDeps = Omit<ServiceDeps,"generator"> & { generator: Generator }`; `askQuestion` does the single null-check/throw at the seam then delegates to an internal `ask(deps: AskDeps, …)` so the core path never re-checks the nullable. Added `ask.test.ts` (4 branch tests): no-generator throws + retriever untouched; empty retrieval → fixed answer, generator not invoked; happy path threads output with `topK` fallback to `defaultTopK`; explicit `topK`/`sourceIds`/`filter` forwarded.
+
+**Moderate (low risk, more files) — OPEN:**
+
+6. **Runtime metadata validation at the parser boundary** — `packages/rag/src/parser/parser-client.ts` `parse()` returns `json.metadata` unvalidated; the generated type is only a compile-time claim about a wire payload. The pipeline (`packages/ingestion/src/pipeline.ts:154`) merges `parsed.metadata` over `source.metadata` (a `DocumentMetadata`) and writes the union to the documents row, but `RetrievalResult.document.metadata` (`packages/core/src/types.ts:170`) still promises `DocumentMetadata` — an unchecked structural gap. Add a `z.record(z.unknown())`-or-tighter parse at the parser-client seam (repo rule: validate at system boundaries), and type the pipeline merge target as `DocumentMetadata & Record<string, unknown>` so the contract retrieval relies on stays honest.
+7. **Unify `RetrievalQuery.filter` with `filterSchema`** — `packages/core/src/types.ts:147` types `filter?` as the _unbounded_ `Record<string, string | string[]>`, disconnected from the bounded `filterSchema`. The cap only applies if every call site remembers to `.parse()`. Derive the core type from the schema (`z.infer<typeof filterSchema>`) so the bounded shape is the only representable one past the HTTP boundary. Verify call sites in `apps/api/src/routes/` and `apps/mcp/src/tools/` still typecheck.
+8. **`createTokenVerifier` empty-tokens guard** — `packages/core/src/auth.ts`. An accidentally-empty `tokens` array yields a verifier that rejects everything (safe) but silently — consider asserting `tokens.length > 0` at construction so a misconfig fails loud rather than locking everyone out quietly. (Judgment call; confirm against how runtime builds the token set.)
+
+**Risky / pre-existing (tracking only — NOT a PR #3 regression):**
+
+9. **`paginate` mid-page truncation** — when a single upstream page yields more documents than `remaining`, each connector's `fetchPage` advances the cursor past the _entire_ page (e.g. `outlook/index.ts` returns `cursor:{link:nextLink}`; `sharepoint/index.ts:154` sets `cursor.current={next:nextLink}`), so the unconsumed tail is skipped next call. Identical on `main` — the refactor only centralized it. Proper fix threads an intra-page offset through all 4 connectors' cursors (high regression surface). ~75% likely a real latent data-loss bug; needs the eval harness (§12) to validate any fix. Either fix deliberately with tests or document the "`fetchPage` must not over-fetch" contract loudly in `paginate.ts`.
+10. **gmail/gdrive delta-with-null-token silently triggers full re-scan** — `gmail/index.ts:211-218`, `gdrive/index.ts:214-219` log at `warn` and reseed an initial full re-ingest when a delta cursor lacks its `historyId`/`pageToken`. Asymmetric with the loud failure for _malformed_ cursors. Consider rejecting "delta mode + null token" in each connector's `normalize` (→ `ValidationError`), or at minimum log at `error`/emit a metric since an unplanned full re-scan is an operational event. Also note gmail does not special-case the 404 "startHistoryId too old" → it becomes a hard job failure that retries 3× rather than self-healing to initial.
+11. **No server-side logging of real `triggerSync` failures** — `ServiceDeps` carries no logger, so a genuine (non-dedupe) enqueue failure routed via the MCP adapter (`apps/mcp/src/tools/trigger-sync.ts:64`) becomes a tool-result string with no server-side capture. Add a logger to `ServiceDeps` and log non-dedupe failures before rethrow.
 
 ## 12. A note on measuring any of this
 

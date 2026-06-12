@@ -1,4 +1,5 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { createTokenVerifier } from "@rag/core";
 import express, {
   type NextFunction,
   type Request,
@@ -88,21 +89,14 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     );
   }
 
-  // Every valid token (admin OR scoped) participates in the constant-time
-  // allow-list. Pre-hash so per-request comparison is constant-time on
-  // equal-length SHA-256 digests rather than variable-length strings.
-  const allTokens = [...tokens, ...principals.map((p) => p.token)];
-  const hashedTokens = allTokens.map((t) =>
-    createHash("sha256").update(t).digest(),
-  );
-  const verifyToken = (presented: string): boolean => {
-    const h = createHash("sha256").update(presented).digest();
-    let ok = false;
-    for (const candidate of hashedTokens) {
-      if (timingSafeEqual(h, candidate)) ok = true;
-    }
-    return ok;
-  };
+  // Every valid token (admin OR scoped) feeds the shared constant-time verifier
+  // (@rag/core/auth) — the same implementation the HTTP API uses. The allow-list
+  // (admin tokens + scoped-principal tokens) is pre-hashed once inside the
+  // factory; identity resolution to admin-vs-scoped happens in scopeForRequest.
+  const verifyToken = createTokenVerifier([
+    ...tokens,
+    ...principals.map((p) => p.token),
+  ]);
 
   // Resolve a request's verified bearer token to its retrieval authorization
   // scope. The `guard` middleware already proved the token is valid; here we

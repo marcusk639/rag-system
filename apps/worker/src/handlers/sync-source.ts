@@ -1,4 +1,4 @@
-import { createIngestionJob, getSource, updateIngestionJob } from "@rag/db";
+import { getSource, updateIngestionJob } from "@rag/db";
 import { runIngestion, type SyncSourcePayload } from "@rag/ingestion";
 import type { WorkerDeps } from "../deps.js";
 
@@ -6,7 +6,7 @@ import type { WorkerDeps } from "../deps.js";
  * pg-boss hands the worker a job whose `data` is the SyncSourcePayload we put
  * on the queue from the API. We:
  *   1. Resolve the source row from Postgres.
- *   2. Open an ingestion_jobs history row (status=running).
+ *   2. Mark the producer-created ingestion_jobs history row running.
  *   3. Build the right connector + delegate to `runIngestion`.
  *   4. Mark the history row completed/failed accordingly.
  *
@@ -22,13 +22,22 @@ export async function handleSyncSource(
 
   const source = await getSource(db, job.data.sourceId);
   if (!source) {
-    log.error("source not found, skipping");
+    // The source was deleted between enqueue and execution. Close out the
+    // history row (created by `triggerSync`) so it doesn't sit `pending`
+    // forever — pg-boss otherwise marks the job completed and nothing else
+    // ever touches this row again.
+    log.error("source not found, marking ingestion job failed");
+    await updateIngestionJob(db, job.data.ingestionId, {
+      status: "failed",
+      completedAt: new Date(),
+      error: "source not found",
+    });
     return;
   }
 
-  const historyRow = await createIngestionJob(db, {
-    sourceId: source.id,
-    mode: job.data.mode,
+  // The history row was created by `triggerSync` (the sole writer of
+  // ingestion_jobs). We only transition it through its lifecycle here.
+  await updateIngestionJob(db, job.data.ingestionId, {
     status: "running",
     startedAt: new Date(),
   });
@@ -50,7 +59,7 @@ export async function handleSyncSource(
       { db, parser, chunker, embedder, logger: log },
     );
 
-    await updateIngestionJob(db, historyRow.id, {
+    await updateIngestionJob(db, job.data.ingestionId, {
       status: "completed",
       completedAt: new Date(),
       documentsProcessed: result.documentsProcessed,
@@ -60,7 +69,7 @@ export async function handleSyncSource(
     log.info(result, "sync completed");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await updateIngestionJob(db, historyRow.id, {
+    await updateIngestionJob(db, job.data.ingestionId, {
       status: "failed",
       completedAt: new Date(),
       error: message,

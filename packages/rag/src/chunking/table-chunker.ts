@@ -172,7 +172,7 @@ function escapeCell(cell: string): string {
 function makeChunk(args: {
   text: string;
   ordinal: number;
-  sheetName: string | undefined;
+  sheetName: string | null | undefined;
 }): Chunk {
   // Last-resort safety net: an oversized row is emitted alone (see chunk()),
   // which can exceed the hard embedding token cap. Clamp it token-aware before

@@ -39,8 +39,8 @@ export class CompositeChunker implements Chunker {
   }
 
   async chunk(document: ParsedDocument): Promise<Chunk[]> {
-    const isSpreadsheet = document.tables.some(
-      (t) => t.sheetType !== undefined,
+    const isSpreadsheet = (document.tables ?? []).some(
+      (t) => t.sheetType != null,
     );
     if (isSpreadsheet) {
       return this.chunkSpreadsheet(document);
@@ -52,7 +52,7 @@ export class CompositeChunker implements Chunker {
     const out: Chunk[] = [];
     let ordinal = 0;
 
-    for (const table of document.tables) {
+    for (const table of document.tables ?? []) {
       const tableChunks = this.tableChunker.chunk({
         table,
         startOrdinal: ordinal,

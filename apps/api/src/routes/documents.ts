@@ -1,10 +1,4 @@
-import {
-  type DocumentMetadata,
-  isSourceAllowed,
-  NotFoundError,
-  sanitizeMetadata,
-} from "@rag/core";
-import { getDocument } from "@rag/db";
+import { getDocumentById } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -19,26 +13,20 @@ export async function registerDocumentRoutes(
 ): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  // GET /documents/:id — return the full document row (parsed markdown + metadata)
+  // GET /documents/:id — return the full document row (parsed markdown +
+  // metadata). Thin adapter: getDocumentById throws NotFoundError → 404.
   typed.get(
     "/documents/:id",
     { schema: { params: IdParams } },
     async (request) => {
-      const row = await getDocument(deps.db, request.params.id);
-      // Confidentiality boundary (P1b): a scoped caller must not be able to read
-      // — or even confirm the existence of — a document outside its enforced
-      // source set. Treat a forbidden source EXACTLY like a missing id (same
-      // 404) so the two cases are indistinguishable.
-      const scope = scopeFromRequest(request);
-      if (!row || !isSourceAllowed(scope, row.sourceId))
-        throw new NotFoundError(`Document ${request.params.id} not found`);
-      // PII boundary: the stored `metadata` jsonb carries email author/from/
-      // to/subject and connector `extra`. Apply the allowlist before returning
-      // the row to the caller. See @rag/core metadata-policy.
-      return {
-        ...row,
-        metadata: sanitizeMetadata(row.metadata as DocumentMetadata),
-      };
+      // The service enforces P1b (forbidden source is indistinguishable from a
+      // missing id — same NotFoundError → 404) and the PII metadata allowlist;
+      // the route only resolves the principal's scope and delegates.
+      return getDocumentById(
+        deps,
+        request.params.id,
+        scopeFromRequest(request),
+      );
     },
   );
 }

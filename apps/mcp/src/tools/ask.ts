@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope } from "@rag/core";
+import { filterSchema } from "@rag/core";
+import { askQuestion, GenerationNotConfiguredError } from "@rag/services";
 import type { Deps } from "../deps.js";
-import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 
@@ -66,56 +67,41 @@ export function registerAsk(
       inputSchema,
     },
     async ({ question, topK, sourceIds, filter }) => {
-      if (!deps.generator) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No generation provider is configured on this MCP server. Set GENERATION_PROVIDER and GENERATION_MODEL (and the matching API key) to enable `ask`, or use `search_documents` to retrieve passages and synthesize the answer yourself.",
-            },
-          ],
-          isError: true,
-        };
+      // Thin adapter: the generator-null guard and empty-results short-circuit
+      // live in askQuestion (canonical behavior). We only translate the
+      // not-configured case into an MCP isError with a tool-specific hint.
+      let result;
+      try {
+        result = await askQuestion(
+          deps,
+          { question, topK, sourceIds, filter },
+          deps.config.retrieval.defaultTopK,
+          scope,
+        );
+      } catch (err) {
+        if (err instanceof GenerationNotConfiguredError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No generation provider is configured on this MCP server. Set GENERATION_PROVIDER and GENERATION_MODEL (and the matching API key) to enable `ask`, or use `search_documents` to retrieve passages and synthesize the answer yourself.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
       }
 
-      // MANDATORY confidentiality boundary — same enforced scope as search.
-      const results = await deps.retriever.search(
-        {
-          query: question,
-          topK: topK ?? deps.config.retrieval.defaultTopK,
-          sourceIds,
-          filter,
-        },
-        scope,
-      );
-
-      if (results.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "The available documents do not contain enough information to answer that. Try rephrasing, removing filters, or syncing a relevant source.",
-            },
-          ],
-          structuredContent: {
-            answer: "",
-            citations: [],
-            retrievedCount: 0,
-          },
-        };
-      }
-
-      const { answer, citations } = await deps.generator.answer(
-        question,
-        results,
-      );
-
+      // `askQuestion` already enforced the confidentiality scope and short-
+      // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
+      const { answer, citations, retrieved } = result;
       return {
         content: [{ type: "text", text: renderAnswer(answer, citations) }],
         structuredContent: {
           answer,
           citations,
-          retrievedCount: results.length,
+          retrievedCount: retrieved.length,
         },
       };
     },

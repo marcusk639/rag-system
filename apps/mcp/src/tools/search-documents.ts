@@ -1,12 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  type AuthorizationScope,
-  type RetrievalResult,
-  sanitizeRetrievalResults,
-} from "@rag/core";
+import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
+import { filterSchema } from "@rag/core";
+import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
-import { filterSchema } from "./filter.js";
 
 const MAX_TOP_K = 50;
 const EXCERPT_CHARS = 300;
@@ -38,7 +35,7 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max).trimEnd()}…`;
 }
 
-function formatResults(results: RetrievalResult[]): string {
+function formatResults(results: SanitizedRetrievalResult[]): string {
   if (results.length === 0) {
     return "No matching chunks found. Try a broader query, remove filters, or check that the relevant source has been synced.";
   }
@@ -68,25 +65,20 @@ export function registerSearchDocuments(
       inputSchema,
     },
     async ({ query, topK, sourceIds, filter }) => {
-      // MANDATORY confidentiality boundary: the session's enforced scope
-      // (admin for stdio/admin-token, source-scoped for a scoped token). The
-      // optional caller `sourceIds` narrows WITHIN this scope.
-      const results = await deps.retriever.search(
-        {
-          query,
-          topK: topK ?? deps.config.retrieval.defaultTopK,
-          sourceIds,
-          filter,
-        },
+      // The service enforces the MANDATORY confidentiality boundary (scope —
+      // admin for stdio/admin-token, source-scoped for a scoped token; the
+      // optional caller `sourceIds` narrows WITHIN it) and the PII metadata
+      // allowlist, so the same leak via MCP is closed the same way as the HTTP
+      // API. `results` is already sanitized.
+      const results = await searchDocuments(
+        deps,
+        { query, topK, sourceIds, filter },
+        deps.config.retrieval.defaultTopK,
         scope,
       );
-      // PII boundary: the same metadata leak via MCP is the same incident as
-      // via the HTTP API. Strip non-allowlisted metadata (author/from/to/
-      // subject/extra) from the structured payload. The text excerpt above
-      // already only uses title/heading/page. See @rag/core metadata-policy.
       return {
         content: [{ type: "text", text: formatResults(results) }],
-        structuredContent: { results: sanitizeRetrievalResults(results) },
+        structuredContent: { results },
       };
     },
   );

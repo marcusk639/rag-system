@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "./parser-types.generated.js";
 
 // ============================================================================
 // Source — an external system the ingestion pipeline can pull from
@@ -72,6 +73,13 @@ export interface SourceDocument {
 // ============================================================================
 
 /**
+ * Output of the parser sidecar. Single-sourced from the parser's Pydantic
+ * models via the generated OpenAPI types — DO NOT hand-edit. Regenerate with
+ * `pnpm gen:parser-types` (requires the parser container to be up).
+ */
+export type ParsedDocument = components["schemas"]["ParsedDocument"];
+
+/**
  * Routing label assigned by the parser per spreadsheet sheet. Drives downstream
  * choices about chunking (row-grouping vs. semantic), text-to-SQL eligibility,
  * and citation formatting. For non-spreadsheet sources `sheetType` is undefined.
@@ -83,53 +91,63 @@ export interface SourceDocument {
  *  - `financial_model` — small, dense, formula-heavy. Embed COMPUTED values
  *                        and treat the whole sheet as one logical section.
  *  - `freeform`        — todo lists, plans, irregular layouts. Best-effort.
+ *
+ * Derived from the generated `ParsedTable.sheetType` to stay single-sourced.
  */
-export const SheetType = z.enum([
-  "tabular",
-  "narrative",
-  "financial_model",
-  "freeform",
-]);
-export type SheetType = z.infer<typeof SheetType>;
-
-export const ParsedTableSchema = z.object({
-  /** Markdown rendering of the table — embedded in `markdown` for retrieval */
-  markdown: z.string(),
-  /** Optional caption/title near the table */
-  caption: z.string().optional(),
-  /** Sheet name for spreadsheet sources; undefined for tables embedded in other docs */
-  sheetName: z.string().optional(),
-  /** Routing label for downstream chunking + retrieval (spreadsheets only) */
-  sheetType: SheetType.optional(),
-  /** Header row(s), one entry per column. Empty for non-spreadsheet tables. */
-  headers: z.array(z.string()).optional(),
-  /** Data rows. Each inner array has `headers.length` entries (right-padded with "") */
-  rows: z.array(z.array(z.string())).optional(),
-  /** Convenience for callers that don't want to count `rows.length` */
-  rowCount: z.number().int().nonnegative().optional(),
-  /** Convenience for callers that don't want to count `headers.length` */
-  columnCount: z.number().int().nonnegative().optional(),
-});
-export type ParsedTable = z.infer<typeof ParsedTableSchema>;
+export type SheetType = NonNullable<ParsedTable["sheetType"]>;
 
 /**
- * Zod schema for the parser sidecar's response. Mirrors `ParsedDocument`
- * exactly and is the validation gate at the TS↔Python parser boundary —
- * `HttpParserClient` `.parse()`s the sidecar JSON through this instead of an
- * unchecked `as` cast, so a malformed response fails loudly instead of
- * silently corrupting downstream chunks.
+ * A structured table extracted from a document. Single-sourced from the
+ * parser's Pydantic models via the generated OpenAPI types — DO NOT hand-edit.
  */
-export const ParsedDocumentSchema = z.object({
-  /** Cleaned markdown representation of the document */
+export type ParsedTable = components["schemas"]["ParsedTable"];
+
+/**
+ * Runtime validator for the parser sidecar's `/parse` response.
+ *
+ * The TYPES above are the single source of truth (generated from the parser's
+ * Pydantic models). This Zod schema is a deliberately SEPARATE runtime guard:
+ * `HttpParserClient.parse()` validates the sidecar JSON through it instead of an
+ * unchecked `as ParsedDocument` cast, so a malformed response (parser/version
+ * skew, proxy mangling, a parser bug) fails loudly at the boundary instead of
+ * silently corrupting downstream chunks. The parser runs as a separate,
+ * independently-deployed container, so this boundary is a real trust boundary.
+ *
+ * The shape mirrors the parser's Pydantic defaults exactly: `_CamelModel`
+ * serializes camelCase, and list/int fields carry defaults (so they are present
+ * rather than missing). The `_assertParsedDocAssignable` check below fails the
+ * build if this validator ever drifts from the generated contract.
+ */
+const ParsedTableSchema = z.object({
   markdown: z.string(),
-  /** Detected/normalized title (may differ from source title) */
-  title: z.string(),
-  /** Structured tables extracted from the document */
-  tables: z.array(ParsedTableSchema),
-  /** Metadata extracted by the parser (overrides/augments source metadata) */
-  metadata: DocumentMetadata,
+  caption: z.string().nullish(),
+  sheetName: z.string().nullish(),
+  sheetType: z
+    .enum(["tabular", "narrative", "financial_model", "freeform"])
+    .nullish(),
+  headers: z.array(z.string()).default([]),
+  rows: z.array(z.array(z.string())).default([]),
+  rowCount: z.number().int().nonnegative().default(0),
+  columnCount: z.number().int().nonnegative().default(0),
 });
-export type ParsedDocument = z.infer<typeof ParsedDocumentSchema>;
+
+export const ParsedDocumentSchema = z.object({
+  title: z.string(),
+  markdown: z.string(),
+  tables: z.array(ParsedTableSchema).default([]),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+/**
+ * Compile-time drift guard: the runtime validator's OUTPUT must stay assignable
+ * to the generated contract. If the parser's Pydantic models change and the
+ * generated types are regenerated, this line stops compiling until the schema
+ * above is updated to match — keeping the single source of truth honest.
+ */
+type _ParsedDocAssignable =
+  z.infer<typeof ParsedDocumentSchema> extends ParsedDocument ? true : never;
+const _assertParsedDocAssignable: _ParsedDocAssignable = true;
+void _assertParsedDocAssignable;
 
 // ============================================================================
 // Chunk — a slice of a document ready to embed

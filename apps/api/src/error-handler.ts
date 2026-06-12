@@ -9,6 +9,13 @@ import { ZodError } from "zod";
 const STATUS_BY_CODE: Record<string, number> = {
   VALIDATION_ERROR: 400,
   NOT_FOUND: 404,
+  // A duplicate sync was rejected by pg-boss's singletonKey dedupe — the
+  // request is well-formed, the resource is just busy. (@rag/ingestion's
+  // SyncAlreadyRunningError, surfaced from triggerSync.)
+  SYNC_ALREADY_RUNNING: 409,
+  // /ask was called but no generation provider is configured on the server.
+  // (@rag/services' GenerationNotConfiguredError.)
+  GENERATION_NOT_CONFIGURED: 503,
   CONNECTOR_AUTH_ERROR: 502,
   CONNECTOR_TRANSIENT_ERROR: 503,
   PARSER_ERROR: 502,
