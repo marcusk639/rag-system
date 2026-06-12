@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { encode } from "gpt-tokenizer";
 import type { ParsedDocument, ParsedTable } from "@rag/core";
 import { CompositeChunker } from "./composite-chunker.js";
+import { MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 function makeTable(
   partial: Partial<ParsedTable> & Pick<ParsedTable, "markdown">,
@@ -136,6 +138,28 @@ describe("CompositeChunker", () => {
     expect(ordinals).toEqual(
       Array.from({ length: ordinals.length }, (_, i) => i),
     );
+  });
+
+  it("clamps a giant code block below the hard embedding token cap", async () => {
+    // A huge fenced code block can't be split by paragraph/sentence and only
+    // gets char-sliced by hardSplit using a 4-chars/token estimate that can
+    // under-count. Without the clamp such a chunk can exceed Gemini's 2048
+    // embedding input limit. The clamp is the last line of defense.
+    const chunker = new CompositeChunker(opts);
+    const giantCode = "const x = 1; // padding token here\n".repeat(4000);
+    const doc: ParsedDocument = {
+      title: "huge.md",
+      markdown: `# Code\n\n\`\`\`ts\n${giantCode}\`\`\`\n`,
+      tables: [],
+      metadata: {},
+    };
+    const chunks = await chunker.chunk(doc);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const c of chunks) {
+      expect(encode(c.text).length).toBeLessThanOrEqual(MAX_EMBEDDING_TOKENS);
+      expect(c.tokenCount).toBeLessThanOrEqual(MAX_EMBEDDING_TOKENS);
+      expect(c.tokenCount).toBe(encode(c.text).length);
+    }
   });
 
   it("never produces a chunk with mid-row content for a spreadsheet doc", async () => {

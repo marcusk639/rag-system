@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AuthorizationScope } from "@rag/core";
 import { filterSchema } from "@rag/core";
 import { askQuestion, GenerationNotConfiguredError } from "@rag/services";
 import type { Deps } from "../deps.js";
@@ -52,7 +53,11 @@ function renderAnswer(
   return `${answer}\n\nSources:\n${block}`;
 }
 
-export function registerAsk(server: McpServer, deps: Deps): void {
+export function registerAsk(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "ask",
     {
@@ -71,6 +76,7 @@ export function registerAsk(server: McpServer, deps: Deps): void {
           deps,
           { question, topK, sourceIds, filter },
           deps.config.retrieval.defaultTopK,
+          scope,
         );
       } catch (err) {
         if (err instanceof GenerationNotConfiguredError) {
@@ -87,6 +93,8 @@ export function registerAsk(server: McpServer, deps: Deps): void {
         throw err;
       }
 
+      // `askQuestion` already enforced the confidentiality scope and short-
+      // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
       const { answer, citations, retrieved } = result;
       return {
         content: [{ type: "text", text: renderAnswer(answer, citations) }],

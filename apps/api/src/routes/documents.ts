@@ -2,6 +2,7 @@ import { getDocumentById } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { scopeFromRequest } from "./authz.js";
 import type { Deps } from "../deps.js";
 
 const IdParams = z.object({ id: z.string().uuid() });
@@ -18,7 +19,14 @@ export async function registerDocumentRoutes(
     "/documents/:id",
     { schema: { params: IdParams } },
     async (request) => {
-      return getDocumentById(deps, request.params.id);
+      // The service enforces P1b (forbidden source is indistinguishable from a
+      // missing id — same NotFoundError → 404) and the PII metadata allowlist;
+      // the route only resolves the principal's scope and delegates.
+      return getDocumentById(
+        deps,
+        request.params.id,
+        scopeFromRequest(request),
+      );
     },
   );
 }

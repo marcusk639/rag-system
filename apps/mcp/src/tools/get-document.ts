@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { NotFoundError } from "@rag/core";
+import { type AuthorizationScope, NotFoundError } from "@rag/core";
 import { getDocumentById } from "@rag/services";
 import type { Deps } from "../deps.js";
 
@@ -13,7 +13,11 @@ const inputSchema = {
     ),
 };
 
-export function registerGetDocument(server: McpServer, deps: Deps): void {
+export function registerGetDocument(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "get_document",
     {
@@ -23,9 +27,14 @@ export function registerGetDocument(server: McpServer, deps: Deps): void {
       inputSchema,
     },
     async ({ documentId }) => {
+      // Confidentiality boundary (P1b): `getDocumentById` enforces the session
+      // scope and throws NotFoundError for a forbidden source EXACTLY as it does
+      // for a missing id, so the two cases are indistinguishable and the summary
+      // below (which embeds sourceId + the full markdown body) is never built
+      // for an out-of-scope document. It also applies the PII metadata allowlist.
       let doc;
       try {
-        doc = await getDocumentById(deps, documentId);
+        doc = await getDocumentById(deps, documentId, scope);
       } catch (err) {
         if (err instanceof NotFoundError) {
           return {
@@ -52,6 +61,7 @@ export function registerGetDocument(server: McpServer, deps: Deps): void {
             mimeType: doc.mimeType,
             sizeBytes: doc.sizeBytes,
             sourceModifiedAt: doc.sourceModifiedAt?.toISOString() ?? null,
+            // `doc.metadata` is already PII-allowlisted by `getDocumentById`.
             metadata: doc.metadata,
             markdown: doc.markdown,
           },

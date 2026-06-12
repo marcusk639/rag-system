@@ -13,6 +13,7 @@ import {
   pgEnum,
   customType,
 } from "drizzle-orm/pg-core";
+import { EMBEDDING_COLUMN_DIMENSIONS } from "./embedding-dimensions.js";
 
 // ----------------------------------------------------------------------------
 // tsvector custom type — Drizzle has no native tsvector primitive, so we
@@ -149,7 +150,9 @@ export const chunks = pgTable(
      * Keeping this nullable would mean dense retrieval silently skips chunks
      * whose embedding step failed without any other signal.
      */
-    embedding: vector("embedding", { dimensions: 768 }).notNull(),
+    embedding: vector("embedding", {
+      dimensions: EMBEDDING_COLUMN_DIMENSIONS,
+    }).notNull(),
     embeddingProvider: text("embedding_provider").notNull(),
     embeddingModel: text("embedding_model").notNull(),
     /** tsvector for BM25-style sparse retrieval — auto-populated by trigger */
@@ -165,6 +168,26 @@ export const chunks = pgTable(
       table.ordinal,
     ),
     hashIdx: index("chunks_hash_idx").on(table.hash),
+    // ⚠️ SOURCE-OF-TRUTH WARNING — DO NOT "fix" the diff by deleting indexes.
+    // ────────────────────────────────────────────────────────────────────────
+    // The two indexes that actually MAKE RETRIEVAL WORK are NOT declared here:
+    //   • chunks_embedding_hnsw_idx — HNSW, vector_cosine_ops (dense ANN search)
+    //   • chunks_tsv_idx            — GIN on `tsv`            (sparse full-text)
+    // Plus the `chunks_tsv_update` trigger + `chunks_tsv_trigger()` function
+    // that populate `tsv`.
+    //
+    // These three objects are OWNED BY `packages/db/drizzle/0000_init.sql`
+    // (lines ~100–122), because Drizzle cannot express HNSW opclass options or
+    // a plpgsql trigger. They are therefore INVISIBLE to Drizzle's model, so a
+    // `drizzle-kit generate` will diff them as "removed" and emit `DROP INDEX`.
+    // Dropping them throws NO error and breaks NO test — dense + sparse search
+    // just collapse to sequential scans and queries quietly get slow.
+    //
+    // DO NOT add these to the schema to "silence" the diff, and DO NOT apply a
+    // generated migration that drops them. The migration is the owner. The
+    // regression guard `assertRequiredIndexes()` (see required-indexes.ts,
+    // wired into api/mcp/worker startup) fails fast if either index ever goes
+    // missing — keep `REQUIRED_SEARCH_INDEXES` in sync with 0000_init.sql.
   }),
 );
 

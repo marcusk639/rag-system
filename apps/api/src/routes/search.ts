@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
+import { scopeFromRequest } from "./authz.js";
 
 const SearchBody = z.object({
   query: z.string().min(1).max(1000),
@@ -24,10 +25,14 @@ export async function registerSearchRoute(
 
   // POST /search — retrieval only (no LLM). Thin adapter: validate → service.
   typed.post("/search", { schema: { body: SearchBody } }, async (request) => {
+    // The service enforces the MANDATORY confidentiality boundary (scope) and
+    // the PII metadata allowlist; the route only resolves the principal's scope
+    // from the request and delegates.
     const results = await searchDocuments(
       deps,
       request.body,
       config.retrieval.defaultTopK,
+      scopeFromRequest(request),
     );
     return { results };
   });

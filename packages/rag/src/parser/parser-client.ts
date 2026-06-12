@@ -1,6 +1,6 @@
 import { request } from "undici";
 import type { ParsedDocument, Parser } from "@rag/core";
-import { ParserError } from "@rag/core";
+import { ParserError, ParsedDocumentSchema } from "@rag/core";
 
 /**
  * Client for the Python parser sidecar. Wraps the HTTP boundary so the rest
@@ -45,12 +45,20 @@ export class HttpParserClient implements Parser {
       );
     }
 
-    const json = (await response.body.json()) as ParsedDocument;
+    const raw = await response.body.json();
+    const result = ParsedDocumentSchema.safeParse(raw);
+    if (!result.success) {
+      throw new ParserError(
+        `Parser sidecar returned a malformed response: ${result.error.message}`,
+        result.error,
+      );
+    }
+    const json = result.data;
     return {
       title: json.title,
       markdown: json.markdown,
-      tables: json.tables ?? [],
-      metadata: json.metadata ?? {},
+      tables: json.tables,
+      metadata: json.metadata,
     };
   }
 }

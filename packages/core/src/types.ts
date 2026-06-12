@@ -102,6 +102,53 @@ export type SheetType = NonNullable<ParsedTable["sheetType"]>;
  */
 export type ParsedTable = components["schemas"]["ParsedTable"];
 
+/**
+ * Runtime validator for the parser sidecar's `/parse` response.
+ *
+ * The TYPES above are the single source of truth (generated from the parser's
+ * Pydantic models). This Zod schema is a deliberately SEPARATE runtime guard:
+ * `HttpParserClient.parse()` validates the sidecar JSON through it instead of an
+ * unchecked `as ParsedDocument` cast, so a malformed response (parser/version
+ * skew, proxy mangling, a parser bug) fails loudly at the boundary instead of
+ * silently corrupting downstream chunks. The parser runs as a separate,
+ * independently-deployed container, so this boundary is a real trust boundary.
+ *
+ * The shape mirrors the parser's Pydantic defaults exactly: `_CamelModel`
+ * serializes camelCase, and list/int fields carry defaults (so they are present
+ * rather than missing). The `_assertParsedDocAssignable` check below fails the
+ * build if this validator ever drifts from the generated contract.
+ */
+const ParsedTableSchema = z.object({
+  markdown: z.string(),
+  caption: z.string().nullish(),
+  sheetName: z.string().nullish(),
+  sheetType: z
+    .enum(["tabular", "narrative", "financial_model", "freeform"])
+    .nullish(),
+  headers: z.array(z.string()).default([]),
+  rows: z.array(z.array(z.string())).default([]),
+  rowCount: z.number().int().nonnegative().default(0),
+  columnCount: z.number().int().nonnegative().default(0),
+});
+
+export const ParsedDocumentSchema = z.object({
+  title: z.string(),
+  markdown: z.string(),
+  tables: z.array(ParsedTableSchema).default([]),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+/**
+ * Compile-time drift guard: the runtime validator's OUTPUT must stay assignable
+ * to the generated contract. If the parser's Pydantic models change and the
+ * generated types are regenerated, this line stops compiling until the schema
+ * above is updated to match — keeping the single source of truth honest.
+ */
+type _ParsedDocAssignable =
+  z.infer<typeof ParsedDocumentSchema> extends ParsedDocument ? true : never;
+const _assertParsedDocAssignable: _ParsedDocAssignable = true;
+void _assertParsedDocAssignable;
+
 // ============================================================================
 // Chunk — a slice of a document ready to embed
 // ============================================================================

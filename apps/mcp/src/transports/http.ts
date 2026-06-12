@@ -8,6 +8,13 @@ import express, {
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  DENY_ALL_SCOPE,
+  principalToScope,
+  resolvePrincipal,
+  type AuthorizationScope,
+  type ScopedPrincipalConfig,
+} from "@rag/core";
 import type { Logger } from "pino";
 
 /**
@@ -20,16 +27,43 @@ import type { Logger } from "pino";
  * per-connection request state on the server object. `buildServer` is called
  * lazily on the initialize request.
  */
+/**
+ * Normalize the `mcp-session-id` header. Node/Express types a header as
+ * `string | string[] | undefined`; a repeated header arrives as `string[]`.
+ * Casting it `as string | undefined` silently drops that case, so a duplicated
+ * header would make every request look like a brand-new session. Collapse to
+ * the first value instead.
+ */
+export function normalizeSessionId(
+  raw: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
 export interface HttpTransportOptions {
-  buildServer: () => McpServer;
+  /**
+   * Build a session's McpServer for the given authorization scope. Called once
+   * per MCP session with the scope resolved from THAT session's bearer token,
+   * so each session's search/ask tools are confined to the token's allowed
+   * sources. See @rag/core access-control.
+   */
+  buildServer: (scope: AuthorizationScope) => McpServer;
   port: number;
   logger: Logger;
   /**
-   * Bearer tokens authorized to call /mcp. REQUIRED — the MCP HTTP transport
-   * exposes search, ask, list_sources, trigger_sync; running without auth
-   * lets anyone on the network exfiltrate the entire indexed corpus.
+   * Plain (unscoped) ADMIN bearer tokens authorized to call /mcp. REQUIRED —
+   * the MCP HTTP transport exposes search, ask, list_sources, trigger_sync;
+   * running without auth lets anyone on the network exfiltrate the entire
+   * indexed corpus. A token here resolves to an all-access principal.
    */
   tokens: readonly string[];
+  /**
+   * Scoped principals (opt-in confidentiality boundary). A token here is also
+   * a valid bearer token but is ENFORCED to its `allowedSourceIds` in
+   * retrieval. Scoped wins over `tokens` if a string appears in both (least
+   * privilege). Empty by default.
+   */
+  principals?: readonly ScopedPrincipalConfig[];
   /**
    * Allowed Origin values for CORS. If a browser-based caller sends an
    * Origin header, it must match one of these. Mitigates DNS rebinding
@@ -40,17 +74,41 @@ export interface HttpTransportOptions {
 }
 
 export async function startHttp(opts: HttpTransportOptions): Promise<void> {
-  const { buildServer, port, logger, tokens, allowedOrigins = [] } = opts;
+  const {
+    buildServer,
+    port,
+    logger,
+    tokens,
+    principals = [],
+    allowedOrigins = [],
+  } = opts;
 
-  if (tokens.length === 0) {
+  if (tokens.length === 0 && principals.length === 0) {
     throw new Error(
       "MCP HTTP transport requires at least one bearer token — refusing to start without auth",
     );
   }
 
-  // Shared constant-time verifier (@rag/core/auth) — same implementation the
-  // HTTP API uses. Tokens are pre-hashed once inside the factory.
-  const verifyToken = createTokenVerifier(tokens);
+  // Every valid token (admin OR scoped) feeds the shared constant-time verifier
+  // (@rag/core/auth) — the same implementation the HTTP API uses. The allow-list
+  // (admin tokens + scoped-principal tokens) is pre-hashed once inside the
+  // factory; identity resolution to admin-vs-scoped happens in scopeForRequest.
+  const verifyToken = createTokenVerifier([
+    ...tokens,
+    ...principals.map((p) => p.token),
+  ]);
+
+  // Resolve a request's verified bearer token to its retrieval authorization
+  // scope. The `guard` middleware already proved the token is valid; here we
+  // map it to admin (plain token) vs. scoped (API_PRINCIPALS). Fail CLOSED to
+  // an empty scope (zero results) if resolution somehow misses — never fall
+  // back to admin/all for an unrecognized token.
+  const scopeForRequest = (req: Request): AuthorizationScope => {
+    const auth = req.headers.authorization;
+    const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    const principal = resolvePrincipal(token, tokens, principals);
+    return principal ? principalToScope(principal) : DENY_ALL_SCOPE;
+  };
 
   const originSet = new Set(allowedOrigins);
 
@@ -98,7 +156,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   app.post("/mcp", async (req: Request, res: Response) => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const sessionId = normalizeSessionId(req.headers["mcp-session-id"]);
     try {
       let transport: StreamableHTTPServerTransport | undefined = sessionId
         ? transports.get(sessionId)
@@ -150,7 +208,10 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
           }
         };
 
-        const server = buildServer();
+        // Resolve THIS session's authorization scope from its initialize
+        // request's token, and bind it to the per-session server so all of the
+        // session's search/ask calls are confined to the token's sources.
+        const server = buildServer(scopeForRequest(req));
         await server.connect(transport);
       }
 
@@ -171,7 +232,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     req: Request,
     res: Response,
   ): StreamableHTTPServerTransport | null => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const sessionId = normalizeSessionId(req.headers["mcp-session-id"]);
     if (!sessionId) {
       res.status(400).send("Missing mcp-session-id header");
       return null;

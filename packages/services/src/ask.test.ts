@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
+import { ADMIN_SCOPE } from "@rag/core";
 import { askQuestion } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
@@ -42,7 +43,7 @@ describe("askQuestion", () => {
     const deps = makeDeps({ generator: null, search });
 
     await expect(
-      askQuestion(deps, { question: "q" }, DEFAULT_TOP_K),
+      askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE),
     ).rejects.toBeInstanceOf(GenerationNotConfiguredError);
     expect(search).not.toHaveBeenCalled();
   });
@@ -55,7 +56,12 @@ describe("askQuestion", () => {
       search,
     });
 
-    const result = await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K);
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
 
     expect(result.answer).toMatch(/do not contain enough information/i);
     expect(result.citations).toEqual([]);
@@ -81,11 +87,18 @@ describe("askQuestion", () => {
       search,
     });
 
-    const result = await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K);
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
 
-    // topK omitted → falls back to defaultTopK at the retriever.
+    // topK omitted → falls back to defaultTopK at the retriever; scope is the
+    // mandatory second argument.
     expect(search).toHaveBeenCalledWith(
       expect.objectContaining({ query: "q", topK: DEFAULT_TOP_K }),
+      ADMIN_SCOPE,
     );
     expect(answer).toHaveBeenCalledWith("q", retrieved);
     expect(result).toEqual({ answer: "grounded", citations, retrieved });
@@ -103,13 +116,17 @@ describe("askQuestion", () => {
       deps,
       { question: "q", topK: 3, sourceIds: ["s1"], filter: { tag: ["x"] } },
       DEFAULT_TOP_K,
+      ADMIN_SCOPE,
     );
 
-    expect(search).toHaveBeenCalledWith({
-      query: "q",
-      topK: 3,
-      sourceIds: ["s1"],
-      filter: { tag: ["x"] },
-    });
+    expect(search).toHaveBeenCalledWith(
+      {
+        query: "q",
+        topK: 3,
+        sourceIds: ["s1"],
+        filter: { tag: ["x"] },
+      },
+      ADMIN_SCOPE,
+    );
   });
 });

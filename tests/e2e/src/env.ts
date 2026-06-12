@@ -45,6 +45,9 @@ export function makeTestConfig(): Config {
       host: "127.0.0.1",
       port: 0, // never bound; we use Fastify inject()
       tokens: [TEST_API_TOKEN],
+      // No scoped principals in the base test config — the test token is an
+      // admin (all-access) principal, preserving pre-ACL retrieval behavior.
+      principals: [],
     },
     mcp: { transport: "stdio", httpPort: 3001 },
     worker: { concurrency: 1, pollIntervalMs: 2_000 },

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { encode } from "gpt-tokenizer";
 import type { Chunk, Chunker, ParsedDocument } from "@rag/core";
+import { clampToTokenLimit } from "./token-clamp.js";
 
 /**
  * Markdown-aware recursive chunker.
@@ -33,7 +34,10 @@ export class MarkdownChunker implements Chunker {
 
     for (const section of sections) {
       const sectionChunks = this.chunkSection(section);
-      for (const text of sectionChunks) {
+      for (const rawText of sectionChunks) {
+        // Last-resort safety net: never let a chunk past the hard embedding
+        // token cap (see token-clamp.ts). Truncation is token-aware.
+        const text = clampToTokenLimit(rawText);
         const tokenCount = countTokens(text);
         chunks.push({
           hash: sha256(`${section.headingPath.join("/")}::${text}`),

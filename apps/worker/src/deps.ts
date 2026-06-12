@@ -11,6 +11,7 @@ import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 // This import (and the `makeConnector` adapter below) is the single point to
 // reconcile if the connectors package signature changes.
 import { createConnector } from "@rag/connectors";
+import { SourceKind } from "@rag/core";
 import type { Logger } from "pino";
 
 /**
@@ -71,9 +72,11 @@ export async function buildDeps(
     createConnector(
       {
         id: source.id,
-        // SourceKind narrows to the enum in core; we trust the DB to only
-        // store valid values because the column is a Postgres enum.
-        kind: source.kind as never,
+        // Validate at the boundary instead of trusting the DB blindly: a new
+        // SourceKind that the connector factory can't build must fail loudly
+        // here, not crash deep inside `createConnector`. `.parse` throws a Zod
+        // error for any value outside the enum.
+        kind: SourceKind.parse(source.kind),
         config: source.config,
       },
       { microsoft: config.microsoft, google: config.google },

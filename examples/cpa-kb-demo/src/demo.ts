@@ -32,6 +32,7 @@ import pino from "pino";
 import { CompositeChunker, HttpParserClient, Retriever } from "@rag/rag";
 import { runIngestion } from "@rag/ingestion";
 import { createDb, createSource } from "@rag/db";
+import { ADMIN_SCOPE } from "@rag/core";
 import type {
   Connector,
   ConnectorListOptions,
@@ -269,7 +270,11 @@ async function main(): Promise<void> {
     let totalScored = 0;
 
     for (const dq of DEMO_QUERIES) {
-      const hits = await retriever.search({ query: dq.q, topK: 3 });
+      // Local single-user demo: admin/all-access scope (no token boundary).
+      const hits = await retriever.search(
+        { query: dq.q, topK: 3 },
+        ADMIN_SCOPE,
+      );
       const verdict = printQueryResult(dq, hits);
       totalScored++;
       if (verdict.top1Correct) top1Correct++;

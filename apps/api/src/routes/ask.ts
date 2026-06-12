@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
+import { scopeFromRequest } from "./authz.js";
 
 const AskBody = z.object({
   question: z.string().min(1).max(2000),
@@ -24,8 +25,14 @@ export async function registerAskRoute(
   // POST /ask — retrieval + generation. Thin adapter: validate → service.
   // The generator-null guard and empty-results short-circuit live in
   // `askQuestion`; GenerationNotConfiguredError maps to 503 via the central
-  // error handler (STATUS_BY_CODE).
+  // error handler (STATUS_BY_CODE). The service enforces the confidentiality
+  // scope and PII allowlist; the route only resolves the principal's scope.
   typed.post("/ask", { schema: { body: AskBody } }, async (request) => {
-    return askQuestion(deps, request.body, config.retrieval.defaultTopK);
+    return askQuestion(
+      deps,
+      request.body,
+      config.retrieval.defaultTopK,
+      scopeFromRequest(request),
+    );
   });
 }

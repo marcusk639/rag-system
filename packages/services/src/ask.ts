@@ -1,5 +1,6 @@
 import type { GenerationResult, Generator } from "@rag/rag";
-import type { RetrievalResult } from "@rag/core";
+import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
+import { sanitizeRetrievalResults } from "@rag/core";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
@@ -23,7 +24,7 @@ export interface AskInput {
 export interface AskResult {
   answer: string;
   citations: GenerationResult["citations"];
-  retrieved: RetrievalResult[];
+  retrieved: SanitizedRetrievalResult[];
 }
 
 const EMPTY_ANSWER =
@@ -36,36 +37,51 @@ const EMPTY_ANSWER =
  * - Throws `GenerationNotConfiguredError` when no generator is configured.
  * - Short-circuits with a fixed answer when retrieval returns nothing (the
  *   model would otherwise hallucinate).
+ *
+ * `scope` is the MANDATORY confidentiality boundary (P1) — the same enforced
+ * source-id scope applied to /search. Generation runs against the FULL
+ * retrieved results (it only ever emits answer text + citations), but the
+ * `retrieved` array returned to the caller is passed through the metadata
+ * allowlist (P2) so non-exposable metadata never leaves the service.
  */
 export async function askQuestion(
   deps: ServiceDeps,
   input: AskInput,
   defaultTopK: number,
+  scope: AuthorizationScope,
 ): Promise<AskResult> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
   }
   // Past this seam the generator is proven present; the core logic runs on the
   // narrowed `AskDeps` so it never has to re-check (or `!`-assert) the nullable.
-  return ask({ ...deps, generator: deps.generator }, input, defaultTopK);
+  return ask({ ...deps, generator: deps.generator }, input, defaultTopK, scope);
 }
 
 async function ask(
   deps: AskDeps,
   input: AskInput,
   defaultTopK: number,
+  scope: AuthorizationScope,
 ): Promise<AskResult> {
-  const retrieved = await deps.retriever.search({
-    query: input.question,
-    topK: input.topK ?? defaultTopK,
-    ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
-    ...(input.filter ? { filter: input.filter } : {}),
-  });
+  const retrieved = await deps.retriever.search(
+    {
+      query: input.question,
+      topK: input.topK ?? defaultTopK,
+      ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+      ...(input.filter ? { filter: input.filter } : {}),
+    },
+    scope,
+  );
 
   if (retrieved.length === 0) {
-    return { answer: EMPTY_ANSWER, citations: [], retrieved };
+    return { answer: EMPTY_ANSWER, citations: [], retrieved: [] };
   }
 
   const result = await deps.generator.answer(input.question, retrieved);
-  return { answer: result.answer, citations: result.citations, retrieved };
+  return {
+    answer: result.answer,
+    citations: result.citations,
+    retrieved: sanitizeRetrievalResults(retrieved),
+  };
 }

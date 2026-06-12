@@ -1,4 +1,9 @@
-import { loadConfig } from "@rag/core";
+import { ADMIN_SCOPE, loadConfig } from "@rag/core";
+import {
+  assertEmbeddingDimensions,
+  assertRequiredIndexes,
+  createIndexExistenceRunner,
+} from "@rag/db";
 import pino, { type Logger } from "pino";
 import { buildServer } from "./server.js";
 import { buildDeps } from "./deps.js";
@@ -16,6 +21,9 @@ import { startHttp } from "./transports/http.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  // Fail fast before building deps / embedding any retrieval query: the
+  // configured provider's vector size must match the chunks.embedding column.
+  assertEmbeddingDimensions(config.embedding.dimensions);
 
   const logger: Logger =
     config.mcp.transport === "stdio"
@@ -26,6 +34,13 @@ async function main(): Promise<void> {
       : pino({ level: process.env.LOG_LEVEL ?? "info" });
 
   const deps = await buildDeps(config, logger);
+
+  // Fail fast before serving any tool calls: the HNSW + GIN search indexes
+  // (owned by 0000_init.sql, invisible to Drizzle's model) must exist. The
+  // search/ask tools query the corpus, and a stray regenerate that dropped
+  // these indexes would silently degrade retrieval to sequential scans with no
+  // error — so refuse to start instead.
+  await assertRequiredIndexes(createIndexExistenceRunner(deps.db));
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Shutting down MCP server");
@@ -40,9 +55,18 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
   if (config.mcp.transport === "stdio") {
-    const server = buildServer({ deps, logger });
+    // EXPLICIT ADMIN DECISION: the stdio transport is a local, single-user,
+    // trusted channel — the client SPAWNS this process over stdin/stdout and
+    // there is no token to scope against. We therefore grant the stdio session
+    // an ADMIN / all-access retrieval scope (unrestricted). This is the only
+    // sanctioned unscoped path; the network-facing HTTP transport always
+    // resolves a per-token scope. If stdio ever becomes multi-tenant or
+    // network-exposed, this MUST be replaced with a real principal.
+    const server = buildServer({ deps, logger, scope: ADMIN_SCOPE });
     await startStdio(server);
-    logger.info("MCP stdio server ready");
+    logger.info(
+      "MCP stdio server ready (admin/all-access scope — trusted local channel)",
+    );
     return;
   }
 
@@ -56,10 +80,14 @@ async function main(): Promise<void> {
     .filter(Boolean);
 
   await startHttp({
-    buildServer: () => buildServer({ deps, logger }),
+    // Per-session: the transport resolves the session token to a scope and
+    // hands it in here, confining that session's search/ask tools to the
+    // token's allowed sources.
+    buildServer: (scope) => buildServer({ deps, logger, scope }),
     port: config.mcp.httpPort,
     logger,
     tokens: config.api.tokens,
+    principals: config.api.principals,
     allowedOrigins,
   });
   logger.info(

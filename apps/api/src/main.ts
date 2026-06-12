@@ -1,5 +1,10 @@
 import pino from "pino";
 import { loadConfig } from "@rag/core";
+import {
+  assertEmbeddingDimensions,
+  assertRequiredIndexes,
+  createIndexExistenceRunner,
+} from "@rag/db";
 import { buildDeps } from "./deps.js";
 import { buildServer } from "./server.js";
 
@@ -10,12 +15,22 @@ import { buildServer } from "./server.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  // Fail fast before building deps / embedding the first /ask query: the
+  // configured provider's vector size must match the chunks.embedding column.
+  assertEmbeddingDimensions(config.embedding.dimensions);
   const logger = pino({
     level: process.env.LOG_LEVEL ?? "info",
     base: { service: "rag-api" },
   });
 
   const deps = await buildDeps(config, logger);
+
+  // Fail fast before serving traffic: the HNSW + GIN search indexes (owned by
+  // 0000_init.sql, invisible to Drizzle's model) must exist. If a stray
+  // regenerate dropped them, /ask + /search would silently degrade to
+  // sequential scans with no error — so refuse to start instead.
+  await assertRequiredIndexes(createIndexExistenceRunner(deps.db));
+
   const app = await buildServer({ config, logger, deps });
 
   await app.listen({ host: config.api.host, port: config.api.port });
