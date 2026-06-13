@@ -48,6 +48,7 @@ export async function buildTestApi(opts: {
     queue: queueStub,
     retriever,
     generator: opts.generator ?? null,
+    logger,
     close: async () => undefined, // owned by the spec, not by the harness
   };
 

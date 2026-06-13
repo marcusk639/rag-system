@@ -303,13 +303,13 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Fix first — latent breakage & money traps
 
-| Item                                                                              | Sev | Effort |
-| --------------------------------------------------------------------------------- | --- | ------ |
-| C1 — index-drift guard + Drizzle ownership decision                               | 🔴  | S–M    |
-| H3 — startup embedding-dimension assertion                                        | 🟠  | S      |
-| H4 — boundary validation (`ParsedDocumentSchema`, `SourceKind.parse`, session-id) | 🟠  | S–M    |
-| M-N1 — hard token clamp before embedding                                          | 🟡  | S      |
-| C2 — parser shared-secret auth (before any networked deploy)                      | 🔴  | M      |
+| Item                                                                              | Sev | Effort | Status                              |
+| --------------------------------------------------------------------------------- | --- | ------ | ----------------------------------- |
+| C1 — index-drift guard + Drizzle ownership decision                               | 🔴  | S–M    | ✅ done (`required-indexes.ts`)     |
+| H3 — startup embedding-dimension assertion                                        | 🟠  | S      | ✅ done (`embedding-dimensions.ts`) |
+| H4 — boundary validation (`ParsedDocumentSchema`, `SourceKind.parse`, session-id) | 🟠  | S–M    | ✅ done (all three casts)           |
+| M-N1 — hard token clamp before embedding                                          | 🟡  | S      | ✅ done (`token-clamp.ts`)          |
+| C2 — parser shared-secret auth (before any networked deploy)                      | 🔴  | M      | OPEN (needs approval)               |
 
 ### Highest-ROI RAG-quality upgrades
 
@@ -350,12 +350,12 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### CPA-deployment blockers — close before ingesting real client data (§9)
 
-| Item                                                                  | Sev | Effort              |
-| --------------------------------------------------------------------- | --- | ------------------- |
-| P3 — LLM-provider disclosure decision (§7216): agreement or self-host | 🔴  | M (mostly decision) |
-| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L                 |
-| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S                   |
-| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M                   |
+| Item                                                                  | Sev | Effort              | Status                                                          |
+| --------------------------------------------------------------------- | --- | ------------------- | --------------------------------------------------------------- |
+| P3 — LLM-provider disclosure decision (§7216): agreement or self-host | 🔴  | M (mostly decision) | OPEN (decision)                                                 |
+| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L                 | ✅ done (`access-control.ts`, scope enforced in `hybridSearch`) |
+| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S                   | ✅ done (`metadata-policy.ts`)                                  |
+| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M                   | OPEN                                                            |
 
 ### Ingestion operator-experience (§10) — needed for a non-developer operator
 
@@ -396,17 +396,17 @@ A 4-agent review (code / tests / error-handling / type-design) of the full PR ra
 4. ✅ **Worker marks row `failed` on deleted source** — `apps/worker/src/handlers/sync-source.ts`. The `source not found` branch now calls `updateIngestionJob(db, job.data.ingestionId, { status: "failed", completedAt, error: "source not found" })` before returning, so the row no longer sits `pending` forever once pg-boss marks the job completed.
 5. ✅ **`askQuestion` narrowed to non-null-generator `AskDeps`** — `packages/services/src/ask.ts`. Added exported `AskDeps = Omit<ServiceDeps,"generator"> & { generator: Generator }`; `askQuestion` does the single null-check/throw at the seam then delegates to an internal `ask(deps: AskDeps, …)` so the core path never re-checks the nullable. Added `ask.test.ts` (4 branch tests): no-generator throws + retriever untouched; empty retrieval → fixed answer, generator not invoked; happy path threads output with `topK` fallback to `defaultTopK`; explicit `topK`/`sourceIds`/`filter` forwarded.
 
-**Moderate (low risk, more files) — OPEN:**
+**Moderate (low risk, more files) — ✅ ALL RESOLVED (2026-06-13):**
 
-6. **Runtime metadata validation at the parser boundary** — `packages/rag/src/parser/parser-client.ts` `parse()` returns `json.metadata` unvalidated; the generated type is only a compile-time claim about a wire payload. The pipeline (`packages/ingestion/src/pipeline.ts:154`) merges `parsed.metadata` over `source.metadata` (a `DocumentMetadata`) and writes the union to the documents row, but `RetrievalResult.document.metadata` (`packages/core/src/types.ts:170`) still promises `DocumentMetadata` — an unchecked structural gap. Add a `z.record(z.unknown())`-or-tighter parse at the parser-client seam (repo rule: validate at system boundaries), and type the pipeline merge target as `DocumentMetadata & Record<string, unknown>` so the contract retrieval relies on stays honest.
-7. **Unify `RetrievalQuery.filter` with `filterSchema`** — `packages/core/src/types.ts:147` types `filter?` as the _unbounded_ `Record<string, string | string[]>`, disconnected from the bounded `filterSchema`. The cap only applies if every call site remembers to `.parse()`. Derive the core type from the schema (`z.infer<typeof filterSchema>`) so the bounded shape is the only representable one past the HTTP boundary. Verify call sites in `apps/api/src/routes/` and `apps/mcp/src/tools/` still typecheck.
-8. **`createTokenVerifier` empty-tokens guard** — `packages/core/src/auth.ts`. An accidentally-empty `tokens` array yields a verifier that rejects everything (safe) but silently — consider asserting `tokens.length > 0` at construction so a misconfig fails loud rather than locking everyone out quietly. (Judgment call; confirm against how runtime builds the token set.)
+6. ✅ **Runtime metadata validation at the parser boundary** — **superseded by H4**: `parser-client.ts` now runs the full wire payload through `ParsedDocumentSchema.safeParse` (stronger than the originally-proposed plain-object guard), so `parsed.metadata` is structurally validated at the seam. The pipeline merge target (`pipeline.ts:154`) is now explicitly typed `DocumentMetadata & Record<string, unknown>` so the stored shape is honest about both halves.
+7. ✅ **Unify `RetrievalQuery.filter` with `filterSchema`** — `packages/core/src/types.ts` `filter?` is now `z.infer<typeof filterSchema>` (type-only import of `filterSchema` from `./validation.js`), so the bounded DoS-capped shape is the only representable one past the HTTP/MCP boundary. All call sites in `apps/api/src/routes/` and `apps/mcp/src/tools/` still typecheck.
+8. ✅ **`createTokenVerifier` empty-tokens guard** — `packages/core/src/auth.ts` now throws at construction on an empty `tokens` array (fails loud instead of silently rejecting every request). Defense-in-depth: `config.ts` already enforces `api.tokens` `.min(1)` and the MCP HTTP transport hard-throws on empty before constructing. `auth.test.ts` updated to assert the throw.
 
 **Risky / pre-existing (tracking only — NOT a PR #3 regression):**
 
 9. **`paginate` mid-page truncation** — when a single upstream page yields more documents than `remaining`, each connector's `fetchPage` advances the cursor past the _entire_ page (e.g. `outlook/index.ts` returns `cursor:{link:nextLink}`; `sharepoint/index.ts:154` sets `cursor.current={next:nextLink}`), so the unconsumed tail is skipped next call. Identical on `main` — the refactor only centralized it. Proper fix threads an intra-page offset through all 4 connectors' cursors (high regression surface). ~75% likely a real latent data-loss bug; needs the eval harness (§12) to validate any fix. Either fix deliberately with tests or document the "`fetchPage` must not over-fetch" contract loudly in `paginate.ts`.
 10. **gmail/gdrive delta-with-null-token silently triggers full re-scan** — `gmail/index.ts:211-218`, `gdrive/index.ts:214-219` log at `warn` and reseed an initial full re-ingest when a delta cursor lacks its `historyId`/`pageToken`. Asymmetric with the loud failure for _malformed_ cursors. Consider rejecting "delta mode + null token" in each connector's `normalize` (→ `ValidationError`), or at minimum log at `error`/emit a metric since an unplanned full re-scan is an operational event. Also note gmail does not special-case the 404 "startHistoryId too old" → it becomes a hard job failure that retries 3× rather than self-healing to initial.
-11. **No server-side logging of real `triggerSync` failures** — `ServiceDeps` carries no logger, so a genuine (non-dedupe) enqueue failure routed via the MCP adapter (`apps/mcp/src/tools/trigger-sync.ts:64`) becomes a tool-result string with no server-side capture. Add a logger to `ServiceDeps` and log non-dedupe failures before rethrow.
+11. ✅ **Server-side logging of real `triggerSync` failures** (2026-06-13) — `ServiceDeps` now carries a minimal structural `ServiceLogger` (`error`/`warn`/`info`; pino's `Logger` satisfies it, so no `pino` dependency leaks into `@rag/services` — mirrors the `Queue`↔`pg-boss` decoupling). `triggerSync` logs a genuine (non-dedupe) enqueue failure via `deps.logger.error({ err, sourceId, ingestionId, mode }, "sync enqueue failed")` before cleanup/rethrow, so it's captured even when a transport reduces the thrown error to a string. `SyncAlreadyRunningError` stays out of the error log. API runtime `Deps` + the e2e `buildTestApi` helper now thread `logger` through (MCP `Deps` already did). `sources.test.ts` gains 2 tests (genuine failure logs full context; dedupe does not log).
 
 ## 12. A note on measuring any of this
 

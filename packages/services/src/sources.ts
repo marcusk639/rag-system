@@ -57,16 +57,37 @@ export async function triggerSync(
       ingestionId: ingestionRow.id,
     });
   } catch (err) {
-    // The row we just created is for a sync that will never run. A duplicate
-    // rejected by pg-boss's singleton guard leaves no real attempt, so delete
-    // the row (the in-flight sync owns its own). Any other enqueue failure is
-    // a genuine attempt that failed — mark it `failed` so it stays auditable
-    // rather than stuck `pending`. Cleanup must never mask the original error.
+    const isDuplicate = err instanceof SyncAlreadyRunningError;
+
+    // A duplicate is expected and benign (the in-flight sync is doing the work),
+    // so it stays out of the error log. A genuine enqueue failure must be
+    // captured server-side here: a transport may reduce the thrown error to a
+    // user-facing string (the `trigger_sync` MCP tool does), making this the
+    // only guaranteed point of capture.
+    if (!isDuplicate) {
+      deps.logger.error(
+        {
+          err,
+          sourceId: input.sourceId,
+          ingestionId: ingestionRow.id,
+          mode: input.mode,
+        },
+        "sync enqueue failed",
+      );
+    }
+
+    // The row we just created is for a sync that will never run. A rejected
+    // duplicate leaves no real attempt, so delete the row (the in-flight sync
+    // owns its own). Any other enqueue failure is a genuine attempt that
+    // failed — mark it `failed` so it stays auditable rather than stuck
+    // `pending`. Cleanup must never mask the original error.
     try {
-      if (err instanceof SyncAlreadyRunningError) {
+      if (isDuplicate) {
         await deleteIngestionJob(deps.db, ingestionRow.id);
       } else {
-        await updateIngestionJob(deps.db, ingestionRow.id, { status: "failed" });
+        await updateIngestionJob(deps.db, ingestionRow.id, {
+          status: "failed",
+        });
       }
     } catch {
       // Swallow cleanup failure; the original enqueue error is what matters.

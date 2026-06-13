@@ -16,6 +16,15 @@ import { createHash, timingSafeEqual } from "node:crypto";
 export function createTokenVerifier(
   tokens: readonly string[],
 ): (presented: string) => boolean {
+  // An empty set yields a verifier that rejects everything — safe, but it would
+  // lock out all callers silently. Fail loud so a misconfigured token list is a
+  // startup error, not a mysterious 401 storm.
+  if (tokens.length === 0) {
+    throw new Error(
+      "createTokenVerifier requires at least one token; refusing to build a verifier that rejects every request",
+    );
+  }
+
   const hashedTokens = tokens.map((t) =>
     createHash("sha256").update(t).digest(),
   );

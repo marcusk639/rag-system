@@ -20,9 +20,9 @@ describe("createTokenVerifier", () => {
     expect(verify("secret-token ")).toBe(false);
   });
 
-  it("rejects everything when no tokens are configured", () => {
-    const verify = createTokenVerifier([]);
-    expect(verify("anything")).toBe(false);
-    expect(verify("")).toBe(false);
+  it("throws at construction when no tokens are configured", () => {
+    // A reject-everything verifier would lock callers out silently; the factory
+    // fails loud instead so a misconfig surfaces at startup.
+    expect(() => createTokenVerifier([])).toThrow(/at least one token/);
   });
 });
