@@ -31,7 +31,8 @@ vi.mock("@rag/ingestion", () => ({
 const { triggerSync } = await import("./sources.js");
 import type { ServiceDeps } from "./deps.js";
 
-const deps = { db: {}, queue: {} } as unknown as ServiceDeps;
+const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+const deps = { db: {}, queue: {}, logger } as unknown as ServiceDeps;
 const input = { sourceId: "src-1", mode: "full" as const };
 
 beforeEach(() => {
@@ -78,6 +79,33 @@ describe("triggerSync", () => {
       status: "failed",
     });
     expect(deleteIngestionJob).not.toHaveBeenCalled();
+  });
+
+  it("logs a genuine enqueue failure server-side with full context", async () => {
+    const rejection = new Error("pg-boss connection lost");
+    enqueueSync.mockRejectedValue(rejection);
+
+    await expect(triggerSync(deps, input)).rejects.toBe(rejection);
+
+    // The failure is captured here because a transport (e.g. the trigger_sync
+    // MCP tool) may reduce the thrown error to a user-facing string.
+    expect(logger.error).toHaveBeenCalledWith(
+      { err: rejection, sourceId: "src-1", ingestionId: "ing-1", mode: "full" },
+      "sync enqueue failed",
+    );
+  });
+
+  it("does NOT log when the failure is just a deduped duplicate", async () => {
+    enqueueSync.mockRejectedValue(
+      new SyncAlreadyRunningError("already running"),
+    );
+
+    await expect(triggerSync(deps, input)).rejects.toBeInstanceOf(
+      SyncAlreadyRunningError,
+    );
+
+    // A duplicate is expected/benign — it stays out of the error log.
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("rethrows the original error even if cleanup fails", async () => {

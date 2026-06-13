@@ -5,6 +5,7 @@ import {
   EmbeddingError,
   type Chunker,
   type Connector,
+  type DocumentMetadata,
   type EmbeddingProvider,
   type Parser,
   type SourceDocument,
@@ -151,7 +152,11 @@ async function ingestOne(
     sourceModifiedAt: new Date(source.modifiedAt),
     contentHash,
     sizeBytes: source.content.byteLength,
-    metadata: { ...source.metadata, ...parsed.metadata },
+    // The connector's typed DocumentMetadata plus the parser's free-form bag
+    // (validated to a plain object at the parser-client boundary). Typed as the
+    // union so the stored shape is honest about both halves.
+    metadata: { ...source.metadata, ...parsed.metadata } as DocumentMetadata &
+      Record<string, unknown>,
     markdown: parsed.markdown,
   });
 
