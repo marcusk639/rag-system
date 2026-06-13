@@ -21,6 +21,7 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "e2e": "pnpm --filter @rag/e2e test",
+    "eval": "pnpm --filter @rag/e2e run eval",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
