@@ -41,6 +41,10 @@ services:
       PYTHONUNBUFFERED: "1"
       # MarkItDown can optionally call an LLM for image-to-text. Leave blank to disable.
       OPENAI_API_KEY: ""
+      # Optional shared-secret auth. When PARSER_SECRET is set on the host, the
+      # sidecar enforces a matching X-Parser-Token header and the Node services
+      # must be started with the same value. Empty by default (loopback-only).
+      PARSER_SECRET: ${PARSER_SECRET:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
       interval: 10s

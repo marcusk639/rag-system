@@ -20,7 +20,7 @@ export async function runOneIngestion(
   overrides?: { chunkSize?: number; chunkOverlap?: number },
 ): Promise<PipelineRunResult> {
   const logger = pino({ level: "silent" });
-  const parser = new HttpParserClient(env.parserUrl, 60_000);
+  const parser = new HttpParserClient(env.parserUrl, 60_000, env.parserSecret);
   const chunker = new CompositeChunker({
     markdown: {
       chunkSize: overrides?.chunkSize ?? 800,

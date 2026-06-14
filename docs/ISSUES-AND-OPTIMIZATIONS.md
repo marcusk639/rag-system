@@ -34,10 +34,16 @@ A consolidated, effort-ranked roadmap is at the end ([§11](#11-prioritized-road
 2. Add them to a `drizzle-kit` ignore list and put a loud comment in `schema.ts` that `0000_init.sql` owns them.
    **Add a regression guard regardless:** a startup/CI assertion that `chunks_embedding_hnsw_idx` and `chunks_tsv_idx` exist in `pg_indexes`. This is the cheapest insurance against the whole class of "index silently dropped" bugs.
 
-### 🔴 C2 — Python parser sidecar still has no authentication `[review:C2 — partially fixed]`
+### ✅ C2 — Python parser sidecar shared-secret authentication `[resolved 2026-06-13]`
 
-Port is now bound to `127.0.0.1` (good), but `POST /parse` (`services/parser-py/app/main.py:107`) accepts arbitrary binaries into MarkItDown/LibreOffice/Unstructured/Tesseract with no auth. Loopback binding is adequate for single-host dev; **any networked deployment (separate parser container/host, k8s) re-exposes it.**
-**Fix:** shared-secret header (`X-Parser-Token` from `PARSER_SECRET`) checked by FastAPI middleware; `HttpParserClient` (`packages/rag/src/parser/parser-client.ts`) sends it. Touches Python + Node client + env — needs explicit approval, hence still open.
+Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binaries into MarkItDown/LibreOffice/Unstructured/Tesseract with no auth. Loopback binding is adequate for single-host dev; **any networked deployment (separate parser container/host, k8s) re-exposed it.**
+**Fix shipped:** opt-in shared-secret auth keyed on `PARSER_SECRET`.
+
+- `require_parser_token` FastAPI dependency (`services/parser-py/app/main.py`) guards `/parse`: when `PARSER_SECRET` is set, every request must carry a matching `X-Parser-Token` header (constant-time `hmac.compare_digest`); when unset/blank, no auth is enforced (loopback-only dev). `/health` stays open for probes.
+- `HttpParserClient` (`packages/rag/src/parser/parser-client.ts`) takes an optional `secret` and sends the header when configured.
+- Threaded through `config.parser.secret` (`@rag/core` Zod schema ← `PARSER_SECRET`) into both construction sites (`apps/worker/src/deps.ts`, `tests/e2e/src/helpers/ingestion.ts`).
+- Wired into `env.example`, `docker/docker-compose.yml` (`PARSER_SECRET: ${PARSER_SECRET:-}`), and the e2e config.
+- Tests: 6 pytest cases (`services/parser-py/tests/test_auth.py`, run in-container) covering unset/blank-secret bypass, missing/wrong/correct token, and `/health` always-open; 3 vitest cases (`parser-client.test.ts`) asserting the client's header behavior. Dev-only test deps in `requirements-dev.txt`.
 
 ---
 
@@ -309,7 +315,7 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 | H3 — startup embedding-dimension assertion                                        | 🟠  | S      | ✅ done (`embedding-dimensions.ts`) |
 | H4 — boundary validation (`ParsedDocumentSchema`, `SourceKind.parse`, session-id) | 🟠  | S–M    | ✅ done (all three casts)           |
 | M-N1 — hard token clamp before embedding                                          | 🟡  | S      | ✅ done (`token-clamp.ts`)          |
-| C2 — parser shared-secret auth (before any networked deploy)                      | 🔴  | M      | OPEN (needs approval)               |
+| C2 — parser shared-secret auth (before any networked deploy)                      | 🔴  | M      | ✅ done (`require_parser_token`)    |
 
 ### Highest-ROI RAG-quality upgrades
 
