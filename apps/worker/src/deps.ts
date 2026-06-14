@@ -53,6 +53,7 @@ export async function buildDeps(
   const parser = new HttpParserClient(
     config.parser.url,
     config.parser.timeoutMs,
+    config.parser.secret,
   );
 
   const chunker = new CompositeChunker({

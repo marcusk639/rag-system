@@ -10,6 +10,12 @@ export class HttpParserClient implements Parser {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs: number = 60_000,
+    /**
+     * Optional shared secret. When set, every request carries it in the
+     * `X-Parser-Token` header so the sidecar can authenticate the caller.
+     * Leave undefined for single-host dev where the parser is loopback-bound.
+     */
+    private readonly secret?: string,
   ) {}
 
   async parse(input: {
@@ -20,13 +26,18 @@ export class HttpParserClient implements Parser {
     const boundary = `----rag-${Date.now().toString(36)}`;
     const body = buildMultipart(boundary, input);
 
+    const headers: Record<string, string> = {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    };
+    if (this.secret) {
+      headers["x-parser-token"] = this.secret;
+    }
+
     let response;
     try {
       response = await request(`${this.baseUrl}/parse`, {
         method: "POST",
-        headers: {
-          "content-type": `multipart/form-data; boundary=${boundary}`,
-        },
+        headers,
         body,
         bodyTimeout: this.timeoutMs,
         headersTimeout: this.timeoutMs,

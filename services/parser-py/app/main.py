@@ -29,6 +29,7 @@ Unstructured sources:      https://github.com/Unstructured-IO/unstructured
 from __future__ import annotations
 
 import csv as csvmod
+import hmac
 import io
 import logging
 import os
@@ -38,7 +39,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import magic
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from markitdown import MarkItDown
 from openpyxl import load_workbook
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,6 +105,31 @@ class ParsedDocument(_CamelModel):
 
 
 # ----------------------------------------------------------------------------
+# Authentication
+#
+# Opt-in shared-secret auth. The env var is read per-request (not cached at
+# import) so the value is easy to rotate and trivial to exercise in tests.
+# ----------------------------------------------------------------------------
+def require_parser_token(x_parser_token: str | None = Header(default=None)) -> None:
+    """
+    Guard /parse with a shared secret when PARSER_SECRET is configured.
+
+    When PARSER_SECRET is unset or empty, no auth is enforced — adequate only
+    for single-host dev where the sidecar is bound to loopback. When it is set,
+    every request must carry a matching `X-Parser-Token` header; the comparison
+    is constant-time to avoid leaking the secret through response timing.
+    """
+    secret = os.environ.get("PARSER_SECRET", "").strip()
+    if not secret:
+        return
+    # Starlette joins duplicate inbound headers with ", " (a proxy/LB can
+    # legitimately duplicate them), so accept the token if ANY value matches.
+    candidates = [v.strip() for v in (x_parser_token or "").split(",") if v.strip()]
+    if not any(hmac.compare_digest(c, secret) for c in candidates):
+        raise HTTPException(status_code=401, detail="invalid or missing X-Parser-Token")
+
+
+# ----------------------------------------------------------------------------
 # Endpoints
 # ----------------------------------------------------------------------------
 @app.get("/health")
@@ -116,6 +142,7 @@ async def parse(
     file: UploadFile = File(...),
     filename: str | None = Form(None),
     mime_type: str | None = Form(None),
+    _auth: None = Depends(require_parser_token),
 ) -> ParsedDocument:
     """
     Convert any supported document to clean markdown + structured metadata.

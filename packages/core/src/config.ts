@@ -20,6 +20,10 @@ export const Config = z.object({
   parser: z.object({
     url: z.string().url(),
     timeoutMs: z.number().int().positive().default(60_000),
+    // Opt-in shared secret. When set, the sidecar requires a matching
+    // X-Parser-Token header and the client sends it. Undefined = no auth
+    // (acceptable only for loopback-bound single-host dev).
+    secret: z.string().min(1).optional(),
   }),
 
   api: z.object({
@@ -135,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     parser: {
       url: env.PARSER_URL ?? "http://localhost:8000",
       timeoutMs: Number(env.PARSER_TIMEOUT_MS ?? 60_000),
+      secret: env.PARSER_SECRET || undefined,
     },
     api: {
       host: env.API_HOST,

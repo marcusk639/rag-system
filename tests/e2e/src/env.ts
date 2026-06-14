@@ -18,6 +18,10 @@ export const env = {
     process.env.E2E_PARSER_URL ??
     process.env.PARSER_URL ??
     "http://localhost:8000",
+  // `|| undefined` (not `??`) so a blank PARSER_SECRET normalizes to undefined,
+  // matching loadConfig and the schema's `.min(1).optional()` expectation.
+  parserSecret:
+    (process.env.E2E_PARSER_SECRET ?? process.env.PARSER_SECRET) || undefined,
   // Dedicated pg-boss schema so a leftover queue from `pnpm dev:worker` runs
   // doesn't surface jobs into the test suite.
   pgBossSchema: process.env.E2E_PGBOSS_SCHEMA ?? "pgboss_e2e",
@@ -40,6 +44,7 @@ export function makeTestConfig(): Config {
     parser: {
       url: env.parserUrl,
       timeoutMs: 60_000,
+      secret: env.parserSecret,
     },
     api: {
       host: "127.0.0.1",
