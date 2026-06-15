@@ -1,4 +1,5 @@
 import { ADMIN_SCOPE, loadConfig } from "@rag/core";
+import { buildAuthProvider } from "@rag/runtime";
 import {
   assertEmbeddingDimensions,
   assertRequiredIndexes,
@@ -80,14 +81,14 @@ async function main(): Promise<void> {
     .filter(Boolean);
 
   await startHttp({
-    // Per-session: the transport resolves the session token to a scope and
+    // Per-session: the transport resolves the session credential to a scope and
     // hands it in here, confining that session's search/ask tools to the
-    // token's allowed sources.
+    // credential's allowed sources. Same AuthProvider the HTTP API uses
+    // (static tokens, OIDC JWTs, or both — selected by AUTH_PROVIDER).
     buildServer: (scope) => buildServer({ deps, logger, scope }),
     port: config.mcp.httpPort,
     logger,
-    tokens: config.api.tokens,
-    principals: config.api.principals,
+    authProvider: buildAuthProvider(config, logger),
     allowedOrigins,
   });
   logger.info(

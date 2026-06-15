@@ -1,9 +1,4 @@
-import {
-  createTokenVerifier,
-  resolvePrincipal,
-  type Principal,
-  type ScopedPrincipalConfig,
-} from "@rag/core";
+import type { AuthProvider, Principal } from "@rag/core";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 /**
@@ -25,27 +20,21 @@ declare module "fastify" {
 }
 
 /**
- * Build a Fastify `onRequest` hook that enforces `Authorization: Bearer <token>`
- * against the configured token allow-list using the shared constant-time
- * verifier (@rag/core/auth), then resolves the token to a `Principal` and
- * decorates it onto the request.
+ * Build a Fastify `onRequest` hook that enforces `Authorization: Bearer
+ * <credential>` and resolves the credential to a `Principal` via the injected
+ * `AuthProvider`, decorating it onto the request.
  *
- * `tokens` are plain (unscoped) ADMIN tokens; `principals` are scoped tokens.
- * A token is valid if it is in EITHER list (both feed the shared constant-time
- * verifier). Identity resolution then maps it to admin vs. scoped — scoped wins
- * for least privilege. See @rag/core access-control for the policy.
+ * The provider is the single pluggable seam: a `StaticTokenAuthProvider`
+ * preserves the legacy admin/scoped-token behavior exactly, while a
+ * `CompositeAuthProvider` additionally accepts OIDC JWTs. The hook itself is
+ * transport-only and IdP-agnostic — it never inspects the credential's shape.
+ * Identity-to-scope mapping (admin vs. scoped, scoped wins for least privilege)
+ * lives inside the provider / @rag/core access-control.
+ *
+ * `authenticate` returning `null` is the fail-closed signal: respond 401 and
+ * never serve an unscoped request for an unrecognized credential.
  */
-export function createAuthHook(
-  tokens: readonly string[],
-  principals: readonly ScopedPrincipalConfig[] = [],
-) {
-  // Every valid token (admin OR scoped) feeds the shared constant-time verifier,
-  // which pre-hashes the allow-list once at startup.
-  const verifyToken = createTokenVerifier([
-    ...tokens,
-    ...principals.map((p) => p.token),
-  ]);
-
+export function createAuthHook(provider: AuthProvider) {
   return async function authHook(
     request: FastifyRequest,
     reply: FastifyReply,
@@ -63,22 +52,12 @@ export function createAuthHook(
       return;
     }
 
-    const token = header.slice("Bearer ".length).trim();
-    if (!verifyToken(token)) {
+    const credential = header.slice("Bearer ".length).trim();
+    const principal = await provider.authenticate(credential);
+    if (!principal) {
+      // Fail CLOSED — invalid/expired token or an unrecognized principal.
       await reply.code(401).send({
         error: { code: "UNAUTHORIZED", message: "Invalid bearer token" },
-      });
-      return;
-    }
-
-    // Token is valid — resolve identity. A plain `API_TOKENS` token => admin;
-    // a token in `principals` => scoped (and scoped wins if it's in both).
-    const principal = resolvePrincipal(token, tokens, principals);
-    if (!principal) {
-      // Defensive: verifyToken accepted it, so this should be unreachable. If
-      // the two lists ever drift, fail CLOSED rather than serving unscoped.
-      await reply.code(401).send({
-        error: { code: "UNAUTHORIZED", message: "Unrecognized principal" },
       });
       return;
     }

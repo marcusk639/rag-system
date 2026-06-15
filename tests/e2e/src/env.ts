@@ -55,6 +55,9 @@ export function makeTestConfig(): Config {
       principals: [],
     },
     mcp: { transport: "stdio", httpPort: 3001 },
+    // Static-token auth only — the test token resolves to an admin principal,
+    // matching the `tokens`/`principals` above. No OIDC in the e2e harness.
+    auth: { provider: "static-token" },
     worker: { concurrency: 1, pollIntervalMs: 2_000 },
     retrieval: {
       chunkSize: 800,

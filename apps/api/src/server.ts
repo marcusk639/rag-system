@@ -6,6 +6,7 @@ import {
 } from "fastify-type-provider-zod";
 import type { Logger } from "pino";
 import type { Config } from "@rag/core";
+import { buildAuthProvider } from "@rag/runtime";
 import { createAuthHook } from "./auth.js";
 import type { Deps } from "./deps.js";
 import { registerErrorHandler } from "./error-handler.js";
@@ -44,14 +45,13 @@ export async function buildServer(opts: {
   // Global error handler — must register BEFORE routes so it catches their throws.
   registerErrorHandler(app);
 
-  // Bearer-token auth on every route except /health and /ready. Resolves each
-  // token to a Principal (admin for plain API_TOKENS, scoped for API_PRINCIPALS)
-  // and decorates `request.principal` — the source of the MANDATORY retrieval
+  // Bearer-credential auth on every route except /health and /ready. The
+  // pluggable AuthProvider (static tokens, OIDC JWTs, or both via composite —
+  // selected by AUTH_PROVIDER) resolves each credential to a Principal (admin
+  // for plain API_TOKENS, scoped for API_PRINCIPALS or OIDC scope-map) and
+  // decorates `request.principal` — the source of the MANDATORY retrieval
   // authorization scope used by /search and /ask.
-  app.addHook(
-    "onRequest",
-    createAuthHook(config.api.tokens, config.api.principals),
-  );
+  app.addHook("onRequest", createAuthHook(buildAuthProvider(config, logger)));
 
   // -------- Liveness/readiness probes --------
   app.get("/health", async () => ({ status: "ok" }));

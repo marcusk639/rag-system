@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { createTokenVerifier } from "@rag/core";
 import express, {
   type NextFunction,
   type Request,
@@ -11,9 +10,8 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import {
   DENY_ALL_SCOPE,
   principalToScope,
-  resolvePrincipal,
+  type AuthProvider,
   type AuthorizationScope,
-  type ScopedPrincipalConfig,
 } from "@rag/core";
 import type { Logger } from "pino";
 
@@ -51,19 +49,13 @@ export interface HttpTransportOptions {
   port: number;
   logger: Logger;
   /**
-   * Plain (unscoped) ADMIN bearer tokens authorized to call /mcp. REQUIRED —
-   * the MCP HTTP transport exposes search, ask, list_sources, trigger_sync;
-   * running without auth lets anyone on the network exfiltrate the entire
-   * indexed corpus. A token here resolves to an all-access principal.
+   * Pluggable authenticator. REQUIRED — the MCP HTTP transport exposes search,
+   * ask, list_sources, trigger_sync; running without auth lets anyone on the
+   * network exfiltrate the entire indexed corpus. The same provider the HTTP
+   * API uses (static tokens, OIDC JWTs, or both) so both surfaces authenticate
+   * identically. `authenticate` returns a Principal or null (fail closed).
    */
-  tokens: readonly string[];
-  /**
-   * Scoped principals (opt-in confidentiality boundary). A token here is also
-   * a valid bearer token but is ENFORCED to its `allowedSourceIds` in
-   * retrieval. Scoped wins over `tokens` if a string appears in both (least
-   * privilege). Empty by default.
-   */
-  principals?: readonly ScopedPrincipalConfig[];
+  authProvider: AuthProvider;
   /**
    * Allowed Origin values for CORS. If a browser-based caller sends an
    * Origin header, it must match one of these. Mitigates DNS rebinding
@@ -74,39 +66,16 @@ export interface HttpTransportOptions {
 }
 
 export async function startHttp(opts: HttpTransportOptions): Promise<void> {
-  const {
-    buildServer,
-    port,
-    logger,
-    tokens,
-    principals = [],
-    allowedOrigins = [],
-  } = opts;
+  const { buildServer, port, logger, authProvider, allowedOrigins = [] } = opts;
 
-  if (tokens.length === 0 && principals.length === 0) {
-    throw new Error(
-      "MCP HTTP transport requires at least one bearer token — refusing to start without auth",
-    );
-  }
-
-  // Every valid token (admin OR scoped) feeds the shared constant-time verifier
-  // (@rag/core/auth) — the same implementation the HTTP API uses. The allow-list
-  // (admin tokens + scoped-principal tokens) is pre-hashed once inside the
-  // factory; identity resolution to admin-vs-scoped happens in scopeForRequest.
-  const verifyToken = createTokenVerifier([
-    ...tokens,
-    ...principals.map((p) => p.token),
-  ]);
-
-  // Resolve a request's verified bearer token to its retrieval authorization
-  // scope. The `guard` middleware already proved the token is valid; here we
-  // map it to admin (plain token) vs. scoped (API_PRINCIPALS). Fail CLOSED to
-  // an empty scope (zero results) if resolution somehow misses — never fall
-  // back to admin/all for an unrecognized token.
-  const scopeForRequest = (req: Request): AuthorizationScope => {
+  // Resolve a request's bearer credential to its retrieval authorization scope
+  // via the shared AuthProvider (the same one the HTTP API uses). Returns the
+  // principal's scope, or DENY_ALL (zero results) when authentication fails —
+  // fail CLOSED, never fall back to admin/all for an unrecognized credential.
+  const scopeForRequest = async (req: Request): Promise<AuthorizationScope> => {
     const auth = req.headers.authorization;
-    const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-    const principal = resolvePrincipal(token, tokens, principals);
+    const credential = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    const principal = await authProvider.authenticate(credential);
     return principal ? principalToScope(principal) : DENY_ALL_SCOPE;
   };
 
@@ -116,7 +85,11 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
    * Auth + Origin middleware. Applied only to /mcp routes; /health bypasses
    * so orchestrator probes don't need a token.
    */
-  const guard = (req: Request, res: Response, next: NextFunction): void => {
+  const guard = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     // DNS rebinding mitigation: if the caller is a browser (Origin header
     // present), require an exact match against the configured allow-list.
     const origin = req.headers.origin;
@@ -129,8 +102,8 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
     }
 
     const auth = req.headers.authorization;
-    const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-    if (!token || !verifyToken(token)) {
+    const credential = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    if (!credential || !(await authProvider.authenticate(credential))) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -139,8 +112,15 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: "4mb" }));
-  // Auth gate. Order matters — must register BEFORE the /mcp routes.
-  app.use("/mcp", guard);
+  // Auth gate. Order matters — must register BEFORE the /mcp routes. Express 4
+  // does not await async middleware, so wrap it: a rejected promise becomes a
+  // fail-closed 401 instead of an unhandled rejection.
+  app.use("/mcp", (req: Request, res: Response, next: NextFunction) => {
+    guard(req, res, next).catch((err) => {
+      logger.error({ err }, "MCP auth guard error");
+      if (!res.headersSent) res.status(401).json({ error: "Unauthorized" });
+    });
+  });
 
   // sessionId → live transport. The transport itself holds a reference to
   // the McpServer it was connected to, so we don't need to track servers
@@ -211,7 +191,7 @@ export async function startHttp(opts: HttpTransportOptions): Promise<void> {
         // Resolve THIS session's authorization scope from its initialize
         // request's token, and bind it to the per-session server so all of the
         // session's search/ask calls are confined to the token's sources.
-        const server = buildServer(scopeForRequest(req));
+        const server = buildServer(await scopeForRequest(req));
         await server.connect(transport);
       }
 

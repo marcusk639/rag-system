@@ -1,4 +1,4 @@
-import type { Config } from "@rag/core";
+import { createAuthProvider, type AuthProvider, type Config } from "@rag/core";
 import { createDb, type Db } from "@rag/db";
 import { createQueue } from "@rag/ingestion";
 import {
@@ -45,6 +45,48 @@ export interface CoreDeps {
  * flag. The worker simply ignores it; the cost of the unused instance is
  * negligible and avoiding it would mean an options-bag we explicitly don't want.
  */
+/**
+ * Build the deployment's `AuthProvider` from config. Single source of truth so
+ * the HTTP API and the MCP HTTP transport authenticate IDENTICALLY (same
+ * static tokens, same OIDC settings). The provider wraps `resolvePrincipal` —
+ * the downstream `Principal` → `AuthorizationScope` → retrieval contract is
+ * unchanged.
+ *
+ * Composite errors (e.g. a thrown OIDC verification path) are routed to the
+ * logger rather than swallowed silently or printed to stdout.
+ */
+export function buildAuthProvider(
+  config: Config,
+  logger: Logger,
+): AuthProvider {
+  const base = {
+    tokens: config.api.tokens,
+    principals: config.api.principals,
+  };
+  switch (config.auth.provider) {
+    case "static-token":
+      return createAuthProvider({ provider: "static-token", ...base });
+    case "oidc":
+      // Schema guarantees oidc is present when provider === "oidc" (loadConfig
+      // fails loud otherwise), but guard defensively for direct callers.
+      if (!config.auth.oidc) {
+        throw new Error("auth.provider is 'oidc' but no OIDC config was built");
+      }
+      return createAuthProvider({
+        provider: "oidc",
+        oidc: config.auth.oidc,
+      });
+    case "composite":
+      return createAuthProvider({
+        provider: "composite",
+        ...base,
+        oidc: config.auth.oidc,
+        onError: (err) =>
+          logger.warn({ err }, "auth provider error (isolated)"),
+      });
+  }
+}
+
 export async function buildCoreDeps(
   config: Config,
   logger: Logger,
