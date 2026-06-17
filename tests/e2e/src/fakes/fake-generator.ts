@@ -41,4 +41,15 @@ export class FakeGenerator implements Generator {
       })),
     };
   }
+
+  async *answerStream(
+    question: string,
+    context: RetrievalResult[],
+  ): AsyncIterable<string> {
+    const { answer } = await this.answer(question, context);
+    // Emit in a couple of chunks to exercise the streaming path.
+    const mid = Math.ceil(answer.length / 2);
+    yield answer.slice(0, mid);
+    yield answer.slice(mid);
+  }
 }

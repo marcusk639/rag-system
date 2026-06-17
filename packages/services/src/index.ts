@@ -1,7 +1,13 @@
 export { type ServiceDeps, type Queue } from "./deps.js";
 export { GenerationNotConfiguredError } from "./errors.js";
 export { searchDocuments, type SearchInput } from "./search.js";
-export { askQuestion, type AskInput, type AskResult } from "./ask.js";
+export {
+  askQuestion,
+  askQuestionStream,
+  type AskInput,
+  type AskResult,
+  type AskStreamEvent,
+} from "./ask.js";
 export {
   triggerSync,
   listPublicSources,

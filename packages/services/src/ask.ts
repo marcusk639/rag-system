@@ -1,4 +1,5 @@
 import type { GenerationResult, Generator } from "@rag/rag";
+import { buildCitations } from "@rag/rag";
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
 import type { ServiceDeps } from "./deps.js";
@@ -82,6 +83,77 @@ async function ask(
   return {
     answer: result.answer,
     citations: result.citations,
+    retrieved: sanitizeRetrievalResults(retrieved),
+  };
+}
+
+
+/** SSE-shaped event emitted by {@link askQuestionStream}. */
+export type AskStreamEvent =
+  | { type: "token"; value: string }
+  | {
+      type: "done";
+      citations: GenerationResult["citations"];
+      retrieved: SanitizedRetrievalResult[];
+    };
+
+/**
+ * Streaming counterpart of {@link askQuestion}. Runs IDENTICAL retrieval +
+ * scope enforcement, yields answer tokens as they arrive, then emits one
+ * terminal `done` event carrying citations + the PII-allowlisted `retrieved`
+ * array. Preserves the zero-results short-circuit (emits the fixed answer as a
+ * single token) and the `GenerationNotConfiguredError` path (thrown before any
+ * token, so the route can still respond 503).
+ */
+export async function* askQuestionStream(
+  deps: ServiceDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+): AsyncGenerator<AskStreamEvent> {
+  if (!deps.generator) {
+    throw new GenerationNotConfiguredError();
+  }
+  yield* askStream(
+    { ...deps, generator: deps.generator },
+    input,
+    defaultTopK,
+    scope,
+  );
+}
+
+async function* askStream(
+  deps: AskDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+): AsyncGenerator<AskStreamEvent> {
+  const retrieved = await deps.retriever.search(
+    {
+      query: input.question,
+      topK: input.topK ?? defaultTopK,
+      ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+      ...(input.filter ? { filter: input.filter } : {}),
+    },
+    scope,
+  );
+
+  if (retrieved.length === 0) {
+    yield { type: "token", value: EMPTY_ANSWER };
+    yield { type: "done", citations: [], retrieved: [] };
+    return;
+  }
+
+  for await (const token of deps.generator.answerStream(
+    input.question,
+    retrieved,
+  )) {
+    yield { type: "token", value: token };
+  }
+
+  yield {
+    type: "done",
+    citations: buildCitations(retrieved),
     retrieved: sanitizeRetrievalResults(retrieved),
   };
 }
