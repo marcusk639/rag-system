@@ -30,6 +30,15 @@ RUN pip install -r requirements.txt
 
 COPY app/ ./app/
 
+# Run as a non-root user. LibreOffice/tesseract need a writable HOME, so
+# --create-home gives appuser /home/appuser; /app is owned by appuser too.
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Bind IPv6 (::) so the service is reachable over Railway's IPv6-only private
+# network (PARSER_URL=http://rag-parser.railway.internal:8000). On dual-stack
+# Linux, :: also accepts IPv4, so local docker-compose port mapping still works.
+CMD ["uvicorn", "app.main:app", "--host", "::", "--port", "8000", "--workers", "2"]

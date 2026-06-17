@@ -1,0 +1,29 @@
+# Build artifacts and deps (reinstalled/rebuilt inside the image)
+**/node_modules
+**/dist
+**/.turbo
+
+# VCS / editor / local tooling
+.git
+.gitignore
+.serena
+.worktrees
+.vscode
+.idea
+
+# Secrets and local env (never bake into an image)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local data and logs
+postgres-data
+**/*.log
+
+# Docs and scratch (not needed to build/run)
+docs
+*.md
+!README.md
+sesh.sh
+PATHFINDER-*
+journey-into-rag-system.md
