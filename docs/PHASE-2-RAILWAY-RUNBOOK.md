@@ -4,17 +4,17 @@ Self-contained steps to finish Phase 2. Project is already created and Postgres 
 live; this covers the remaining work: Gemini key, pgvector extensions, fixing the
 parser, deploying the 3 Node services, migrations, domains, and verification.
 
-## Current state (LIVE — only the parser remains)
+## Current state (LIVE — all services online, Phase 2 complete)
 
-| Resource                 | State     | Notes                                                                                                                   |
-| ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Project `rag-system`     | ✅        | id `d5676b24-11fe-4665-a9bb-1e55b3670eb1`                                                                               |
-| Environment `production` | ✅        | id `53a51a39-6b88-493a-92f1-ff3cad32b73a`                                                                               |
-| `rag-postgres`           | ✅ Online | pgvector/pgvector:pg16 + volume; `PGDATA=/var/lib/postgresql/data/pgdata`; extensions installed; **migrations applied** |
-| `rag-api`                | ✅ Online | `https://rag-api-production-07b4.up.railway.app` — `/health` ok, `/ready` ok (DB ping passes)                           |
-| `rag-worker`             | ✅ Online | pg-boss connected, polling `rag.sync_source` (concurrency 4)                                                            |
-| `rag-mcp`                | ✅ Online | `https://rag-mcp-production-77f9.up.railway.app` — `/health` ok (http transport)                                        |
-| `rag-parser`             | ❌ Failed | **only remaining item** — needs Root Directory fix (Step 3)                                                             |
+| Resource                 | State     | Notes                                                                                                                                                                                                                              |
+| ------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project `rag-system`     | ✅        | id `d5676b24-11fe-4665-a9bb-1e55b3670eb1`                                                                                                                                                                                          |
+| Environment `production` | ✅        | id `53a51a39-6b88-493a-92f1-ff3cad32b73a`                                                                                                                                                                                          |
+| `rag-postgres`           | ✅ Online | pgvector/pgvector:pg16 + volume; `PGDATA=/var/lib/postgresql/data/pgdata`; extensions installed; **migrations applied**                                                                                                            |
+| `rag-api`                | ✅ Online | `https://rag-api-production-07b4.up.railway.app` — `/health` ok, `/ready` ok (DB ping passes)                                                                                                                                      |
+| `rag-worker`             | ✅ Online | pg-boss connected, polling `rag.sync_source` (concurrency 4)                                                                                                                                                                       |
+| `rag-mcp`                | ✅ Online | `https://rag-mcp-production-77f9.up.railway.app` — `/health` ok (http transport)                                                                                                                                                   |
+| `rag-parser`             | ✅ Online | **internal-only** (no public domain); Root Directory fix applied (Step 3). Verified 2026-06-18: worker → `rag-parser.railway.internal:8000/health` 200; authed `/parse` 200; missing-token `/parse` 401 (`PARSER_SECRET` enforced) |
 
 > Migrations were run via a temporary Postgres **TCP proxy** + local
 > `pnpm --filter @rag/db migrate`, then the proxy was **deleted** (DB is
