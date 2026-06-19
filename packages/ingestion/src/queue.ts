@@ -41,6 +41,18 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
   });
 
   await boss.start();
+
+  // pg-boss v10 requires queues to exist before send()/work(): `send` JOINs the
+  // job insert against `pgboss.queue` and silently inserts nothing for an
+  // unknown queue, which `enqueueSync` then misreads as a duplicate (a false
+  // SYNC_ALREADY_RUNNING), while `work()` just polls a queue that never fills.
+  // Ensure every queue we produce to / consume from exists. createQueue is
+  // idempotent (upsert + CREATE TABLE IF NOT EXISTS), so both api and worker
+  // can call this safely on every boot.
+  for (const name of Object.values(JOB_NAMES)) {
+    await boss.createQueue(name);
+  }
+
   return boss;
 }
 

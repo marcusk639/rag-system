@@ -4,6 +4,13 @@ python-multipart==0.0.20
 # MarkItDown: Microsoft's universal document → markdown converter.
 # Handles docx, xlsx, pptx, pdf, html, csv, json, xml, and more.
 markitdown[all]==0.0.1a4
+# markdownify is a transitive dep of markitdown, left unpinned upstream.
+# markdownify>=0.13 changed its converter calling convention to pass
+# `parent_tags=` into convert_* methods; markitdown 0.0.1a4's _CustomMarkdownify
+# overrides convert_a() with the pre-0.13 signature, so the newer release raises
+# `convert_a() got an unexpected keyword argument 'parent_tags'` and 500s on any
+# docx/html containing links. Cap below 0.13 until markitdown itself is upgraded.
+markdownify<0.13
 # Unstructured: fallback for difficult/scanned docs with OCR support.
 unstructured[local-inference]==0.16.11
 # openpyxl: direct XLSX parsing with formula-value access (data_only=True).

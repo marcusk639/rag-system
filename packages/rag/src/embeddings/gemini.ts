@@ -5,9 +5,11 @@ import { EmbeddingError } from "@rag/core";
 /**
  * Gemini embedding provider.
  *
- * Default model: `text-embedding-004` — 768 dimensions, generous free tier
- * (1,500 requests/minute on the free quota as of early 2026). For higher
- * quality (and a paid tier), `gemini-embedding-001` is also supported.
+ * Default model: `gemini-embedding-001` — the current GA embedding model.
+ * `text-embedding-004` was retired on the Gemini API and now 404s on
+ * `embedContent`. `gemini-embedding-001` supports Matryoshka output dims via
+ * `outputDimensionality`, so it still emits 768-d vectors to match the
+ * `chunks.embedding` column (no index migration needed).
  *
  * Docs: https://ai.google.dev/gemini-api/docs/embeddings
  */
@@ -22,7 +24,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       throw new EmbeddingError("Gemini API key is required");
     }
     this.client = new GoogleGenAI({ apiKey: opts.apiKey });
-    this.model = opts.model ?? "text-embedding-004";
+    this.model = opts.model ?? "gemini-embedding-001";
     this.dimensions = opts.dimensions ?? 768;
   }
 
