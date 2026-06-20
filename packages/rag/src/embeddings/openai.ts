@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
 import { EmbeddingError } from "@rag/core";
+import { retryOnRateLimit } from "./retry.js";
 
 /**
  * OpenAI embedding provider. Use when you want maximum quality and don't
@@ -15,12 +16,19 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly model: string;
   readonly dimensions: number;
   private client: OpenAI;
+  private readonly maxRetries: number;
 
-  constructor(opts: { apiKey: string; model?: string; dimensions?: number }) {
+  constructor(opts: {
+    apiKey: string;
+    model?: string;
+    dimensions?: number;
+    maxRetries?: number;
+  }) {
     if (!opts.apiKey) throw new EmbeddingError("OpenAI API key is required");
     this.client = new OpenAI({ apiKey: opts.apiKey });
     this.model = opts.model ?? "text-embedding-3-small";
     this.dimensions = opts.dimensions ?? 1536;
+    this.maxRetries = opts.maxRetries ?? 5;
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -36,12 +44,16 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       const batchSize = 2048; // OpenAI limit
       for (let i = 0; i < texts.length; i += batchSize) {
         const slice = texts.slice(i, i + batchSize);
-        const resp = await this.client.embeddings.create({
-          model: this.model,
-          input: slice,
-          dimensions: this.dimensions,
-          encoding_format: "float",
-        });
+        const resp = await retryOnRateLimit(
+          () =>
+            this.client.embeddings.create({
+              model: this.model,
+              input: slice,
+              dimensions: this.dimensions,
+              encoding_format: "float",
+            }),
+          { maxRetries: this.maxRetries },
+        );
         for (const item of resp.data) {
           results.push({
             vector: item.embedding,

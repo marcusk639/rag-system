@@ -26,6 +26,7 @@ export function createEmbeddingProvider(
         apiKey: cfg.apiKey,
         model: cfg.model,
         dimensions: cfg.dimensions,
+        maxRetries: cfg.maxRetries,
       });
     case "openai":
       if (!cfg.apiKey)
@@ -36,6 +37,7 @@ export function createEmbeddingProvider(
         apiKey: cfg.apiKey,
         model: cfg.model,
         dimensions: cfg.dimensions,
+        maxRetries: cfg.maxRetries,
       });
     case "local":
       throw new ValidationError(

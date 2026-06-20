@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
 import { EmbeddingError } from "@rag/core";
+import { retryOnRateLimit } from "./retry.js";
 
 /**
  * Gemini embedding provider.
@@ -18,14 +19,21 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly model: string;
   readonly dimensions: number;
   private client: GoogleGenAI;
+  private readonly maxRetries: number;
 
-  constructor(opts: { apiKey: string; model?: string; dimensions?: number }) {
+  constructor(opts: {
+    apiKey: string;
+    model?: string;
+    dimensions?: number;
+    maxRetries?: number;
+  }) {
     if (!opts.apiKey) {
       throw new EmbeddingError("Gemini API key is required");
     }
     this.client = new GoogleGenAI({ apiKey: opts.apiKey });
     this.model = opts.model ?? "gemini-embedding-001";
     this.dimensions = opts.dimensions ?? 768;
+    this.maxRetries = opts.maxRetries ?? 5;
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -43,14 +51,18 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       const batchSize = 100;
       for (let i = 0; i < texts.length; i += batchSize) {
         const slice = texts.slice(i, i + batchSize);
-        const response = await this.client.models.embedContent({
-          model: this.model,
-          contents: slice,
-          config: {
-            outputDimensionality: this.dimensions,
-            taskType: "RETRIEVAL_DOCUMENT",
-          },
-        });
+        const response = await retryOnRateLimit(
+          () =>
+            this.client.models.embedContent({
+              model: this.model,
+              contents: slice,
+              config: {
+                outputDimensionality: this.dimensions,
+                taskType: "RETRIEVAL_DOCUMENT",
+              },
+            }),
+          { maxRetries: this.maxRetries },
+        );
         const embeddings = response.embeddings ?? [];
         if (embeddings.length !== slice.length) {
           throw new EmbeddingError(
