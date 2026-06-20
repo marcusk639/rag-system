@@ -265,7 +265,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pgBossSchema: env.PG_BOSS_SCHEMA,
     embedding: {
       provider,
-      model: env.EMBEDDING_MODEL ?? "text-embedding-004",
+      model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
       dimensions: Number(env.EMBEDDING_DIMENSIONS ?? 768),
       apiKey,
     },
