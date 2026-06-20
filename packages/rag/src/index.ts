@@ -33,6 +33,7 @@ export {
   GeminiGenerator,
   OpenAIGenerator,
   createGenerator,
+  buildCitations,
   type Generator,
   type GenerationResult,
 } from "./generation/generator.js";
