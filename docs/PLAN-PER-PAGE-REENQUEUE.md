@@ -147,6 +147,36 @@ The continuation job must re-`send()` for the **same source**. The existing dedu
 - Do NOT move cursor persistence to "only at run end" — it must persist per page so a crash/retry resumes (`pipeline.ts:97-99`).
 - Do NOT change `ingestOne` or the embedding/chunking contracts.
 
+### Phase 2 results (COMPLETE — 2026-06-20)
+
+Implemented and green (`pnpm --filter @rag/ingestion test` 5/5, `@rag/db` 16/16,
+typecheck db+ingestion+worker clean):
+
+- `@rag/db`: split `updateSourceCursor` into a **cursor-only** write (no longer
+  stamps `lastSyncedAt`) + new `markSourceSynced(db, id)` that stamps
+  `lastSyncedAt = now()`. Both exported via the barrel.
+- `@rag/ingestion` `pipeline.ts`: added `opts.maxPagesPerRun`; the page loop now
+  stops on `page.done` **or** the page budget. `PipelineRunResult` gained
+  `nextCursor` and `done` now authoritatively reflects the last page's `done`.
+- `apps/worker` `handleSyncSource`: stamps `lastSyncedAt` via `markSourceSynced`
+  **only** when `result.done === true`, immediately before marking the history
+  row completed — the single place `lastSyncedAt` advances now.
+- New unit tests `packages/ingestion/src/pipeline.test.ts` (mock `@rag/db`, fake
+  connector/parser/chunker/embedder) cover: `maxPagesPerRun:1` single-page +
+  `done:false`; two-call continuation with cursor advance; single-page no-change;
+  default-unbounded drain-all; empty-page-with-`done:false` does not terminate.
+
+**Deliberate deviation from the plan (read before Phase 3):** `maxPagesPerRun`
+**defaults to unbounded** (drain-all), NOT 1. Reason: Phase 2 must ship without
+Phase 3. The current worker calls `runIngestion` once and marks the row
+completed regardless of `done`; defaulting to 1 now would mark multi-page syncs
+"completed" after one page (data-loss regression). Unbounded default preserves
+exact current behavior while making single-page a tunable opt-in. **Phase 3 flips
+the worker to pass `maxPagesPerRun: 1` and re-enqueues on `done === false`** (and
+moves the `markSourceSynced` stamp to the terminal continuation). The
+`lastSyncedAt`-on-completion stamp was pulled forward into Phase 2 (gated on
+`result.done`) so the DB split doesn't regress the signal in the interim.
+
 ---
 
 ## Phase 3 — Worker self-re-enqueues until `done`, with one history row per sync (HIGH; ~0.5 day)

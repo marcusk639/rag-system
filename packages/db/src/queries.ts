@@ -45,14 +45,32 @@ export async function listSources(db: Db) {
   return db.select().from(sources).orderBy(sources.createdAt);
 }
 
+/**
+ * Persist the delta cursor for a source. CURSOR ONLY — this no longer stamps
+ * `lastSyncedAt`. It runs after every page of an ingestion run (including
+ * intermediate pages of a multi-page sync), so it must NOT advance the
+ * user-visible "last synced" signal mid-sync. `lastSyncedAt` is stamped exactly
+ * once, on completion, via `markSourceSynced` (called from the worker).
+ */
 export async function updateSourceCursor(
   db: Db,
   id: string,
   cursor: string | null,
 ) {
+  await db.update(sources).set({ cursor }).where(eq(sources.id, id));
+}
+
+/**
+ * Stamp `lastSyncedAt = now()` for a source. Call this ONCE, when a sync
+ * reaches its terminal/completed state — never per page. Decoupled from
+ * `updateSourceCursor` so the per-page cursor write doesn't make the
+ * "is it finished?" signal (surfaced via the MCP `list_sources` tool) lie by
+ * advancing mid-sync.
+ */
+export async function markSourceSynced(db: Db, id: string) {
   await db
     .update(sources)
-    .set({ cursor, lastSyncedAt: new Date() })
+    .set({ lastSyncedAt: new Date() })
     .where(eq(sources.id, id));
 }
 

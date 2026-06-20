@@ -1,0 +1,238 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Logger } from "pino";
+import type {
+  Chunk,
+  Connector,
+  ConnectorListResult,
+  Embedding,
+  EmbeddingProvider,
+  Parser,
+} from "@rag/core";
+import { runIngestion, type PipelineDeps } from "./pipeline.js";
+
+// Mock the @rag/db sinks so the pipeline's control flow (page loop, cursor
+// persistence, done reporting) can be tested without a live Postgres.
+const { updateSourceCursorMock, upsertDocumentMock, replaceChunksMock } =
+  vi.hoisted(() => ({
+    updateSourceCursorMock: vi.fn(),
+    upsertDocumentMock: vi.fn(),
+    replaceChunksMock: vi.fn(),
+  }));
+
+vi.mock("@rag/db", () => ({
+  updateSourceCursor: updateSourceCursorMock,
+  upsertDocument: upsertDocumentMock,
+  replaceChunks: replaceChunksMock,
+}));
+
+interface FakePage {
+  documents: string[]; // externalIds
+  nextCursor: string | null;
+  done: boolean;
+}
+
+/** A connector that hands back a fixed sequence of pages, one per list() call. */
+function makeConnector(pages: FakePage[]) {
+  const received: { cursor: string | null }[] = [];
+  let i = 0;
+  const connector = {
+    kind: "custom",
+    validate: vi.fn(),
+    fetch: vi.fn(),
+    list: vi.fn(
+      async (opts: { cursor: string | null }): Promise<ConnectorListResult> => {
+        received.push({ cursor: opts.cursor });
+        const page = pages[Math.min(i, pages.length - 1)];
+        if (!page) throw new Error("makeConnector: no page configured");
+        i++;
+        return {
+          documents: page.documents.map((externalId) => ({
+            externalId,
+            title: externalId,
+            modifiedAt: new Date().toISOString(),
+            mimeType: "text/plain",
+            content: Buffer.from(`content-${externalId}`),
+            metadata: {},
+          })),
+          nextCursor: page.nextCursor,
+          done: page.done,
+        };
+      },
+    ),
+  };
+  return { connector: connector as unknown as Connector, received };
+}
+
+function makeDeps(): PipelineDeps {
+  const parser: Parser = {
+    parse: vi.fn(async ({ filename }) => ({
+      title: String(filename),
+      markdown: `# ${filename}\n\nbody`,
+      tables: [],
+      metadata: {},
+    })),
+  } as unknown as Parser;
+
+  const chunk: Chunk = {
+    hash: "h",
+    text: "t",
+    tokenCount: 1,
+    ordinal: 0,
+    headingPath: [],
+  };
+  const chunker = {
+    chunk: vi.fn(async (): Promise<Chunk[]> => [chunk]),
+  } as unknown as PipelineDeps["chunker"];
+
+  const embedding: Embedding = {
+    vector: [0.1],
+    provider: "fake",
+    model: "fake-1",
+    dimensions: 1,
+  };
+  const embedder = {
+    name: "fake",
+    model: "fake-1",
+    embedBatch: vi.fn(
+      async (texts: string[]): Promise<Embedding[]> =>
+        texts.map(() => embedding),
+    ),
+  } as unknown as EmbeddingProvider;
+
+  const noop = () => undefined;
+  const logger = {
+    info: noop,
+    error: noop,
+    warn: noop,
+    debug: noop,
+    child: () => logger,
+  } as unknown as Logger;
+
+  return { db: {} as PipelineDeps["db"], parser, chunker, embedder, logger };
+}
+
+const OPTS = { concurrency: 2, pageSize: 50 };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  upsertDocumentMock.mockResolvedValue({ id: "doc-1", contentChanged: true });
+  replaceChunksMock.mockResolvedValue(undefined);
+  updateSourceCursorMock.mockResolvedValue(undefined);
+});
+
+describe("runIngestion page budgeting", () => {
+  it("maxPagesPerRun:1 processes exactly one page and reports done:false when the feed continues", async () => {
+    const { connector, received } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: false },
+      { documents: ["b"], nextCursor: "c2", done: true },
+    ]);
+
+    const result = await runIngestion(
+      "src",
+      connector,
+      null,
+      {
+        ...OPTS,
+        maxPagesPerRun: 1,
+      },
+      makeDeps(),
+    );
+
+    expect(connector.list).toHaveBeenCalledTimes(1);
+    expect(received[0]?.cursor).toBeNull();
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.done).toBe(false);
+    expect(result.nextCursor).toBe("c1");
+    // cursor persisted once, for the single page processed
+    expect(updateSourceCursorMock).toHaveBeenCalledTimes(1);
+    expect(updateSourceCursorMock).toHaveBeenCalledWith({}, "src", "c1");
+  });
+
+  it("a fake connector returning done:false then done:true completes the source across two runIngestion calls, cursor advancing each call", async () => {
+    const { connector, received } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: false },
+      { documents: ["b"], nextCursor: "c2", done: true },
+    ]);
+    const deps = makeDeps();
+
+    const first = await runIngestion(
+      "src",
+      connector,
+      null,
+      {
+        ...OPTS,
+        maxPagesPerRun: 1,
+      },
+      deps,
+    );
+    expect(first.done).toBe(false);
+    expect(first.nextCursor).toBe("c1");
+
+    // The continuation resumes from the persisted cursor.
+    const second = await runIngestion(
+      "src",
+      connector,
+      first.nextCursor,
+      {
+        ...OPTS,
+        maxPagesPerRun: 1,
+      },
+      deps,
+    );
+    expect(second.done).toBe(true);
+    expect(second.nextCursor).toBe("c2");
+
+    expect(connector.list).toHaveBeenCalledTimes(2);
+    expect(received[0]?.cursor).toBeNull();
+    expect(received[1]?.cursor).toBe("c1"); // advanced
+    expect(first.documentsProcessed + second.documentsProcessed).toBe(2);
+  });
+
+  it("a single-page source (done:true on first page) completes in one call — no behavior change", async () => {
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    const result = await runIngestion(
+      "src",
+      connector,
+      null,
+      {
+        ...OPTS,
+        maxPagesPerRun: 1,
+      },
+      makeDeps(),
+    );
+
+    expect(connector.list).toHaveBeenCalledTimes(1);
+    expect(result.done).toBe(true);
+    expect(result.documentsProcessed).toBe(1);
+  });
+
+  it("defaults to unbounded: drains every page in a single call (historical behavior)", async () => {
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: false },
+      { documents: ["b", "c"], nextCursor: "c2", done: true },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(connector.list).toHaveBeenCalledTimes(2);
+    expect(result.done).toBe(true);
+    expect(result.documentsProcessed).toBe(3);
+    expect(updateSourceCursorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT terminate on an empty page when done is still false (only done ends the feed)", async () => {
+    const { connector } = makeConnector([
+      { documents: [], nextCursor: "c1", done: false },
+      { documents: ["a"], nextCursor: "c2", done: true },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(connector.list).toHaveBeenCalledTimes(2);
+    expect(result.done).toBe(true);
+    expect(result.documentsProcessed).toBe(1);
+  });
+});
