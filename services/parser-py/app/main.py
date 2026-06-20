@@ -53,6 +53,14 @@ logger = logging.getLogger("parser")
 # accidental or malicious oversized uploads cheap to reject.
 MAX_UPLOAD_BYTES = int(os.environ.get("PARSER_MAX_UPLOAD_BYTES", 100 * 1024 * 1024))
 
+# MIME values that carry no routing information. SharePoint (and other
+# connectors) frequently hand us a generic `application/octet-stream` — or
+# nothing — for items it can't classify. Trusting that value routes an
+# extensionless file to a ".bin" temp suffix that MarkItDown can't recognize, so
+# when the caller-supplied MIME is one of these we sniff the actual bytes with
+# libmagic instead.
+_GENERIC_MIMES = {"", "application/octet-stream", "binary/octet-stream"}
+
 app = FastAPI(title="rag-parser", version="0.1.0")
 
 # Single shared instance; MarkItDown is stateless and cheap to keep around.
@@ -171,8 +179,16 @@ async def parse(
         )
 
     fname = filename or file.filename or "document.bin"
-    detected_mime = mime_type or file.content_type or magic.from_buffer(raw, mime=True)
     ext = Path(fname).suffix.lower()
+    # Resolve the MIME type. A caller-supplied MIME wins, but only when it is
+    # specific — a generic/missing value (e.g. SharePoint's octet-stream for
+    # extensionless items) is re-sniffed from the bytes with libmagic so we
+    # route to the real parser/suffix instead of falling through to ".bin".
+    provided_mime = (mime_type or file.content_type or "").strip().lower()
+    if provided_mime in _GENERIC_MIMES:
+        detected_mime = magic.from_buffer(raw, mime=True) or provided_mime
+    else:
+        detected_mime = provided_mime
 
     # Spreadsheet fast path — we want structured rows + classification, not
     # MarkItDown's flat rendering. The TS chunker downstream uses these to
@@ -231,7 +247,14 @@ def _parse_with_markitdown(path: Path, fname: str, mime: str) -> ParsedDocument 
                 "source_filename": fname,
             },
         )
-    except Exception as e:  # noqa: BLE001 — broad on purpose, we fall back
+    except (KeyboardInterrupt, SystemExit, GeneratorExit):
+        raise
+    except BaseException as e:  # noqa: BLE001
+        # Catch BaseException, not just Exception: markitdown's
+        # UnsupportedFormatException does NOT subclass Exception in 0.0.1a4, so a
+        # plain `except Exception` lets it escape to a hard 500. We genuinely want
+        # "markitdown failed for ANY reason -> try the fallback", so we swallow
+        # everything except the control-flow signals re-raised above.
         logger.warning("markitdown failed for %s (%s): %s", fname, mime, e)
         return None
 
@@ -292,7 +315,22 @@ def _parse_with_unstructured(path: Path, fname: str, mime: str) -> ParsedDocumen
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except (KeyboardInterrupt, SystemExit, GeneratorExit):
+        raise
+    except BaseException as e:  # noqa: BLE001 — see markitdown note below
+        # MarkItDown already returned None for this file, so reaching an error
+        # here means neither parser could handle it. If the failure is an
+        # unsupported/undetectable format, treat it as a skip (422) so a single
+        # junk item (e.g. an extensionless `.bin`/`.sndr` SharePoint file) does
+        # not poison the whole document as a hard failure. Genuine internal
+        # errors (OCR crash, OOM, import failure) still surface as 500.
+        # BaseException (minus control-flow signals) mirrors the markitdown path:
+        # some unstructured/dep errors also bypass `Exception`.
+        if _is_unsupported_format_error(e):
+            logger.warning("unsupported format for %s (%s): %s", fname, mime, e)
+            raise HTTPException(
+                status_code=422, detail=f"unsupported document format: {e}"
+            ) from e
         logger.error("unstructured failed for %s (%s): %s", fname, mime, e)
         raise HTTPException(status_code=500, detail=f"parse failed: {e}") from e
 
@@ -625,6 +663,24 @@ def _html_table_to_markdown(html: str) -> str:
         return "\n".join([md_rows[0], separator, *md_rows[1:]])
     except Exception:
         return ""
+
+
+# Substrings (matched case-insensitively against a parser exception message)
+# that indicate a genuinely unsupported/undetectable file format rather than an
+# unexpected internal error. unstructured raises, e.g.,
+# "Invalid file <path>. The FileType.UNK file type is not supported in partition."
+_UNSUPPORTED_FORMAT_MARKERS = (
+    "not supported",
+    "invalid file",
+    "unsupported file",
+    "unsupportedformat",
+)
+
+
+def _is_unsupported_format_error(exc: Exception) -> bool:
+    """True when an exception means the file format simply can't be parsed."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _UNSUPPORTED_FORMAT_MARKERS)
 
 
 def _suffix_for_mime(mime: str) -> str:
