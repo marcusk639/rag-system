@@ -12,6 +12,7 @@ import {
 } from "@rag/core";
 import {
   type Db,
+  documentHasChunks,
   replaceChunks,
   updateSourceCursor,
   upsertDocument,
@@ -193,8 +194,18 @@ async function ingestOne(
   });
 
   if (!contentChanged) {
-    log.debug("content unchanged, skipping chunk/embed");
-    return { chunksCreated: 0 };
+    // Normally an unchanged hash means the document is already fully ingested,
+    // so we skip the expensive chunk/embed work. But a document can have its
+    // hash recorded while having NO chunks: a prior run that upserted the row
+    // and then embed-failed (e.g. Gemini 429 / credit exhaustion) leaves the
+    // hash set but the chunks table empty. Skipping such a document forever
+    // would make it permanently un-retrievable, so we re-embed when chunks are
+    // absent despite a matching hash.
+    if (await documentHasChunks(db, documentId)) {
+      log.debug("content unchanged, skipping chunk/embed");
+      return { chunksCreated: 0 };
+    }
+    log.warn("content hash unchanged but document has no chunks; re-embedding");
   }
 
   // 4. Chunk the markdown.

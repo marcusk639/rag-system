@@ -186,6 +186,29 @@ export async function replaceChunks(
   });
 }
 
+
+/**
+ * Whether a document currently has any chunk rows.
+ *
+ * Used by the ingestion pipeline to detect documents that were upserted
+ * (recording their `content_hash`) but never produced chunks — e.g. a prior
+ * run embedded-failed (429/credit exhaustion) AFTER the document row was
+ * written. On the next sync the hash matches, so the pipeline would normally
+ * short-circuit and skip embedding forever, leaving the document permanently
+ * un-retrievable. Checking for chunk presence lets us re-embed those stragglers.
+ */
+export async function documentHasChunks(
+  db: Db,
+  documentId: string,
+): Promise<boolean> {
+  const result = await db.execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM ${chunks} WHERE ${chunks.documentId} = ${documentId}
+    ) AS exists
+  `);
+  return result.rows[0]?.exists ?? false;
+}
+
 // ============================================================================
 // Hybrid retrieval — dense (pgvector cosine) + sparse (tsvector BM25-ish)
 // combined via Reciprocal Rank Fusion (RRF).

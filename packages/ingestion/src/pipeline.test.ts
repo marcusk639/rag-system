@@ -12,17 +12,23 @@ import { runIngestion, type PipelineDeps } from "./pipeline.js";
 
 // Mock the @rag/db sinks so the pipeline's control flow (page loop, cursor
 // persistence, done reporting) can be tested without a live Postgres.
-const { updateSourceCursorMock, upsertDocumentMock, replaceChunksMock } =
-  vi.hoisted(() => ({
-    updateSourceCursorMock: vi.fn(),
-    upsertDocumentMock: vi.fn(),
-    replaceChunksMock: vi.fn(),
-  }));
+const {
+  updateSourceCursorMock,
+  upsertDocumentMock,
+  replaceChunksMock,
+  documentHasChunksMock,
+} = vi.hoisted(() => ({
+  updateSourceCursorMock: vi.fn(),
+  upsertDocumentMock: vi.fn(),
+  replaceChunksMock: vi.fn(),
+  documentHasChunksMock: vi.fn(),
+}));
 
 vi.mock("@rag/db", () => ({
   updateSourceCursor: updateSourceCursorMock,
   upsertDocument: upsertDocumentMock,
   replaceChunks: replaceChunksMock,
+  documentHasChunks: documentHasChunksMock,
 }));
 
 interface FakePage {
@@ -118,6 +124,7 @@ beforeEach(() => {
   upsertDocumentMock.mockResolvedValue({ id: "doc-1", contentChanged: true });
   replaceChunksMock.mockResolvedValue(undefined);
   updateSourceCursorMock.mockResolvedValue(undefined);
+  documentHasChunksMock.mockResolvedValue(true);
 });
 
 describe("runIngestion page budgeting", () => {
@@ -234,5 +241,42 @@ describe("runIngestion page budgeting", () => {
     expect(connector.list).toHaveBeenCalledTimes(2);
     expect(result.done).toBe(true);
     expect(result.documentsProcessed).toBe(1);
+  });
+});
+
+describe("ingestOne unchanged-hash handling", () => {
+  it("skips chunk/embed when the hash is unchanged AND the document already has chunks", async () => {
+    upsertDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      contentChanged: false,
+    });
+    documentHasChunksMock.mockResolvedValue(true);
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(documentHasChunksMock).toHaveBeenCalledWith({}, "doc-1");
+    expect(replaceChunksMock).not.toHaveBeenCalled();
+  });
+
+  it("re-embeds when the hash is unchanged but the document has NO chunks (prior embed-failure straggler)", async () => {
+    upsertDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      contentChanged: false,
+    });
+    documentHasChunksMock.mockResolvedValue(false);
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(documentHasChunksMock).toHaveBeenCalledWith({}, "doc-1");
+    // The straggler must be re-chunked + re-embedded rather than skipped forever.
+    expect(replaceChunksMock).toHaveBeenCalledTimes(1);
   });
 });
