@@ -45,14 +45,32 @@ export async function listSources(db: Db) {
   return db.select().from(sources).orderBy(sources.createdAt);
 }
 
+/**
+ * Persist the delta cursor for a source. CURSOR ONLY — this no longer stamps
+ * `lastSyncedAt`. It runs after every page of an ingestion run (including
+ * intermediate pages of a multi-page sync), so it must NOT advance the
+ * user-visible "last synced" signal mid-sync. `lastSyncedAt` is stamped exactly
+ * once, on completion, via `markSourceSynced` (called from the worker).
+ */
 export async function updateSourceCursor(
   db: Db,
   id: string,
   cursor: string | null,
 ) {
+  await db.update(sources).set({ cursor }).where(eq(sources.id, id));
+}
+
+/**
+ * Stamp `lastSyncedAt = now()` for a source. Call this ONCE, when a sync
+ * reaches its terminal/completed state — never per page. Decoupled from
+ * `updateSourceCursor` so the per-page cursor write doesn't make the
+ * "is it finished?" signal (surfaced via the MCP `list_sources` tool) lie by
+ * advancing mid-sync.
+ */
+export async function markSourceSynced(db: Db, id: string) {
   await db
     .update(sources)
-    .set({ cursor, lastSyncedAt: new Date() })
+    .set({ lastSyncedAt: new Date() })
     .where(eq(sources.id, id));
 }
 
@@ -166,6 +184,29 @@ export async function replaceChunks(
       }
     }
   });
+}
+
+
+/**
+ * Whether a document currently has any chunk rows.
+ *
+ * Used by the ingestion pipeline to detect documents that were upserted
+ * (recording their `content_hash`) but never produced chunks — e.g. a prior
+ * run embedded-failed (429/credit exhaustion) AFTER the document row was
+ * written. On the next sync the hash matches, so the pipeline would normally
+ * short-circuit and skip embedding forever, leaving the document permanently
+ * un-retrievable. Checking for chunk presence lets us re-embed those stragglers.
+ */
+export async function documentHasChunks(
+  db: Db,
+  documentId: string,
+): Promise<boolean> {
+  const result = await db.execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM ${chunks} WHERE ${chunks.documentId} = ${documentId}
+    ) AS exists
+  `);
+  return result.rows[0]?.exists ?? false;
 }
 
 // ============================================================================

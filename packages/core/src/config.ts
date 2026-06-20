@@ -16,6 +16,11 @@ export const Config = z.object({
     model: z.string(),
     dimensions: z.number().int().positive(),
     apiKey: z.string().optional(),
+    // Retries (after the first attempt) on transient 429 / RESOURCE_EXHAUSTED
+    // from the embedding API, using exponential backoff + jitter. Lets bulk
+    // embeds ride out rate limits (esp. the Gemini free tier) instead of
+    // failing whole documents. 0 disables retrying.
+    maxRetries: z.number().int().min(0).default(5),
   }),
 
   parser: z.object({
@@ -268,6 +273,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
       dimensions: Number(env.EMBEDDING_DIMENSIONS ?? 768),
       apiKey,
+      maxRetries: env.EMBEDDING_MAX_RETRIES
+        ? Number(env.EMBEDDING_MAX_RETRIES)
+        : undefined,
     },
     parser: {
       url: env.PARSER_URL ?? "http://localhost:8000",

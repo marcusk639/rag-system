@@ -41,4 +41,16 @@ export class FakeGenerator implements Generator {
       })),
     };
   }
+
+  async *answerStream(
+    question: string,
+    context: RetrievalResult[],
+  ): AsyncIterable<string> {
+    // Reuse `answer` so streamed text matches the non-streamed answer exactly,
+    // emitted word-by-word so specs can assert incremental delivery.
+    const { answer } = await this.answer(question, context);
+    for (const word of answer.split(" ")) {
+      yield word.length ? `${word} ` : word;
+    }
+  }
 }

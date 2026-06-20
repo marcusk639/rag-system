@@ -12,6 +12,7 @@ import {
 } from "@rag/core";
 import {
   type Db,
+  documentHasChunks,
   replaceChunks,
   updateSourceCursor,
   upsertDocument,
@@ -35,6 +36,18 @@ export interface PipelineOptions {
   concurrency: number;
   /** Max documents to enumerate per list() call (lets us bound memory) */
   pageSize: number;
+  /**
+   * Max number of connector pages this single `runIngestion` call will process
+   * before returning (with `done` reflecting whether the feed is exhausted).
+   * Bounds a single job's wall-clock so a huge source can be drained as a chain
+   * of smaller continuation jobs (see worker self-re-enqueue) instead of one
+   * long-running job.
+   *
+   * Defaults to unbounded (drain every page in one call) — the historical
+   * behavior — so existing callers are unaffected. The worker passes a small
+   * value (e.g. 1) to opt into per-page continuation.
+   */
+  maxPagesPerRun?: number;
 }
 
 export interface PipelineDeps {
@@ -49,7 +62,19 @@ export interface PipelineRunResult {
   documentsProcessed: number;
   documentsFailed: number;
   chunksCreated: number;
+  /**
+   * The connector's authoritative end-of-feed flag for the LAST page processed.
+   * `true` => the source is fully enumerated (nothing left to re-enqueue).
+   * `false` => more pages remain (the page budget was hit first); the caller
+   * should re-enqueue a continuation that resumes from the persisted cursor.
+   */
   done: boolean;
+  /**
+   * The cursor persisted after the last processed page (also written to
+   * `sources.cursor`). Continuations normally read it from `sources.cursor`, but
+   * it's surfaced here too for callers/tests that want it directly.
+   */
+  nextCursor: string | null;
 }
 
 export async function runIngestion(
@@ -60,22 +85,29 @@ export async function runIngestion(
   deps: PipelineDeps,
 ): Promise<PipelineRunResult> {
   const log = deps.logger.child({ sourceId, connector: connector.kind });
-  log.info({ startCursor }, "starting ingestion run");
+  const maxPages = opts.maxPagesPerRun ?? Number.POSITIVE_INFINITY;
+  log.info({ startCursor, maxPages }, "starting ingestion run");
 
   let cursor = startCursor;
   let documentsProcessed = 0;
   let documentsFailed = 0;
   let chunksCreated = 0;
   let pageDone = false;
+  let pagesProcessed = 0;
 
-  // We loop pages here so a single job picks up everything available. For
-  // very large sources, the worker can split this by having the connector
-  // return `done=false` and the job re-enqueue itself with the new cursor.
-  while (!pageDone) {
+  // Process up to `maxPages` connector pages, persisting the cursor after each
+  // so a crash/retry resumes mid-source. We stop when EITHER the connector
+  // signals end-of-feed (`page.done`) OR the page budget is exhausted. When we
+  // stop on the budget with the feed not yet drained, `done` stays `false` and
+  // the caller (the worker) re-enqueues a continuation that resumes from the
+  // persisted cursor. With the default unbounded budget this drains the whole
+  // source in one call (the historical behavior).
+  do {
     const page = await connector.list({ cursor, maxItems: opts.pageSize });
     pageDone = page.done;
+    pagesProcessed++;
     log.info(
-      { count: page.documents.length, nextCursor: page.nextCursor },
+      { count: page.documents.length, nextCursor: page.nextCursor, pagesProcessed },
       "fetched page",
     );
 
@@ -94,29 +126,30 @@ export async function runIngestion(
       }
     }
 
-    // Persist cursor BEFORE returning so we don't re-process this page on retry.
+    // Persist cursor (CURSOR ONLY — `lastSyncedAt` is stamped once on
+    // completion by the worker) so we don't re-process this page on retry.
     cursor = page.nextCursor;
     await updateSourceCursor(deps.db, sourceId, cursor);
 
-    // Loop continuation is driven by `pageDone` (the connector's `done` flag).
-    // Do NOT break on `page.documents.length === 0` — a page that yielded
-    // zero documents (e.g. all drafts/removals filtered out) is NOT the same
-    // as end-of-feed. The connector signals end-of-feed via `done: true`;
-    // breaking on empty documents here would silently stall the sync.
-  }
+    // Loop continuation is driven by `pageDone` (the connector's `done` flag),
+    // NOT by `page.documents.length === 0`. A page that yielded zero documents
+    // (e.g. all drafts/removals filtered out) is NOT end-of-feed; breaking on
+    // empty documents would silently stall the sync. End-of-feed is `done:true`.
+  } while (!pageDone && pagesProcessed < maxPages);
 
   log.info(
-    { documentsProcessed, documentsFailed, chunksCreated },
+    { documentsProcessed, documentsFailed, chunksCreated, done: pageDone, pagesProcessed },
     "ingestion run complete",
   );
-  // `done: pageDone` so the caller knows whether to re-enqueue. With the
-  // while-loop above, this is normally `true` when we exit cleanly, but a
-  // future early-exit (e.g. on signal) could leave it `false`.
+  // `done: pageDone` tells the caller whether the source is fully enumerated.
+  // `false` here means the page budget was hit before the feed ended → the
+  // caller should re-enqueue a continuation resuming from `cursor`.
   return {
     documentsProcessed,
     documentsFailed,
     chunksCreated,
     done: pageDone,
+    nextCursor: cursor,
   };
 }
 
@@ -161,8 +194,18 @@ async function ingestOne(
   });
 
   if (!contentChanged) {
-    log.debug("content unchanged, skipping chunk/embed");
-    return { chunksCreated: 0 };
+    // Normally an unchanged hash means the document is already fully ingested,
+    // so we skip the expensive chunk/embed work. But a document can have its
+    // hash recorded while having NO chunks: a prior run that upserted the row
+    // and then embed-failed (e.g. Gemini 429 / credit exhaustion) leaves the
+    // hash set but the chunks table empty. Skipping such a document forever
+    // would make it permanently un-retrievable, so we re-embed when chunks are
+    // absent despite a matching hash.
+    if (await documentHasChunks(db, documentId)) {
+      log.debug("content unchanged, skipping chunk/embed");
+      return { chunksCreated: 0 };
+    }
+    log.warn("content hash unchanged but document has no chunks; re-embedding");
   }
 
   // 4. Chunk the markdown.

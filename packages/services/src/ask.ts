@@ -1,4 +1,5 @@
 import type { GenerationResult, Generator } from "@rag/rag";
+import { buildCitations } from "@rag/rag";
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
 import type { ServiceDeps } from "./deps.js";
@@ -58,6 +59,15 @@ export async function askQuestion(
   return ask({ ...deps, generator: deps.generator }, input, defaultTopK, scope);
 }
 
+function buildQuery(input: AskInput, defaultTopK: number) {
+  return {
+    query: input.question,
+    topK: input.topK ?? defaultTopK,
+    ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+    ...(input.filter ? { filter: input.filter } : {}),
+  };
+}
+
 async function ask(
   deps: AskDeps,
   input: AskInput,
@@ -65,12 +75,7 @@ async function ask(
   scope: AuthorizationScope,
 ): Promise<AskResult> {
   const retrieved = await deps.retriever.search(
-    {
-      query: input.question,
-      topK: input.topK ?? defaultTopK,
-      ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
-      ...(input.filter ? { filter: input.filter } : {}),
-    },
+    buildQuery(input, defaultTopK),
     scope,
   );
 
@@ -82,6 +87,76 @@ async function ask(
   return {
     answer: result.answer,
     citations: result.citations,
+    retrieved: sanitizeRetrievalResults(retrieved),
+  };
+}
+
+/**
+ * Incremental answer text chunk, or the terminal payload carrying citations
+ * and the (PII-allowlisted) retrieved results. Mirrors the SSE event contract
+ * consumed by the web client's stream parser.
+ */
+export type AskStreamEvent =
+  | { type: "token"; text: string }
+  | {
+      type: "done";
+      citations: GenerationResult["citations"];
+      retrieved: SanitizedRetrievalResult[];
+    };
+
+/**
+ * Streaming counterpart of `askQuestion`. Same confidentiality scope (P1),
+ * empty-retrieval short-circuit, and metadata allowlist (P2) — but yields the
+ * answer incrementally so transports can forward tokens as they arrive.
+ *
+ * Throws `GenerationNotConfiguredError` synchronously (before any token) when
+ * no generator is configured, so a transport can still map it to a 503 before
+ * committing to a streaming response.
+ */
+export async function* askQuestionStream(
+  deps: ServiceDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+): AsyncGenerator<AskStreamEvent> {
+  if (!deps.generator) {
+    throw new GenerationNotConfiguredError();
+  }
+  yield* askStream(
+    { ...deps, generator: deps.generator },
+    input,
+    defaultTopK,
+    scope,
+  );
+}
+
+async function* askStream(
+  deps: AskDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+): AsyncGenerator<AskStreamEvent> {
+  const retrieved = await deps.retriever.search(
+    buildQuery(input, defaultTopK),
+    scope,
+  );
+
+  if (retrieved.length === 0) {
+    yield { type: "token", text: EMPTY_ANSWER };
+    yield { type: "done", citations: [], retrieved: [] };
+    return;
+  }
+
+  for await (const chunk of deps.generator.answerStream(
+    input.question,
+    retrieved,
+  )) {
+    if (chunk) yield { type: "token", text: chunk };
+  }
+
+  yield {
+    type: "done",
+    citations: buildCitations(retrieved),
     retrieved: sanitizeRetrievalResults(retrieved),
   };
 }

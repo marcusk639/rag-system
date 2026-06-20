@@ -1,4 +1,4 @@
-import { getSource, updateIngestionJob } from "@rag/db";
+import { getSource, markSourceSynced, updateIngestionJob } from "@rag/db";
 import { runIngestion, type SyncSourcePayload } from "@rag/ingestion";
 import type { WorkerDeps } from "../deps.js";
 
@@ -58,6 +58,16 @@ export async function handleSyncSource(
       { concurrency: config.worker.concurrency, pageSize: 50 },
       { db, parser, chunker, embedder, logger: log },
     );
+
+    // Stamp the user-visible "last synced" signal ONLY when the source is fully
+    // enumerated (`done`). `updateSourceCursor` no longer touches `lastSyncedAt`
+    // (it runs per page), so this is the single place it advances — and only on
+    // terminal completion, never mid-sync. (A continuation run that stops on the
+    // page budget returns `done:false` and must NOT stamp it; per-page
+    // re-enqueue of the `!done` case is wired in a later phase.)
+    if (result.done) {
+      await markSourceSynced(db, source.id);
+    }
 
     await updateIngestionJob(db, job.data.ingestionId, {
       status: "completed",
