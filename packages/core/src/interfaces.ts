@@ -20,8 +20,19 @@ export interface EmbeddingProvider {
   /**
    * Batch-embed. Implementations should pack as many texts per request as the
    * provider allows. Order of results must match order of inputs.
+   *
+   * NOTE: `embed`/`embedBatch` are the CORPUS/document side. For providers with
+   * asymmetric retrieval embeddings, these use the document task type.
    */
   embedBatch(texts: string[]): Promise<Embedding[]>;
+
+  /**
+   * Embed a search QUERY. Optional. Providers with asymmetric retrieval
+   * embeddings (e.g. Gemini `RETRIEVAL_QUERY` vs `RETRIEVAL_DOCUMENT`) implement
+   * this so queries are projected with the query task type. Providers without
+   * the distinction (e.g. OpenAI) may omit it; callers fall back to `embed`.
+   */
+  embedQuery?(text: string): Promise<Embedding>;
 }
 
 // ============================================================================
