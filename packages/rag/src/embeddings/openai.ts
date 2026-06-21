@@ -65,6 +65,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       }
       return results;
     } catch (err) {
+      if (err instanceof EmbeddingError) throw err;
       throw new EmbeddingError(
         `OpenAI embedding failed: ${(err as Error).message}`,
         err,

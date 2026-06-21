@@ -184,9 +184,14 @@ async def parse(
     # specific — a generic/missing value (e.g. SharePoint's octet-stream for
     # extensionless items) is re-sniffed from the bytes with libmagic so we
     # route to the real parser/suffix instead of falling through to ".bin".
-    provided_mime = (mime_type or file.content_type or "").strip().lower()
+    # Drop any `; charset=…`/parameter portion and normalize, so a caller MIME
+    # like "application/pdf; charset=utf-8" still routes (and a generic value is
+    # recognized as generic rather than slipping through to a ".bin" suffix).
+    provided_mime = (mime_type or file.content_type or "").split(";")[0].strip().lower()
     if provided_mime in _GENERIC_MIMES:
-        detected_mime = magic.from_buffer(raw, mime=True) or provided_mime
+        # libmagic output can carry stray case/whitespace on some builds —
+        # normalize it too, since it feeds the spreadsheet/suffix lookups.
+        detected_mime = (magic.from_buffer(raw, mime=True) or provided_mime).strip().lower()
     else:
         detected_mime = provided_mime
 
@@ -658,8 +663,10 @@ def _html_table_to_markdown(html: str) -> str:
                 md_rows.append("| " + " | ".join(cleaned) + " |")
         if not md_rows:
             return ""
-        # Insert a header separator after the first row.
-        separator = "| " + " | ".join(["---"] * md_rows[0].count("|")) + " |"
+        # Insert a header separator after the first row. A rendered row
+        # "| a | b | c |" has N+1 pipes for N columns, so subtract one.
+        ncols = max(1, md_rows[0].count("|") - 1)
+        separator = "| " + " | ".join(["---"] * ncols) + " |"
         return "\n".join([md_rows[0], separator, *md_rows[1:]])
     except Exception:
         return ""
@@ -669,15 +676,18 @@ def _html_table_to_markdown(html: str) -> str:
 # that indicate a genuinely unsupported/undetectable file format rather than an
 # unexpected internal error. unstructured raises, e.g.,
 # "Invalid file <path>. The FileType.UNK file type is not supported in partition."
+# Kept deliberately specific. "invalid file" alone was too broad (it matches
+# unrelated errors like "invalid file handle/object"); unstructured's real
+# unsupported-format message is "... file type is not supported in partition",
+# which "not supported" already covers.
 _UNSUPPORTED_FORMAT_MARKERS = (
     "not supported",
-    "invalid file",
     "unsupported file",
     "unsupportedformat",
 )
 
 
-def _is_unsupported_format_error(exc: Exception) -> bool:
+def _is_unsupported_format_error(exc: BaseException) -> bool:
     """True when an exception means the file format simply can't be parsed."""
     msg = str(exc).lower()
     return any(marker in msg for marker in _UNSUPPORTED_FORMAT_MARKERS)

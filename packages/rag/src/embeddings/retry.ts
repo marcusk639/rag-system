@@ -45,7 +45,10 @@ export function isRateLimitError(err: unknown): boolean {
     msg.includes("RATE LIMIT") ||
     msg.includes("RATE_LIMIT") ||
     msg.includes("TOO MANY REQUESTS") ||
-    /\b429\b/.test(msg)
+    // Bare "429" only counts as a rate-limit signal when it sits next to a
+    // status-ish word, so a stray "429" in document/metadata text echoed into
+    // an unrelated error message is not misclassified and needlessly retried.
+    /\b(?:HTTP|STATUS|CODE|ERROR)\b[^0-9]{0,5}429\b/.test(msg)
   );
 }
 
@@ -67,7 +70,7 @@ function retryAfterMs(err: unknown): number | undefined {
 
 /**
  * Run `fn`, retrying transient rate-limit errors with capped exponential
- * backoff + full jitter. Non-rate-limit errors propagate immediately.
+ * backoff + jitter. Non-rate-limit errors propagate immediately.
  */
 export async function retryOnRateLimit<T>(
   fn: () => Promise<T>,
@@ -86,8 +89,15 @@ export async function retryOnRateLimit<T>(
     } catch (err) {
       if (attempt >= maxRetries || !isRateLimitError(err)) throw err;
       const expo = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-      const jittered = expo * (0.5 + random() * 0.5); // full jitter, lower-bounded
-      const delay = Math.max(retryAfterMs(err) ?? 0, jittered);
+      // Half jitter: a random point in [0.5, 1.0]x the capped exponential —
+      // spreads concurrent retries without ever collapsing toward ~0ms.
+      const jittered = expo * (0.5 + random() * 0.5);
+      // Honor a server Retry-After as a floor, but clamp to maxDelayMs so a
+      // hostile/misconfigured `Retry-After: 3600` can't stall the worker.
+      const delay = Math.min(
+        maxDelayMs,
+        Math.max(retryAfterMs(err) ?? 0, jittered),
+      );
       await sleep(delay);
       attempt += 1;
     }
