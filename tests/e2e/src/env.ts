@@ -40,6 +40,9 @@ export function makeTestConfig(): Config {
       model: "fake-bow-768",
       dimensions: 768,
       apiKey: undefined,
+      // Inert for the local deterministic embedder (it never rate-limits);
+      // present only to satisfy the required EmbeddingConfig field.
+      maxRetries: 0,
     },
     parser: {
       url: env.parserUrl,
