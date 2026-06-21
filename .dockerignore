@@ -2,6 +2,13 @@
 **/node_modules
 **/dist
 **/.turbo
+**/.next
+
+# Frontend app: the backend service images (api/worker/mcp) must not bundle or
+# build the Next.js chat UI. Excluding it also keeps the workspace `pnpm install
+# --frozen-lockfile` to the 13 backend projects (apps/web deps are intentionally
+# not in the root lockfile yet).
+apps/web
 
 # VCS / editor / local tooling
 .git
