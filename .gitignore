@@ -47,3 +47,7 @@ drizzle/meta/_journal.json.bak
 
 # Git worktrees (superpowers)
 .worktrees/
+
+# Next.js build output / TS build info
+.next/
+*.tsbuildinfo
