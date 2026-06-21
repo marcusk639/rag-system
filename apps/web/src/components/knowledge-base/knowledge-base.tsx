@@ -117,18 +117,34 @@ export const KnowledgeBase = () => {
               </button>
             </CardHeader>
             <div className="p-6 pt-0 text-sm text-gray-600">
-              {activeCitation.url ? (
-                <a
-                  href={activeCitation.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
-                >
-                  Open source document
-                </a>
-              ) : (
-                <span>Document id: {activeCitation.documentId}</span>
-              )}
+              {(() => {
+                // Document URLs originate from ingested source metadata, which
+                // is attacker-influenceable. Only render the link for http(s)
+                // schemes so a `javascript:` URI can't execute on click.
+                const safeUrl = (() => {
+                  if (!activeCitation.url) return null;
+                  try {
+                    const u = new URL(activeCitation.url);
+                    return u.protocol === "https:" || u.protocol === "http:"
+                      ? u.toString()
+                      : null;
+                  } catch {
+                    return null;
+                  }
+                })();
+                return safeUrl ? (
+                  <a
+                    href={safeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    Open source document
+                  </a>
+                ) : (
+                  <span>Document id: {activeCitation.documentId}</span>
+                );
+              })()}
             </div>
           </Card>
         </div>
