@@ -69,7 +69,6 @@ def _install_fake_unstructured(monkeypatch: pytest.MonkeyPatch, partition) -> No
     [
         "Invalid file /tmp/x.bin. The FileType.UNK file type is not supported in partition.",
         "unsupported file type",
-        "Invalid file",
         "UnsupportedFormatException: '.sndr'",
     ],
 )
@@ -79,6 +78,9 @@ def test_unsupported_format_error_detected(msg: str) -> None:
 
 def test_internal_error_not_classified_as_unsupported() -> None:
     assert _is_unsupported_format_error(RuntimeError("connection reset by peer")) is False
+    # "invalid file" alone must NOT be treated as an unsupported-format skip —
+    # otherwise unrelated internal errors would be silently 422'd.
+    assert _is_unsupported_format_error(OSError("invalid file handle")) is False
 
 
 def test_octet_stream_and_empty_are_generic() -> None:

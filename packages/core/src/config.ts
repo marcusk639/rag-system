@@ -273,9 +273,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
       dimensions: Number(env.EMBEDDING_DIMENSIONS ?? 768),
       apiKey,
-      maxRetries: env.EMBEDDING_MAX_RETRIES
-        ? Number(env.EMBEDDING_MAX_RETRIES)
-        : undefined,
+      maxRetries:
+        env.EMBEDDING_MAX_RETRIES !== undefined
+          ? Number(env.EMBEDDING_MAX_RETRIES)
+          : undefined,
     },
     parser: {
       url: env.PARSER_URL ?? "http://localhost:8000",
