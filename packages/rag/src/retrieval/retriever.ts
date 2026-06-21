@@ -49,7 +49,12 @@ export class Retriever {
       authz.enforcedSourceIds,
     );
 
-    const embedding = await this.embedder.embed(query.query);
+    // Use the query-side embedding when the provider distinguishes query vs.
+    // document task types (Gemini); fall back to `embed` for providers that
+    // don't (OpenAI). Embedding a query as a document degrades retrieval.
+    const embedding = this.embedder.embedQuery
+      ? await this.embedder.embedQuery(query.query)
+      : await this.embedder.embed(query.query);
 
     return hybridSearch(this.db, {
       query: query.query,

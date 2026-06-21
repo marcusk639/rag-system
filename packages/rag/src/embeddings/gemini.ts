@@ -42,7 +42,27 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     return vec;
   }
 
+  /**
+   * Embed a search QUERY. Gemini retrieval embeddings are asymmetric: the query
+   * side must use `RETRIEVAL_QUERY` while the corpus side uses
+   * `RETRIEVAL_DOCUMENT`. Embedding a query with the document task type silently
+   * degrades retrieval, so the retriever calls this — not `embed`.
+   */
+  async embedQuery(text: string): Promise<Embedding> {
+    const [vec] = await this.embedWithTaskType([text], "RETRIEVAL_QUERY");
+    if (!vec) throw new EmbeddingError("Gemini returned no embedding");
+    return vec;
+  }
+
   async embedBatch(texts: string[]): Promise<Embedding[]> {
+    // Corpus/document side of the asymmetric retrieval-embedding pair.
+    return this.embedWithTaskType(texts, "RETRIEVAL_DOCUMENT");
+  }
+
+  private async embedWithTaskType(
+    texts: string[],
+    taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY",
+  ): Promise<Embedding[]> {
     if (texts.length === 0) return [];
 
     try {
@@ -58,7 +78,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
               contents: slice,
               config: {
                 outputDimensionality: this.dimensions,
-                taskType: "RETRIEVAL_DOCUMENT",
+                taskType,
               },
             }),
           { maxRetries: this.maxRetries },
