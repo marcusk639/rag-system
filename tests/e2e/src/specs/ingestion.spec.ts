@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { markdownDoc, plainTextDoc } from "../fakes/factories.js";
+import { FakeConnector, markdownDoc, plainTextDoc } from "@rag/test-fixtures";
 import {
   countChunks,
   countDocuments,

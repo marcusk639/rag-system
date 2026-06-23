@@ -1,9 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ADMIN_SCOPE } from "@rag/core";
 import { Retriever } from "@rag/rag";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { plainTextDoc } from "../fakes/factories.js";
-import { FakeEmbedder } from "../fakes/fake-embedder.js";
+import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 import { runOneIngestion } from "../helpers/ingestion.js";
 import type { Db } from "@rag/db";

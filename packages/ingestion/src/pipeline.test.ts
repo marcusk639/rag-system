@@ -1,13 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
-import type {
-  Chunk,
-  Connector,
-  ConnectorListResult,
-  Embedding,
-  EmbeddingProvider,
-  Parser,
-} from "@rag/core";
+import type { Chunk, Connector, ConnectorListResult, Parser } from "@rag/core";
+import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
 import { runIngestion, type PipelineDeps } from "./pipeline.js";
 
 // Mock the @rag/db sinks so the pipeline's control flow (page loop, cursor
@@ -17,11 +11,15 @@ const {
   upsertDocumentMock,
   replaceChunksMock,
   documentHasChunksMock,
+  deleteDocumentByExternalIdMock,
+  setDocumentStorageMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
   replaceChunksMock: vi.fn(),
   documentHasChunksMock: vi.fn(),
+  deleteDocumentByExternalIdMock: vi.fn(),
+  setDocumentStorageMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -29,12 +27,16 @@ vi.mock("@rag/db", () => ({
   upsertDocument: upsertDocumentMock,
   replaceChunks: replaceChunksMock,
   documentHasChunks: documentHasChunksMock,
+  deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
+  setDocumentStorage: setDocumentStorageMock,
 }));
 
 interface FakePage {
   documents: string[]; // externalIds
   nextCursor: string | null;
   done: boolean;
+  deletions?: string[];
+  skippedOversize?: number;
 }
 
 /** A connector that hands back a fixed sequence of pages, one per list() call. */
@@ -62,6 +64,8 @@ function makeConnector(pages: FakePage[]) {
           })),
           nextCursor: page.nextCursor,
           done: page.done,
+          deletions: page.deletions,
+          skippedOversize: page.skippedOversize,
         };
       },
     ),
@@ -90,20 +94,7 @@ function makeDeps(): PipelineDeps {
     chunk: vi.fn(async (): Promise<Chunk[]> => [chunk]),
   } as unknown as PipelineDeps["chunker"];
 
-  const embedding: Embedding = {
-    vector: [0.1],
-    provider: "fake",
-    model: "fake-1",
-    dimensions: 1,
-  };
-  const embedder = {
-    name: "fake",
-    model: "fake-1",
-    embedBatch: vi.fn(
-      async (texts: string[]): Promise<Embedding[]> =>
-        texts.map(() => embedding),
-    ),
-  } as unknown as EmbeddingProvider;
+  const embedder = new FakeEmbedder();
 
   const noop = () => undefined;
   const logger = {
@@ -125,6 +116,11 @@ beforeEach(() => {
   replaceChunksMock.mockResolvedValue(undefined);
   updateSourceCursorMock.mockResolvedValue(undefined);
   documentHasChunksMock.mockResolvedValue(true);
+  deleteDocumentByExternalIdMock.mockResolvedValue({
+    deleted: true,
+    storageKey: null,
+  });
+  setDocumentStorageMock.mockResolvedValue(undefined);
 });
 
 describe("runIngestion page budgeting", () => {
@@ -278,5 +274,161 @@ describe("ingestOne unchanged-hash handling", () => {
     expect(documentHasChunksMock).toHaveBeenCalledWith({}, "doc-1");
     // The straggler must be re-chunked + re-embedded rather than skipped forever.
     expect(replaceChunksMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runIngestion deletion reconciliation + skip observability", () => {
+  it("reconciles tombstones: deletes each reported document and counts removals", async () => {
+    const { connector } = makeConnector([
+      {
+        documents: ["a"],
+        deletions: ["drive1:gone1", "drive1:gone2"],
+        skippedOversize: 3,
+        nextCursor: "c1",
+        done: true,
+      },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(deleteDocumentByExternalIdMock).toHaveBeenCalledTimes(2);
+    expect(deleteDocumentByExternalIdMock).toHaveBeenCalledWith(
+      {},
+      "src",
+      "drive1:gone1",
+    );
+    expect(result.documentsDeleted).toBe(2);
+    expect(result.documentsSkippedOversize).toBe(3);
+    expect(result.documentsProcessed).toBe(1);
+  });
+
+  it("only counts deletions that actually removed a row", async () => {
+    deleteDocumentByExternalIdMock.mockResolvedValueOnce({
+      deleted: true,
+      storageKey: null,
+    });
+    deleteDocumentByExternalIdMock.mockResolvedValueOnce({
+      deleted: false,
+      storageKey: null,
+    }); // already absent
+
+    const { connector } = makeConnector([
+      {
+        documents: [],
+        deletions: ["drive1:gone1", "drive1:never-existed"],
+        nextCursor: "c1",
+        done: true,
+      },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    expect(result.documentsDeleted).toBe(1);
+  });
+
+  it("a failed deletion is logged and does not abort the sync", async () => {
+    deleteDocumentByExternalIdMock.mockRejectedValueOnce(new Error("db down"));
+
+    const { connector } = makeConnector([
+      {
+        documents: ["a"],
+        deletions: ["drive1:gone1"],
+        nextCursor: "c1",
+        done: true,
+      },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    // The document on the same page still ingests; the run completes.
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.documentsDeleted).toBe(0);
+    expect(result.done).toBe(true);
+  });
+
+  it("removes the stored original when a tombstone has a storage key", async () => {
+    deleteDocumentByExternalIdMock.mockResolvedValueOnce({
+      deleted: true,
+      storageKey: "sources/src/abc",
+    });
+    const objectStore = makeObjectStore();
+    const deps = { ...makeDeps(), objectStore } as PipelineDeps;
+
+    const { connector } = makeConnector([
+      {
+        documents: [],
+        deletions: ["drive1:gone1"],
+        nextCursor: "c1",
+        done: true,
+      },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(objectStore.delete).toHaveBeenCalledWith("sources/src/abc");
+  });
+});
+
+function makeObjectStore() {
+  const store = new FakeObjectStore(new Map());
+  vi.spyOn(store, "put");
+  vi.spyOn(store, "delete");
+  return store as FakeObjectStore & {
+    put: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
+}
+
+describe("runIngestion original-bytes storage", () => {
+  it("uploads the original and records its location on content change", async () => {
+    const objectStore = makeObjectStore();
+    const deps = { ...makeDeps(), objectStore } as PipelineDeps;
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(objectStore.put).toHaveBeenCalledTimes(1);
+    expect(setDocumentStorageMock).toHaveBeenCalledTimes(1);
+    expect(setDocumentStorageMock.mock.calls[0]![2]).toMatchObject({
+      storageBucket: "test-bucket",
+    });
+  });
+
+  it("does NOT re-upload when content is unchanged", async () => {
+    upsertDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      contentChanged: false,
+    });
+    documentHasChunksMock.mockResolvedValue(true);
+    const objectStore = makeObjectStore();
+    const deps = { ...makeDeps(), objectStore } as PipelineDeps;
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(objectStore.put).not.toHaveBeenCalled();
+    expect(setDocumentStorageMock).not.toHaveBeenCalled();
+  });
+
+  it("a storage upload failure does not fail text ingestion", async () => {
+    const objectStore = makeObjectStore();
+    objectStore.put.mockRejectedValueOnce(new Error("s3 down"));
+    const deps = { ...makeDeps(), objectStore } as PipelineDeps;
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+
+    // Document still processed (searchable); storage location not recorded.
+    expect(result.documentsProcessed).toBe(1);
+    expect(setDocumentStorageMock).not.toHaveBeenCalled();
   });
 });

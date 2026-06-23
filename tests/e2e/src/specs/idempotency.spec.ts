@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { plainTextDoc } from "../fakes/factories.js";
+import { FakeConnector, plainTextDoc } from "@rag/test-fixtures";
 import {
   countChunks,
   countDocuments,

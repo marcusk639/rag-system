@@ -1,5 +1,4 @@
-import type { RetrievalResult } from "@rag/core";
-import type { GenerationResult, Generator } from "@rag/rag";
+import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
 
 /**
  * Deterministic Generator for /ask specs.
@@ -35,6 +34,7 @@ export class FakeGenerator implements Generator {
         index: i + 1,
         documentId: r.document.id,
         title: r.document.title,
+        downloadable: r.document.hasOriginal ?? false,
         chunkId: r.chunk.id,
         score: r.score,
         ...(r.document.url !== undefined ? { url: r.document.url } : {}),

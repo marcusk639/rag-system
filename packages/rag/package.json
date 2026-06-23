@@ -18,6 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1073.0",
     "@google/genai": "^1.7.0",
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
@@ -26,6 +27,7 @@
     "undici": "^7.2.0"
   },
   "devDependencies": {
+    "@rag/test-fixtures": "workspace:*",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

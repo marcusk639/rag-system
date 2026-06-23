@@ -1,7 +1,9 @@
+import type { Readable } from "node:stream";
 import type {
   Chunk,
   Embedding,
   ParsedDocument,
+  RetrievalResult,
   SourceDocument,
 } from "./types.js";
 
@@ -33,6 +35,65 @@ export interface EmbeddingProvider {
    * the distinction (e.g. OpenAI) may omit it; callers fall back to `embed`.
    */
   embedQuery?(text: string): Promise<Embedding>;
+}
+
+// ============================================================================
+// Generator — answers a question grounded in retrieved chunks. Swap providers
+// (Gemini, OpenAI, etc.) by implementing this. Concrete implementations and the
+// `createGenerator` factory live in `@rag/rag`; only the contract lives here.
+// ============================================================================
+
+export interface Generator {
+  answer(
+    question: string,
+    context: RetrievalResult[],
+  ): Promise<GenerationResult>;
+  /**
+   * Streaming counterpart of `answer`. Yields answer text incrementally as the
+   * model produces it. Citations are derived deterministically from `context`
+   * (see `buildCitations`), so the stream carries text only — the caller
+   * attaches citations once the stream completes.
+   */
+  answerStream(
+    question: string,
+    context: RetrievalResult[],
+  ): AsyncIterable<string>;
+}
+
+export interface GenerationResult {
+  answer: string;
+  citations: Array<{
+    index: number; // matches [N] in the answer
+    documentId: string;
+    title: string;
+    url?: string;
+    /** True when the original file can be downloaded (GET /documents/:id/download). */
+    downloadable: boolean;
+    chunkId: string;
+    score: number;
+  }>;
+}
+
+// ============================================================================
+// Reranker — re-orders a candidate pool by true query relevance. Swap providers
+// by implementing this (hosted cross-encoder, LLM-based, etc.).
+// ============================================================================
+
+export interface Reranker {
+  readonly name: string;
+
+  /**
+   * Re-order `candidates` by relevance to `query` and return the top `topK`.
+   * Implementations MUST return a NEW array (no mutation of the input) and MUST
+   * NOT add or fabricate results — only re-order and truncate the candidates
+   * they were given. Throwing is acceptable; callers degrade to the pre-rerank
+   * (RRF) order so a reranker outage never fails a query.
+   */
+  rerank(
+    query: string,
+    candidates: RetrievalResult[],
+    topK: number,
+  ): Promise<RetrievalResult[]>;
 }
 
 // ============================================================================
@@ -86,6 +147,18 @@ export interface ConnectorListResult {
   nextCursor: string | null;
   /** True when the source has nothing more to return at this point in time */
   done: boolean;
+  /**
+   * External IDs of documents the source reports as deleted/removed since the
+   * last cursor (delta tombstones). The pipeline removes these documents (and
+   * their chunks) so the corpus stays truthful. Optional: connectors that do
+   * not surface deletions simply omit it.
+   */
+  deletions?: string[];
+  /**
+   * Count of items skipped this call because they exceeded the connector's
+   * file-size cap. Surfaced for observability only (not an error). Optional.
+   */
+  skippedOversize?: number;
 }
 
 export interface Connector {
@@ -107,4 +180,35 @@ export interface Connector {
    * Fetch a single document by external ID. Used for retry/reprocess flows.
    */
   fetch(externalId: string): Promise<SourceDocument>;
+}
+
+// ============================================================================
+// ObjectStore — persists original document bytes (S3-compatible) so cited
+// documents can be downloaded later. Swap backends by implementing this.
+// ============================================================================
+
+/** The bytes + content metadata returned when fetching a stored object. */
+export interface ObjectStoreGetResult {
+  /** The object's bytes as a Node Readable stream (suitable for HTTP streaming). */
+  body: Readable;
+  /** The stored content type, if the backend recorded one. */
+  contentType?: string;
+  /** The object's size in bytes, if known. */
+  contentLength?: number;
+}
+
+export interface ObjectStore {
+  /** The bucket originals are written to (recorded alongside each document). */
+  readonly bucket: string;
+  /**
+   * Store bytes under a logical key. Implementations may transparently prefix
+   * the key (e.g. a configured key prefix); callers pass and later read back
+   * the SAME logical key. Overwriting an existing key is allowed (idempotent
+   * re-ingest of changed content).
+   */
+  put(key: string, body: Buffer, contentType?: string): Promise<void>;
+  /** Fetch the object stored under the logical key. Throws if absent. */
+  get(key: string): Promise<ObjectStoreGetResult>;
+  /** Remove the object under the logical key. A missing key is not an error. */
+  delete(key: string): Promise<void>;
 }

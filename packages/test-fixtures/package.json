@@ -1,5 +1,5 @@
 {
-  "name": "@rag/connectors",
+  "name": "@rag/test-fixtures",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,19 +15,12 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@azure/msal-node": "^2.16.2",
-    "@microsoft/microsoft-graph-client": "^3.0.7",
-    "@rag/core": "workspace:*",
-    "googleapis": "^144.0.0",
-    "isomorphic-fetch": "^3.0.0",
-    "pino": "^9.5.0",
-    "zod": "^3.24.1"
+    "@rag/core": "workspace:*"
   },
   "devDependencies": {
-    "@rag/test-fixtures": "workspace:*",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

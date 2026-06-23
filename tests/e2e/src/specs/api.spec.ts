@@ -9,9 +9,7 @@ import {
 } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Db } from "@rag/db";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { FakeGenerator } from "../fakes/fake-generator.js";
-import { plainTextDoc } from "../fakes/factories.js";
+import { FakeConnector, FakeGenerator, plainTextDoc } from "@rag/test-fixtures";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 import { buildTestApi, type TestInject } from "../helpers/api.js";
 import { runOneIngestion } from "../helpers/ingestion.js";

@@ -10,7 +10,7 @@ import type { Db } from "@rag/db";
 import type PgBoss from "pg-boss";
 import pino from "pino";
 import { TEST_API_TOKEN, makeTestConfig } from "../env.js";
-import { FakeEmbedder } from "../fakes/fake-embedder.js";
+import { FakeEmbedder } from "@rag/test-fixtures";
 
 /**
  * Spin up a Fastify instance in-process with the FakeEmbedder + an optional
