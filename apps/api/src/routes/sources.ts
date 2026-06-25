@@ -6,7 +6,7 @@ import {
   getSource,
   toPublicSource,
 } from "@rag/db";
-import { listPublicSources, purgeSource, triggerSync } from "@rag/services";
+import { listPublicSources, triggerSync } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -98,38 +98,7 @@ export async function registerSourceRoutes(
     },
   );
 
-  // DELETE /sources/:id — purge a source and all its documents/chunks
-  // Tighter per-route rate limit (6/min): a purge is irreversible and
-  // administratively significant; burst protection mirrors the sync cap.
-  typed.delete(
-    "/sources/:id",
-    {
-      schema: { params: IdParams },
-      config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
-    },
-    async (request, reply) => {
-      const { id } = request.params;
-
-      // Authz: admin (null enforcedSourceIds) or a scoped principal whose
-      // allow-list includes this source. NotFoundError — no existence leak.
-      const scope = scopeFromRequest(request);
-      const permitted =
-        scope.enforcedSourceIds === null ||
-        scope.enforcedSourceIds.includes(id);
-      if (!permitted) throw new NotFoundError(`Source ${id} not found`);
-
-      await purgeSource(deps, id);
-
-      request.log.info({ sourceId: id }, "source purged");
-
-      return reply.code(204).send();
-    },
-  );
-
   // POST /sources/:id/sync — enqueue ingestion
-  // Tighter per-route rate limit (6/min) — triggers a full connector sync job
-  // that may hit external rate-limited APIs (Graph, Drive, Gmail) and queue
-  // many embedding/parse tasks. The global 60/min bucket is too permissive here.
   typed.post(
     "/sources/:id/sync",
     {
@@ -137,7 +106,6 @@ export async function registerSourceRoutes(
         params: IdParams,
         body: SyncBody,
       },
-      config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
       const { id } = request.params;

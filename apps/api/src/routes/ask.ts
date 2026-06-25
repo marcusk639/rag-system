@@ -31,26 +31,15 @@ export async function registerAskRoute(
   // `askQuestion`; GenerationNotConfiguredError maps to 503 via the central
   // error handler (STATUS_BY_CODE). The service enforces the confidentiality
   // scope and PII allowlist; the route only resolves the principal's scope.
-  //
-  // Tighter per-route rate limit (10/min) — each request triggers an embedding
-  // call + full LLM generation, so cost exposure is much higher than a plain
-  // read. The global 60/min default applies to all other routes.
-  typed.post(
-    "/ask",
-    {
-      schema: { body: AskBody },
-      config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
-    },
-    async (request) => {
-      return askQuestion(
-        deps,
-        request.body,
-        config.retrieval.defaultTopK,
-        scopeFromRequest(request),
-        config.retrieval.maxChunksPerDocument,
-      );
-    },
-  );
+  typed.post("/ask", { schema: { body: AskBody } }, async (request) => {
+    return askQuestion(
+      deps,
+      request.body,
+      config.retrieval.defaultTopK,
+      scopeFromRequest(request),
+      config.retrieval.maxChunksPerDocument,
+    );
+  });
 
   // POST /ask/stream — same retrieval + generation as /ask, but streamed as SSE
   // so the chat client can render tokens as they arrive. The generator-null
@@ -60,14 +49,11 @@ export async function registerAskRoute(
   //
   // SSE event contract (consumed by apps/web/src/lib/stream-chat.ts):
   //   event: token  data: <JSON-encoded string chunk>
-  //   event: done   data: {citations, retrieved, reviewStatus, disclaimer}
+  //   event: done   data: {citations, retrieved}
   //   event: error  data: {message}
   typed.post(
     "/ask/stream",
-    {
-      schema: { body: AskBody },
-      config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
-    },
+    { schema: { body: AskBody } },
     async (request, reply) => {
       if (!deps.generator) {
         throw new GenerationNotConfiguredError();
@@ -97,8 +83,6 @@ export async function registerAskRoute(
               `event: done\ndata: ${JSON.stringify({
                 citations: event.citations,
                 retrieved: event.retrieved,
-                reviewStatus: event.reviewStatus,
-                disclaimer: event.disclaimer,
               })}\n\n`,
             );
           }

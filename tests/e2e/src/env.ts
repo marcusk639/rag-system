@@ -56,8 +56,6 @@ export function makeTestConfig(): Config {
       // No scoped principals in the base test config — the test token is an
       // admin (all-access) principal, preserving pre-ACL retrieval behavior.
       principals: [],
-      // Backward-compatible default: the plain test token stays admin.
-      enforceScoping: false,
     },
     mcp: { transport: "stdio", httpPort: 3001 },
     // Static-token auth only — the test token resolves to an admin principal,
@@ -81,6 +79,5 @@ export function makeTestConfig(): Config {
       forcePathStyle: true,
       keyPrefix: "",
     },
-    environment: "test",
   };
 }
