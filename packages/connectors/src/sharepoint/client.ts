@@ -15,6 +15,17 @@ export interface GraphCredentials {
   clientSecret: string;
 }
 
+
+/**
+ * The read surface the SharePoint connector depends on. Declared as an
+ * interface (which `GraphClient` implements) so the connector can be unit
+ * tested with a fake Graph reader instead of hitting live Microsoft Graph.
+ */
+export interface GraphReader {
+  getJson<T>(urlOrPath: string): Promise<T>;
+  getBytes(urlOrPath: string): Promise<{ bytes: Buffer; contentType: string }>;
+}
+
 /**
  * Minimal Graph HTTP client used by the SharePoint and Outlook connectors.
  *
@@ -24,7 +35,7 @@ export interface GraphCredentials {
  * the rest. The Graph SDK is still useful for type definitions consumers may
  * import.
  */
-export class GraphClient {
+export class GraphClient implements GraphReader {
   private static readonly DEFAULT_SCOPE =
     "https://graph.microsoft.com/.default";
   private static readonly BASE_URL = "https://graph.microsoft.com/v1.0";

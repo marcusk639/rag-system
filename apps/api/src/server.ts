@@ -1,4 +1,5 @@
 import { pingDb } from "@rag/db";
+import fastifyMultipart from "@fastify/multipart";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import {
   serializerCompiler,
@@ -41,6 +42,14 @@ export async function buildServer(opts: {
   // Zod-aware validation + serialization.
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+
+  // Multipart support for the document-upload route (POST /sources/:id/documents):
+  // exactly one file per request, capped at the same 25 MB as the JSON body
+  // limit. @fastify/multipart throws a 413 RequestFileTooLargeError past the
+  // cap, which the error handler surfaces as a clean client error.
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  });
 
   // Global error handler — must register BEFORE routes so it catches their throws.
   registerErrorHandler(app);

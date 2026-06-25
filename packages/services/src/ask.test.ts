@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
 import { ADMIN_SCOPE } from "@rag/core";
-import { askQuestion } from "./ask.js";
+import { askQuestion, capChunksPerDocument } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
-function retrievalResult(id: string): RetrievalResult {
+function retrievalResult(id: string, docId = `doc-${id}`): RetrievalResult {
   return {
     chunkId: `chunk-${id}`,
-    documentId: `doc-${id}`,
+    documentId: docId,
     score: 1,
     text: `text ${id}`,
     document: {
-      id: `doc-${id}`,
+      id: docId,
       sourceId: "src",
       externalId: id,
-      title: `Doc ${id}`,
+      title: `Doc ${docId}`,
       url: undefined,
       metadata: {},
     },
@@ -32,6 +32,7 @@ function makeDeps(opts: {
     queue: {} as ServiceDeps["queue"],
     retriever: { search: opts.search } as unknown as ServiceDeps["retriever"],
     generator: opts.generator,
+    logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
   };
 }
 
@@ -128,5 +129,59 @@ describe("askQuestion", () => {
       },
       ADMIN_SCOPE,
     );
+  });
+
+  it("caps per-document chunks before generation when maxChunksPerDocument is set", async () => {
+    // Six chunks, all from the same document → should be capped to 3.
+    const retrieved = [1, 2, 3, 4, 5, 6].map((n) =>
+      retrievalResult(`${n}`, "doc-A"),
+    );
+    const search = vi.fn().mockResolvedValue(retrieved);
+    const answer = vi.fn().mockResolvedValue({ answer: "a", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      3, // maxChunksPerDocument
+    );
+
+    // The generator and the returned `retrieved` only ever see the capped set.
+    const passedToGenerator = answer.mock.calls[0][1] as RetrievalResult[];
+    expect(passedToGenerator).toHaveLength(3);
+    expect(result.retrieved).toHaveLength(3);
+  });
+});
+
+describe("capChunksPerDocument", () => {
+  it("keeps at most `cap` chunks per document, preserving order, without mutating", () => {
+    const input = [
+      retrievalResult("1", "doc-A"),
+      retrievalResult("2", "doc-A"),
+      retrievalResult("3", "doc-B"),
+      retrievalResult("4", "doc-A"),
+      retrievalResult("5", "doc-B"),
+      retrievalResult("6", "doc-A"),
+    ];
+
+    const capped = capChunksPerDocument(input, 2);
+
+    expect(capped).toHaveLength(4); // doc-A ×2, doc-B ×2
+    expect(capped.filter((r) => r.document.id === "doc-A")).toHaveLength(2);
+    expect(capped.filter((r) => r.document.id === "doc-B")).toHaveLength(2);
+    expect(input).toHaveLength(6); // input untouched (no mutation)
+  });
+
+  it("is a no-op when cap <= 0", () => {
+    const input = [
+      retrievalResult("1", "doc-A"),
+      retrievalResult("2", "doc-A"),
+    ];
+    expect(capChunksPerDocument(input, 0)).toBe(input);
   });
 });

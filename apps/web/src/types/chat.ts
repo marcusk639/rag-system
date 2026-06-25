@@ -6,6 +6,8 @@ export interface Citation {
   documentId: string; // UUID -> use with GET /documents/:id
   title: string;
   url?: string;
+  /** True when the original file can be downloaded via GET /documents/:id/download. */
+  downloadable?: boolean;
   chunkId: string;
   score: number;
 }

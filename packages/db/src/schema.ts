@@ -99,6 +99,15 @@ export const documents = pgTable(
     metadata: jsonb("metadata").notNull().$type<Record<string, unknown>>(),
     /** Cached parsed markdown for quick retrieval of full document */
     markdown: text("markdown").notNull(),
+    /**
+     * Object-store location of the ORIGINAL file bytes, so a cited document can
+     * be downloaded as-is. Null when originals are not stored (object storage
+     * disabled, an upload failure, or a document ingested before storage was
+     * enabled).
+     */
+    storageKey: text("storage_key"),
+    storageBucket: text("storage_bucket"),
+    originalSizeBytes: bigint("original_size_bytes", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -227,6 +236,46 @@ export const ingestionJobs = pgTable(
 );
 
 // ----------------------------------------------------------------------------
+// pending_uploads — staging rows for browser-uploaded files awaiting ingestion.
+// A `POST /sources/:id/documents` writes the original bytes to the object store
+// and records one row here (status "pending"). The `custom` connector claims
+// these rows on the next sync (pending -> ingested), turning each into a
+// SourceDocument the pipeline parses/chunks/embeds like any other document.
+// Scoped to `custom` sources only.
+// ----------------------------------------------------------------------------
+export const pendingUploads = pgTable(
+  "pending_uploads",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    /** Stable id threaded to the ingested document's `externalId` (UUID). */
+    externalId: text("external_id").notNull(),
+    /** Original filename, used as the document title in citations. */
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Object-store key + bucket where the original bytes were written. */
+    storageKey: text("storage_key").notNull(),
+    storageBucket: text("storage_bucket").notNull(),
+    /** "pending" | "ingested" | "failed". Claimed pending -> ingested on sync. */
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    sourceStatusIdx: index("pending_uploads_source_status_idx").on(
+      table.sourceId,
+      table.status,
+    ),
+  }),
+);
+
+// ----------------------------------------------------------------------------
 // Inferred row types — what queries return / what callers insert
 // ----------------------------------------------------------------------------
 export type Source = typeof sources.$inferSelect;
@@ -237,3 +286,5 @@ export type ChunkRow = typeof chunks.$inferSelect;
 export type NewChunk = typeof chunks.$inferInsert;
 export type IngestionJob = typeof ingestionJobs.$inferSelect;
 export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
+export type PendingUpload = typeof pendingUploads.$inferSelect;
+export type NewPendingUpload = typeof pendingUploads.$inferInsert;

@@ -48,6 +48,9 @@ export async function buildTestApi(opts: {
     queue: queueStub,
     retriever,
     generator: opts.generator ?? null,
+    // Object storage isn't exercised by the e2e API harness (no store running);
+    // the download route returns 404, which is the intended disabled behavior.
+    objectStore: null,
     logger,
     close: async () => undefined, // owned by the spec, not by the harness
   };

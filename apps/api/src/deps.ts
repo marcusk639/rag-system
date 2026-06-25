@@ -1,4 +1,4 @@
-import type { Config } from "@rag/core";
+import type { Config, ObjectStore } from "@rag/core";
 import type { Db } from "@rag/db";
 import { buildCoreDeps, type Queue } from "@rag/runtime";
 import type { Generator, Retriever } from "@rag/rag";
@@ -15,6 +15,8 @@ export interface Deps {
   retriever: Retriever;
   /** Null when `config.generation` is not configured — /ask returns 503 in that case. */
   generator: Generator | null;
+  /** Object store for original document bytes; null when storage is disabled. */
+  objectStore: ObjectStore | null;
   /** Threaded to the service layer so it can capture failures server-side. */
   logger: Logger;
   close: () => Promise<void>;
@@ -22,9 +24,7 @@ export interface Deps {
 
 export async function buildDeps(config: Config, logger: Logger): Promise<Deps> {
   logger.info("building runtime dependencies");
-  const { db, queue, retriever, generator, close } = await buildCoreDeps(
-    config,
-    logger,
-  );
-  return { db, queue, retriever, generator, logger, close };
+  const { db, queue, retriever, generator, objectStore, close } =
+    await buildCoreDeps(config, logger);
+  return { db, queue, retriever, generator, objectStore, logger, close };
 }

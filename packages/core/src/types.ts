@@ -219,6 +219,8 @@ export interface RetrievalResult {
     sourceId: string;
     sourceKind: SourceKind;
     url?: string;
+    /** True when the original file bytes are stored and can be downloaded. */
+    hasOriginal?: boolean;
     metadata: DocumentMetadata;
   };
   /** Position within the document */

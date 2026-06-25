@@ -5,11 +5,14 @@ import {
   chunks,
   documents,
   ingestionJobs,
+  pendingUploads,
   sources,
   type NewChunk,
   type NewDocument,
   type NewIngestionJob,
+  type NewPendingUpload,
   type NewSource,
+  type PendingUpload,
   type Source,
 } from "./schema.js";
 
@@ -186,7 +189,6 @@ export async function replaceChunks(
   });
 }
 
-
 /**
  * Whether a document currently has any chunk rows.
  *
@@ -207,6 +209,58 @@ export async function documentHasChunks(
     ) AS exists
   `);
   return result.rows[0]?.exists ?? false;
+}
+
+/**
+ * Delete a document by its source-scoped external ID. The `chunks` FK is
+ * `ON DELETE CASCADE`, so removing the document also removes its chunks — this
+ * is how delta tombstones (a file deleted in the source) are reconciled so the
+ * corpus stops returning stale content. Returns true when a row was removed.
+ */
+export async function deleteDocumentByExternalId(
+  db: Db,
+  sourceId: string,
+  externalId: string,
+): Promise<{ deleted: boolean; storageKey: string | null }> {
+  const result = await db.execute<{
+    id: string;
+    storage_key: string | null;
+  }>(sql`
+    DELETE FROM ${documents}
+    WHERE ${documents.sourceId} = ${sourceId}
+      AND ${documents.externalId} = ${externalId}
+    RETURNING ${documents.id} AS id, ${documents.storageKey} AS storage_key
+  `);
+  const row = result.rows[0];
+  return {
+    deleted: result.rows.length > 0,
+    storageKey: row?.storage_key ?? null,
+  };
+}
+
+/**
+ * Record where a document's original bytes were stored. Called after a
+ * successful object-store upload so the download route can serve the original.
+ * Kept separate from `upsertDocument` so a storage failure never blocks the
+ * text-ingestion path (the row is upserted first; storage columns are filled
+ * in afterwards, or left null).
+ */
+export async function setDocumentStorage(
+  db: Db,
+  documentId: string,
+  storage: {
+    storageKey: string;
+    storageBucket: string;
+    originalSizeBytes: number;
+  },
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE ${documents}
+    SET ${documents.storageKey} = ${storage.storageKey},
+        ${documents.storageBucket} = ${storage.storageBucket},
+        ${documents.originalSizeBytes} = ${storage.originalSizeBytes}
+    WHERE ${documents.id} = ${documentId}
+  `);
 }
 
 // ============================================================================
@@ -368,6 +422,7 @@ export async function hybridSearch(
       source_id: string;
       source_kind: SourceKind;
       metadata: Record<string, unknown>;
+      has_original: boolean;
     }>(sql`
       WITH params AS (
         SELECT ${embedLiteral}::vector AS q_embedding,
@@ -424,7 +479,8 @@ export async function hybridSearch(
         doc.title,
         doc.source_id,
         src.kind AS source_kind,
-        doc.metadata
+        doc.metadata,
+        (doc.storage_key IS NOT NULL) AS has_original
       FROM fused f
       JOIN chunks c ON c.id = f.chunk_id
       JOIN documents doc ON doc.id = c.document_id
@@ -459,6 +515,7 @@ export async function hybridSearch(
         sourceId: r.source_id,
         sourceKind: r.source_kind,
         url,
+        hasOriginal: r.has_original,
         metadata,
       },
       chunk: {
@@ -490,6 +547,34 @@ export async function updateIngestionJob(
 }
 
 /**
+ * Add to an ingestion job's running totals. Used by per-page sync continuations
+ * so the single history row accumulates counts across pages instead of the
+ * last page overwriting earlier ones.
+ *
+ * NOTE: additive updates are NOT crash-safe / exactly-once — if the worker
+ * crashes after incrementing but before the job is marked complete, pg-boss
+ * retries the page and adds its counts again. These counters are observability,
+ * not billing; for an exact count, COUNT over `documents`/`chunks` instead.
+ */
+export async function incrementIngestionJobCounters(
+  db: Db,
+  id: string,
+  delta: {
+    documentsProcessed: number;
+    documentsFailed: number;
+    chunksCreated: number;
+  },
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE ${ingestionJobs}
+    SET documents_processed = documents_processed + ${delta.documentsProcessed},
+        documents_failed = documents_failed + ${delta.documentsFailed},
+        chunks_created = chunks_created + ${delta.chunksCreated}
+    WHERE id = ${id}
+  `);
+}
+
+/**
  * Delete an ingestion-job history row by id. Used to clean up a `pending` row
  * that was created optimistically but whose queue hand-off failed (e.g. a
  * duplicate sync rejected by the pg-boss singleton guard), so no orphaned
@@ -515,4 +600,84 @@ export async function deleteIngestionJob(db: Db, id: string) {
 export function toPublicSource(row: Source): Omit<Source, "config"> {
   const { config: _config, ...safe } = row;
   return safe;
+}
+
+// ============================================================================
+// Pending uploads — staging rows for browser-uploaded files (custom sources).
+// ============================================================================
+
+/**
+ * Record a staged upload. The original bytes are already in the object store
+ * under `storageKey`; this row is what the `custom` connector later claims and
+ * turns into a SourceDocument for ingestion.
+ */
+export async function createPendingUpload(
+  db: Db,
+  row: NewPendingUpload,
+): Promise<PendingUpload> {
+  const [created] = await db.insert(pendingUploads).values(row).returning();
+  if (!created) throw new Error("createPendingUpload: insert returned no row");
+  return created;
+}
+
+/**
+ * Atomically claim up to `limit` pending uploads for a source: select the
+ * oldest pending rows (FOR UPDATE SKIP LOCKED so concurrent workers never grab
+ * the same row) and flip them to "ingested" in the same transaction, returning
+ * the claimed rows. The connector then ingests them. A claimed row is NOT
+ * re-listed on a later sync, so a downstream ingest failure leaves the upload
+ * recorded but un-chunked; the remedy is a re-upload (acceptable for the
+ * manual, low-volume Phase-1 upload path).
+ */
+export async function claimPendingUploads(
+  db: Db,
+  sourceId: string,
+  limit: number,
+): Promise<PendingUpload[]> {
+  return db.transaction(async (tx) => {
+    const claimable = await tx
+      .select({ id: pendingUploads.id })
+      .from(pendingUploads)
+      .where(
+        and(
+          eq(pendingUploads.sourceId, sourceId),
+          eq(pendingUploads.status, "pending"),
+        ),
+      )
+      .orderBy(pendingUploads.createdAt)
+      .limit(limit)
+      .for("update", { skipLocked: true });
+
+    if (claimable.length === 0) return [];
+
+    return tx
+      .update(pendingUploads)
+      .set({ status: "ingested" })
+      .where(
+        inArray(
+          pendingUploads.id,
+          claimable.map((r) => r.id),
+        ),
+      )
+      .returning();
+  });
+}
+
+/** Look up a single staged upload by its (sourceId, externalId). */
+export async function getPendingUploadByExternalId(
+  db: Db,
+  sourceId: string,
+  externalId: string,
+): Promise<PendingUpload | null> {
+  const [row] = await db
+    .select()
+    .from(pendingUploads)
+    .where(
+      and(
+        eq(pendingUploads.sourceId, sourceId),
+        eq(pendingUploads.externalId, externalId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }

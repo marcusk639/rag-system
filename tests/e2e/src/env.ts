@@ -68,6 +68,16 @@ export function makeTestConfig(): Config {
       defaultTopK: 8,
       hybridDenseWeight: 0.7,
       hybridSparseWeight: 0.3,
+      maxChunksPerDocument: 3,
+    },
+    // Reranking disabled in the e2e harness (no hosted reranker available).
+    rerank: { provider: "none", poolMultiplier: 5 },
+    // Originals storage disabled in the e2e harness (no object store running).
+    objectStore: {
+      provider: "none",
+      region: "us-east-1",
+      forcePathStyle: true,
+      keyPrefix: "",
     },
   };
 }

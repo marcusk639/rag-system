@@ -41,13 +41,19 @@ function renderAnswer(
     title: string;
     url?: string;
     documentId: string;
+    downloadable?: boolean;
   }>,
 ): string {
   if (citations.length === 0) return answer;
   const block = citations
     .map((c) => {
       const link = c.url ? ` — ${c.url}` : ` — id=${c.documentId}`;
-      return `[${c.index}] ${c.title}${link}`;
+      // When the original file is stored, point agents at the download route so
+      // they can fetch the exact cited document, not just view it in-source.
+      const dl = c.downloadable
+        ? ` — download: /documents/${c.documentId}/download`
+        : "";
+      return `[${c.index}] ${c.title}${link}${dl}`;
     })
     .join("\n");
   return `${answer}\n\nSources:\n${block}`;
@@ -77,6 +83,7 @@ export function registerAsk(
           { question, topK, sourceIds, filter },
           deps.config.retrieval.defaultTopK,
           scope,
+          deps.config.retrieval.maxChunksPerDocument,
         );
       } catch (err) {
         if (err instanceof GenerationNotConfiguredError) {

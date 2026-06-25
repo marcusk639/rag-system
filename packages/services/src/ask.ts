@@ -1,9 +1,33 @@
 import type { GenerationResult, Generator } from "@rag/rag";
 import { buildCitations } from "@rag/rag";
-import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
+import type {
+  AuthorizationScope,
+  RetrievalResult,
+  SanitizedRetrievalResult,
+} from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
+
+/**
+ * Per-document diversity cap. Returns a NEW array (no mutation) keeping at most
+ * `cap` chunks from any single document, preserving the original relevance
+ * order. Stops one long file from crowding out other sources before the
+ * generator (or caller) sees the results. `cap <= 0` disables the cap.
+ */
+export function capChunksPerDocument(
+  results: RetrievalResult[],
+  cap: number,
+): RetrievalResult[] {
+  if (cap <= 0) return results;
+  const seenPerDoc = new Map<string, number>();
+  return results.filter((r) => {
+    const count = seenPerDoc.get(r.document.id) ?? 0;
+    if (count >= cap) return false;
+    seenPerDoc.set(r.document.id, count + 1);
+    return true;
+  });
+}
 
 /**
  * `ServiceDeps` with the generator proven non-null. Retrieval+generation logic
@@ -50,13 +74,20 @@ export async function askQuestion(
   input: AskInput,
   defaultTopK: number,
   scope: AuthorizationScope,
+  maxChunksPerDocument = 0,
 ): Promise<AskResult> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
   }
   // Past this seam the generator is proven present; the core logic runs on the
   // narrowed `AskDeps` so it never has to re-check (or `!`-assert) the nullable.
-  return ask({ ...deps, generator: deps.generator }, input, defaultTopK, scope);
+  return ask(
+    { ...deps, generator: deps.generator },
+    input,
+    defaultTopK,
+    scope,
+    maxChunksPerDocument,
+  );
 }
 
 function buildQuery(input: AskInput, defaultTopK: number) {
@@ -73,10 +104,11 @@ async function ask(
   input: AskInput,
   defaultTopK: number,
   scope: AuthorizationScope,
+  maxChunksPerDocument: number,
 ): Promise<AskResult> {
-  const retrieved = await deps.retriever.search(
-    buildQuery(input, defaultTopK),
-    scope,
+  const retrieved = capChunksPerDocument(
+    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
+    maxChunksPerDocument,
   );
 
   if (retrieved.length === 0) {
@@ -118,6 +150,7 @@ export async function* askQuestionStream(
   input: AskInput,
   defaultTopK: number,
   scope: AuthorizationScope,
+  maxChunksPerDocument = 0,
 ): AsyncGenerator<AskStreamEvent> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -127,6 +160,7 @@ export async function* askQuestionStream(
     input,
     defaultTopK,
     scope,
+    maxChunksPerDocument,
   );
 }
 
@@ -135,10 +169,11 @@ async function* askStream(
   input: AskInput,
   defaultTopK: number,
   scope: AuthorizationScope,
+  maxChunksPerDocument: number,
 ): AsyncGenerator<AskStreamEvent> {
-  const retrieved = await deps.retriever.search(
-    buildQuery(input, defaultTopK),
-    scope,
+  const retrieved = capChunksPerDocument(
+    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
+    maxChunksPerDocument,
   );
 
   if (retrieved.length === 0) {

@@ -14,4 +14,8 @@ export {
   type TriggerSyncInput,
   type TriggerSyncResult,
 } from "./sources.js";
-export { getDocumentById } from "./documents.js";
+export {
+  getDocumentById,
+  getDocumentDownload,
+  type DocumentDownload,
+} from "./documents.js";
