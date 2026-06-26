@@ -31,15 +31,26 @@ export async function registerAskRoute(
   // `askQuestion`; GenerationNotConfiguredError maps to 503 via the central
   // error handler (STATUS_BY_CODE). The service enforces the confidentiality
   // scope and PII allowlist; the route only resolves the principal's scope.
-  typed.post("/ask", { schema: { body: AskBody } }, async (request) => {
-    return askQuestion(
-      deps,
-      request.body,
-      config.retrieval.defaultTopK,
-      scopeFromRequest(request),
-      config.retrieval.maxChunksPerDocument,
-    );
-  });
+  //
+  // Tighter per-route rate limit (10/min) — each request triggers an embedding
+  // call + full LLM generation, so cost exposure is much higher than a plain
+  // read. The global 60/min default applies to all other routes.
+  typed.post(
+    "/ask",
+    {
+      schema: { body: AskBody },
+      config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+    },
+    async (request) => {
+      return askQuestion(
+        deps,
+        request.body,
+        config.retrieval.defaultTopK,
+        scopeFromRequest(request),
+        config.retrieval.maxChunksPerDocument,
+      );
+    },
+  );
 
   // POST /ask/stream — same retrieval + generation as /ask, but streamed as SSE
   // so the chat client can render tokens as they arrive. The generator-null
@@ -53,7 +64,10 @@ export async function registerAskRoute(
   //   event: error  data: {message}
   typed.post(
     "/ask/stream",
-    { schema: { body: AskBody } },
+    {
+      schema: { body: AskBody },
+      config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+    },
     async (request, reply) => {
       if (!deps.generator) {
         throw new GenerationNotConfiguredError();
