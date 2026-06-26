@@ -12,6 +12,15 @@ export const Config = z
     databaseUrl: z.string().url(),
     pgBossSchema: z.string().default("pgboss"),
 
+    /**
+     * Optional TLS mode for the app's Postgres connection pool, from
+     * DATABASE_SSL: "require" (verify cert), "no-verify" (TLS, skip verify),
+     * "disable"/unset (no explicit TLS on the pool). For uniform coverage
+     * (pool + pg-boss + migrations) prefer `?sslmode=require` in DATABASE_URL;
+     * this field only configures the main app pool.
+     */
+    databaseSsl: z.enum(["disable", "require", "no-verify"]).optional(),
+
     embedding: z.object({
       provider: z.enum(["gemini", "openai", "local"]),
       model: z.string(),
@@ -350,6 +359,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : env.NODE_ENV === "test"
           ? "test"
           : "development",
+    databaseSsl: env.DATABASE_SSL || undefined,
     embedding: {
       provider,
       model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
