@@ -1,10 +1,36 @@
-import { NotFoundError } from "@rag/core";
-import { createSource, getSource, toPublicSource } from "@rag/db";
+import { randomUUID } from "node:crypto";
+import { NotFoundError, RagError, ValidationError } from "@rag/core";
+import {
+  createPendingUpload,
+  createSource,
+  getSource,
+  toPublicSource,
+} from "@rag/db";
 import { listPublicSources, triggerSync } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
+import { scopeFromRequest } from "./authz.js";
+
+/**
+ * MIME types accepted for browser uploads. Kept deliberately narrow — the
+ * parser sidecar handles these document formats; arbitrary binaries are
+ * rejected at the boundary. (Validated again, structurally, by the pipeline.)
+ */
+const ALLOWED_UPLOAD_MIME = new Set<string>([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "application/msword", // .doc
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "application/vnd.ms-excel", // .xls
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
+  "application/vnd.ms-powerpoint", // .ppt
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "text/html",
+]);
 
 const SourceKindSchema = z.enum([
   "sharepoint",
@@ -102,6 +128,105 @@ export async function registerSourceRoutes(
       );
 
       return reply.code(202).send(result);
+    },
+  );
+
+  // POST /sources/:id/documents — upload a single file into a `custom` source.
+  // The original bytes are written to the object store and a `pending_uploads`
+  // row is recorded; an incremental sync is then enqueued, and the custom
+  // connector ingests the staged file on the worker (parse → chunk → embed).
+  // Multipart, so the body is read via `request.file()` (no Zod body schema).
+  typed.post(
+    "/sources/:id/documents",
+    { schema: { params: IdParams } },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      // Authz: admin (unrestricted) or a scoped principal whose allow-list
+      // includes this source. A forbidden source returns 404 (no existence
+      // leak) — same convention as GET /documents/:id.
+      const scope = scopeFromRequest(request);
+      const permitted =
+        scope.enforcedSourceIds === null ||
+        scope.enforcedSourceIds.includes(id);
+      if (!permitted) throw new NotFoundError(`Source ${id} not found`);
+
+      const source = await getSource(deps.db, id);
+      if (!source) throw new NotFoundError(`Source ${id} not found`);
+
+      // Uploads only target `custom` sources: their connector reads the staged
+      // uploads. Other kinds ingest from their external system via sync.
+      if (source.kind !== "custom") {
+        throw new ValidationError(
+          "documents can only be uploaded to a 'custom' source",
+        );
+      }
+
+      // Originals must be persisted so cited documents stay downloadable.
+      if (!deps.objectStore) {
+        throw new RagError(
+          "object store is not configured; uploads are disabled",
+          "STORAGE_NOT_CONFIGURED",
+        );
+      }
+
+      const file = await request.file();
+      if (!file) {
+        throw new ValidationError("multipart upload contained no file");
+      }
+
+      if (!ALLOWED_UPLOAD_MIME.has(file.mimetype)) {
+        throw new ValidationError(`unsupported file type: ${file.mimetype}`);
+      }
+
+      // Buffer the file. @fastify/multipart throws a 413 past the configured
+      // fileSize limit; `truncated` is a belt-and-suspenders guard in case the
+      // throwing behavior is ever disabled.
+      const content = await file.toBuffer();
+      if (file.file.truncated) {
+        throw new ValidationError("file exceeds the upload size limit");
+      }
+      if (content.byteLength === 0) {
+        throw new ValidationError("uploaded file is empty");
+      }
+
+      const externalId = randomUUID();
+      const storageKey = `uploads/${id}/${externalId}`;
+      await deps.objectStore.put(storageKey, content, file.mimetype);
+
+      await createPendingUpload(deps.db, {
+        sourceId: id,
+        externalId,
+        filename: file.filename,
+        mimeType: file.mimetype,
+        sizeBytes: content.byteLength,
+        storageKey,
+        storageBucket: deps.objectStore.bucket,
+      });
+
+      // Reuse the standard sync path so the upload flows through the exact same
+      // worker → runIngestion → ingestOne machinery as every other source.
+      const result = await triggerSync(deps, {
+        sourceId: id,
+        mode: "incremental",
+      });
+
+      request.log.info(
+        {
+          sourceId: id,
+          externalId,
+          filename: file.filename,
+          sizeBytes: content.byteLength,
+          ingestionId: result.ingestionId,
+        },
+        "document upload staged and sync enqueued",
+      );
+
+      return reply.code(202).send({
+        ...result,
+        documentId: externalId,
+        filename: file.filename,
+      });
     },
   );
 }

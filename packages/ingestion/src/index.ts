@@ -8,6 +8,9 @@ export {
   JOB_NAMES,
   createQueue,
   enqueueSync,
+  enqueueContinuation,
+  SYNC_EXPIRE_SECONDS,
+  MAX_SYNC_CONTINUATIONS,
   type SyncSourcePayload,
   type QueueOptions,
 } from "./queue.js";

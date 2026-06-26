@@ -8,7 +8,11 @@ import {
 } from "@rag/core";
 import { makeCursorCodec } from "../util/cursor.js";
 import { paginate, type ConnectorPage } from "../util/paginate.js";
-import { GraphClient, type GraphCredentials } from "./client.js";
+import {
+  GraphClient,
+  type GraphCredentials,
+  type GraphReader,
+} from "./client.js";
 import { SharePointConfigSchema, type SharePointConfig } from "./config.js";
 
 interface DriveItem {
@@ -41,6 +45,7 @@ interface DriveSummary {
 
 interface DrivesResponse {
   value: DriveSummary[];
+  "@odata.nextLink"?: string;
 }
 
 /**
@@ -82,13 +87,15 @@ export class SharePointConnector implements Connector {
   readonly kind = "sharepoint";
 
   private readonly config: SharePointConfig;
-  private readonly graph: GraphClient;
+  private readonly graph: GraphReader;
   private readonly logger: Logger;
 
   constructor(
     rawConfig: unknown,
     credentials: GraphCredentials,
     logger: Logger,
+    // Optional injection point for tests; production wires a real GraphClient.
+    graph?: GraphReader,
   ) {
     const parsed = SharePointConfigSchema.safeParse(rawConfig);
     if (!parsed.success) {
@@ -98,7 +105,7 @@ export class SharePointConnector implements Connector {
       );
     }
     this.config = parsed.data;
-    this.graph = new GraphClient(credentials);
+    this.graph = graph ?? new GraphClient(credentials);
     this.logger = logger.child({ connector: "sharepoint" });
   }
 
@@ -144,8 +151,35 @@ export class SharePointConnector implements Connector {
     const page = await this.graph.getJson<DeltaResponse>(url);
 
     const documents: SourceDocument[] = [];
+    const deletions: string[] = [];
+    let skippedOversize = 0;
     for (const item of page.value) {
-      if (documents.length >= remaining) break;
+      // Tombstone: surface the deletion regardless of the document budget so a
+      // page full of files can never hide a deletion behind the budget cutoff.
+      if (item.deleted?.state) {
+        deletions.push(`${driveId}:${item.id}`);
+        continue;
+      }
+      // Folders and non-file entries are structural, not documents.
+      if (item.folder !== undefined || !item.file) continue;
+      // Oversize files are skipped but COUNTED so the skip is observable
+      // (surfaced in the ingestion run summary) rather than silent.
+      if (typeof item.size === "number" && item.size > this.config.maxFileBytes) {
+        skippedOversize++;
+        this.logger.warn(
+          {
+            marker: "ingest.skip.oversize",
+            id: item.id,
+            size: item.size,
+            max: this.config.maxFileBytes,
+          },
+          "sharepoint item exceeds maxFileBytes, skipping",
+        );
+        continue;
+      }
+      // Document budget for this page is full: keep scanning (to collect any
+      // later tombstones) but stop downloading more file content.
+      if (documents.length >= remaining) continue;
       const doc = await this.toSourceDocument(driveId, item);
       if (doc) documents.push(doc);
     }
@@ -160,7 +194,7 @@ export class SharePointConnector implements Connector {
     }
 
     const done = cursor.current === null && cursor.drives.length === 0;
-    return { documents, cursor, done };
+    return { documents, cursor, done, deletions, skippedOversize };
   }
 
   async fetch(externalId: string): Promise<SourceDocument> {
@@ -202,14 +236,24 @@ export class SharePointConnector implements Connector {
       cursor.drives = [this.config.driveId];
       return cursor;
     }
-    const res = await this.graph.getJson<DrivesResponse>(
-      `/sites/${encodeURIComponent(this.config.siteId)}/drives`,
-    );
-    cursor.drives = res.value
-      .filter(
-        (d) => d.driveType === undefined || d.driveType === "documentLibrary",
-      )
-      .map((d) => d.id);
+    // Enumerate EVERY document library on the site. Graph paginates this
+    // collection with `@odata.nextLink`; following it is required — a site
+    // with more libraries than one Graph page would otherwise silently drop
+    // every drive past the first page.
+    const driveIds: string[] = [];
+    let url: string | undefined = `/sites/${encodeURIComponent(
+      this.config.siteId,
+    )}/drives`;
+    while (url) {
+      const res: DrivesResponse = await this.graph.getJson<DrivesResponse>(url);
+      for (const d of res.value) {
+        if (d.driveType === undefined || d.driveType === "documentLibrary") {
+          driveIds.push(d.id);
+        }
+      }
+      url = res["@odata.nextLink"];
+    }
+    cursor.drives = driveIds;
     this.logger.debug(
       { siteId: this.config.siteId, drives: cursor.drives.length },
       "sharepoint bootstrapped cursor",

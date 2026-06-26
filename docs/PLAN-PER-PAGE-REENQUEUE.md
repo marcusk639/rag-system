@@ -226,6 +226,37 @@ moves the `markSourceSynced` stamp to the terminal continuation). The
 - Do NOT overwrite counters on continuation — accumulate.
 - Do NOT re-enqueue before the real work is done in the handler (a thrown error after re-enqueue could double-execute). Re-enqueue as the **last** step before returning.
 
+### Phase 3 results (COMPLETE — 2026-06-21)
+
+Implemented and green (`pnpm typecheck` 13/13; `@rag/ingestion` 19 tests incl. new `queue.test.ts` 5;
+`apps/worker` NEW vitest harness + `sync-source.test.ts` 7; full workspace build clean).
+
+- **Singleton policy (Option B1, via `updateQueue`).** `createQueue` now calls
+  `boss.updateQueue("rag.sync_source", { policy: "singleton" })` after queue creation — idempotent,
+  reversible, no drop/recreate (per the Phase 1 finding that `singletonKey` is inert under `standard`). One
+  active job per `sync:${sourceId}`; the continuation queues behind it. This also fixes the latent
+  external-duplicate hole (a second trigger now serializes instead of running concurrently).
+- **Worker self-re-enqueue.** `handleSyncSource` passes `maxPagesPerRun: PAGES_PER_RUN` (5, coarser for the
+  shared Graph quota). On `done` → `markSourceSynced` + mark the row `completed`. On `!done` → guard cursor
+  progress, then `enqueueContinuation` (same `ingestionId`, `continuation: true`, `continuationCount+1`) and
+  return. `running`/`startedAt` and `connector.validate()` happen ONLY on the first job (continuations skip
+  both — no N× Graph auth). Counters accumulate via the new additive `incrementIngestionJobCounters`
+  (documented approximate-under-retry).
+- **Continuation resumes from cursor** even for `mode: "full"` (`full` resets the cursor only on the first
+  job). **Loop-safety:** aborts if the cursor didn't advance while `!done`, and a `MAX_SYNC_CONTINUATIONS`
+  (100k) hard cap.
+- **Payload** gained `continuation?` + `continuationCount?` (absent on old/first jobs → falsy, so mixed-fleet
+  rolling deploys are safe).
+
+**Phase 4 (partial, folded in):** expiry switched from `expireInHours: 6` to `expireInSeconds:
+SYNC_EXPIRE_SECONDS` (1800) on both initial + continuation sends; terminal failures log a greppable
+`marker: "ingest.sync.failed"`. A dedicated dead-letter queue was NOT added (the log marker + existing
+`failed` row are the visibility surface).
+
+**Deploy note:** the `updateQueue` policy flip applies to newly-inserted jobs; in-flight `standard` jobs
+finish under their old policy (still correct, just unserialized for their remaining life). Reversible via
+`updateQueue(..., { policy: "standard" })`.
+
 ---
 
 ## Phase 4 — Tighten expiry (S2) + failure visibility / dead-letter (S3) (LOW + MEDIUM; ~0.5 day)

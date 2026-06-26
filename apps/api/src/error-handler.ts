@@ -16,6 +16,9 @@ const STATUS_BY_CODE: Record<string, number> = {
   // /ask was called but no generation provider is configured on the server.
   // (@rag/services' GenerationNotConfiguredError.)
   GENERATION_NOT_CONFIGURED: 503,
+  // A document upload arrived but no object store is configured to persist the
+  // original bytes — a server misconfiguration, not a client error.
+  STORAGE_NOT_CONFIGURED: 503,
   CONNECTOR_AUTH_ERROR: 502,
   CONNECTOR_TRANSIENT_ERROR: 503,
   PARSER_ERROR: 502,

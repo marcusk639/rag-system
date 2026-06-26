@@ -10,7 +10,7 @@ import type { Db } from "@rag/db";
 import type PgBoss from "pg-boss";
 import pino from "pino";
 import { TEST_API_TOKEN, makeTestConfig } from "../env.js";
-import { FakeEmbedder } from "../fakes/fake-embedder.js";
+import { FakeEmbedder } from "@rag/test-fixtures";
 
 /**
  * Spin up a Fastify instance in-process with the FakeEmbedder + an optional
@@ -48,6 +48,9 @@ export async function buildTestApi(opts: {
     queue: queueStub,
     retriever,
     generator: opts.generator ?? null,
+    // Object storage isn't exercised by the e2e API harness (no store running);
+    // the download route returns 404, which is the intended disabled behavior.
+    objectStore: null,
     logger,
     close: async () => undefined, // owned by the spec, not by the harness
   };

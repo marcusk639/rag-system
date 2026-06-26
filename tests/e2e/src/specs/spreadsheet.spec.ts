@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { csvDoc } from "../fakes/factories.js";
+import { FakeConnector, csvDoc } from "@rag/test-fixtures";
 import {
   createCustomSource,
   getChunksForExternalId,

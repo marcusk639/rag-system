@@ -37,6 +37,7 @@ export async function registerAskRoute(
       request.body,
       config.retrieval.defaultTopK,
       scopeFromRequest(request),
+      config.retrieval.maxChunksPerDocument,
     );
   });
 
@@ -73,6 +74,7 @@ export async function registerAskRoute(
           request.body,
           config.retrieval.defaultTopK,
           scope,
+          config.retrieval.maxChunksPerDocument,
         )) {
           if (event.type === "token") {
             raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);

@@ -14,6 +14,12 @@ export { OutlookConnector } from "./outlook/index.js";
 export { OutlookConfigSchema, type OutlookConfig } from "./outlook/config.js";
 
 export {
+  CustomConnector,
+  type StagedUpload,
+  type UploadStagingStore,
+} from "./custom/index.js";
+
+export {
   createConnector,
   type ConnectorEnv,
   type SourceLike,

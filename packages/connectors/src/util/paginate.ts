@@ -15,6 +15,14 @@ export interface ConnectorPage<T> {
    * documents — otherwise a delta walk terminates early and loses later pages.
    */
   done: boolean;
+  /**
+   * External IDs the upstream feed reported as deleted on this page (delta
+   * tombstones). Collected independently of the `remaining` document budget so
+   * deletions are never dropped when the doc budget fills. Optional.
+   */
+  deletions?: string[];
+  /** Items skipped on this page for exceeding the size cap (observability). Optional. */
+  skippedOversize?: number;
 }
 
 export interface PaginateParams<T> {
@@ -41,6 +49,8 @@ export async function paginate<T>(
 ): Promise<ConnectorListResult> {
   const maxItems = Math.max(1, params.maxItems);
   const documents: SourceDocument[] = [];
+  const deletions: string[] = [];
+  let skippedOversize = 0;
   let cursor = params.cursor;
   let done = false;
 
@@ -52,11 +62,21 @@ export async function paginate<T>(
       if (documents.length >= maxItems) break;
       documents.push(doc);
     }
+    if (page.deletions && page.deletions.length > 0) {
+      deletions.push(...page.deletions);
+    }
+    if (page.skippedOversize) skippedOversize += page.skippedOversize;
     if (page.done) {
       done = true;
       break;
     }
   }
 
-  return { documents, nextCursor: params.encode(cursor), done };
+  return {
+    documents,
+    nextCursor: params.encode(cursor),
+    done,
+    deletions,
+    skippedOversize,
+  };
 }

@@ -1,3 +1,4 @@
+import type { ObjectStore } from "@rag/core";
 import type { Db } from "@rag/db";
 import type { createQueue } from "@rag/ingestion";
 import type { Generator, Retriever } from "@rag/rag";
@@ -33,6 +34,12 @@ export interface ServiceDeps {
   /** Null when generation is not configured — `askQuestion` throws in that case. */
   generator: Generator | null;
   queue: Queue;
+  /**
+   * Object store for original document bytes. Null/undefined when storage is
+   * disabled — `getDocumentDownload` then treats every document as
+   * not-downloadable (404).
+   */
+  objectStore?: ObjectStore | null;
   /**
    * Server-side log sink. Service functions own capturing failures that a
    * transport might otherwise reduce to a user-facing string (e.g. the

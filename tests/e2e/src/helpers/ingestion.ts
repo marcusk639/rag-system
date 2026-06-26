@@ -4,7 +4,7 @@ import { runIngestion, type PipelineRunResult } from "@rag/ingestion";
 import type { Connector } from "@rag/core";
 import type { Db } from "@rag/db";
 import { env } from "../env.js";
-import { FakeEmbedder } from "../fakes/fake-embedder.js";
+import { FakeEmbedder } from "@rag/test-fixtures";
 
 /**
  * Drive the ingestion pipeline synchronously, bypassing pg-boss. The worker

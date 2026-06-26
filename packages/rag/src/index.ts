@@ -25,8 +25,16 @@ export {
   clampToTokenLimit,
 } from "./chunking/token-clamp.js";
 
+// Object storage (originals for downloadable citations)
+export { S3ObjectStore } from "./storage/s3-object-store.js";
+export { createObjectStore, documentStorageKey } from "./storage/factory.js";
+
 // Retrieval
 export { Retriever } from "./retrieval/retriever.js";
+export {
+  HttpCrossEncoderReranker,
+  createReranker,
+} from "./retrieval/reranker.js";
 
 // Generation
 export {

@@ -92,6 +92,7 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 
 ## Things that will trip you up
 
+- **Migrations auto-run on Railway deploy.** The `rag-worker` service has a `preDeployCommand` (`pnpm --filter @rag/db migrate`) — it's the single migration owner (it boots without the index-assert that crash-loops api/mcp). On a schema-changing release, deploy `rag-worker` first, then api/mcp. Don't add the same command to api/mcp (concurrent `0000_init` bootstrap contends). See `docs/DEPLOYMENT.md`.
 - **pgvector dimension mismatch.** The `chunks.embedding` column is `vector(768)` to match Gemini. If you switch to OpenAI 1536-dim, change the column AND drop/rebuild the HNSW index. The migration script in `packages/db/drizzle/` handles this if you regenerate.
 - **The Python parser is a separate process.** If parsing fails locally, the first thing to check is whether the `parser` container is up (`docker ps`) and reachable at `PARSER_URL`.
 - **pg-boss schema.** It auto-creates the `pgboss` schema on first connect. If you nuke the DB, the worker re-creates it — no manual migration needed.

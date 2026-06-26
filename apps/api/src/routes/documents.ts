@@ -1,4 +1,4 @@
-import { getDocumentById } from "@rag/services";
+import { getDocumentById, getDocumentDownload } from "@rag/services";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -27,6 +27,31 @@ export async function registerDocumentRoutes(
         request.params.id,
         scopeFromRequest(request),
       );
+    },
+  );
+
+  // GET /documents/:id/download — stream the ORIGINAL file bytes as an
+  // attachment. Same scope check as getDocumentById (forbidden/missing/
+  // not-stored all surface as 404 via NotFoundError). Streams from the object
+  // store; bytes never pass through the markdown/metadata path.
+  typed.get(
+    "/documents/:id/download",
+    { schema: { params: IdParams } },
+    async (request, reply) => {
+      const dl = await getDocumentDownload(
+        deps,
+        request.params.id,
+        scopeFromRequest(request),
+      );
+      reply.header("content-type", dl.contentType);
+      reply.header(
+        "content-disposition",
+        `attachment; filename="${dl.filename}"`,
+      );
+      if (dl.contentLength != null) {
+        reply.header("content-length", String(dl.contentLength));
+      }
+      return reply.send(dl.body);
     },
   );
 }

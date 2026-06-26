@@ -7,16 +7,20 @@ import {
   type Connector,
   type DocumentMetadata,
   type EmbeddingProvider,
+  type ObjectStore,
   type Parser,
   type SourceDocument,
 } from "@rag/core";
 import {
   type Db,
+  deleteDocumentByExternalId,
   documentHasChunks,
   replaceChunks,
+  setDocumentStorage,
   updateSourceCursor,
   upsertDocument,
 } from "@rag/db";
+import { documentStorageKey } from "@rag/rag";
 
 /**
  * The full ingestion pipeline for a single source.
@@ -56,12 +60,22 @@ export interface PipelineDeps {
   chunker: Chunker;
   embedder: EmbeddingProvider;
   logger: Logger;
+  /**
+   * Where original document bytes are persisted so cited documents can be
+   * downloaded later. Null/undefined disables storage (the document is still
+   * ingested and searchable; it just won't be downloadable).
+   */
+  objectStore?: ObjectStore | null;
 }
 
 export interface PipelineRunResult {
   documentsProcessed: number;
   documentsFailed: number;
   chunksCreated: number;
+  /** Documents removed this run because the source reported them deleted (tombstones). */
+  documentsDeleted: number;
+  /** Items the connector skipped for exceeding its size cap (observability only). */
+  documentsSkippedOversize: number;
   /**
    * The connector's authoritative end-of-feed flag for the LAST page processed.
    * `true` => the source is fully enumerated (nothing left to re-enqueue).
@@ -92,6 +106,8 @@ export async function runIngestion(
   let documentsProcessed = 0;
   let documentsFailed = 0;
   let chunksCreated = 0;
+  let documentsDeleted = 0;
+  let documentsSkippedOversize = 0;
   let pageDone = false;
   let pagesProcessed = 0;
 
@@ -107,7 +123,13 @@ export async function runIngestion(
     pageDone = page.done;
     pagesProcessed++;
     log.info(
-      { count: page.documents.length, nextCursor: page.nextCursor, pagesProcessed },
+      {
+        count: page.documents.length,
+        deletions: page.deletions?.length ?? 0,
+        skippedOversize: page.skippedOversize ?? 0,
+        nextCursor: page.nextCursor,
+        pagesProcessed,
+      },
       "fetched page",
     );
 
@@ -126,6 +148,37 @@ export async function runIngestion(
       }
     }
 
+    // Reconcile deletions (delta tombstones): remove the document AND its
+    // chunks (FK cascade) so files deleted in the source stop surfacing in
+    // search. A single failed delete must not abort the whole sync.
+    for (const externalId of page.deletions ?? []) {
+      try {
+        const del = await deleteDocumentByExternalId(
+          deps.db,
+          sourceId,
+          externalId,
+        );
+        if (del.deleted) {
+          documentsDeleted++;
+          // Best-effort: also remove the stored original so deleted files don't
+          // leave orphaned blobs. A failure here is logged, not fatal.
+          if (del.storageKey && deps.objectStore) {
+            try {
+              await deps.objectStore.delete(del.storageKey);
+            } catch (err) {
+              log.error(
+                { err, externalId, marker: "ingest.store.delete_failed" },
+                "failed to delete stored original for tombstone",
+              );
+            }
+          }
+        }
+      } catch (err) {
+        log.error({ err, externalId }, "failed to reconcile deleted document");
+      }
+    }
+    documentsSkippedOversize += page.skippedOversize ?? 0;
+
     // Persist cursor (CURSOR ONLY — `lastSyncedAt` is stamped once on
     // completion by the worker) so we don't re-process this page on retry.
     cursor = page.nextCursor;
@@ -138,7 +191,16 @@ export async function runIngestion(
   } while (!pageDone && pagesProcessed < maxPages);
 
   log.info(
-    { documentsProcessed, documentsFailed, chunksCreated, done: pageDone, pagesProcessed },
+    {
+      marker: "ingest.run.summary",
+      documentsProcessed,
+      documentsFailed,
+      documentsDeleted,
+      documentsSkippedOversize,
+      chunksCreated,
+      done: pageDone,
+      pagesProcessed,
+    },
     "ingestion run complete",
   );
   // `done: pageDone` tells the caller whether the source is fully enumerated.
@@ -148,6 +210,8 @@ export async function runIngestion(
     documentsProcessed,
     documentsFailed,
     chunksCreated,
+    documentsDeleted,
+    documentsSkippedOversize,
     done: pageDone,
     nextCursor: cursor,
   };
@@ -159,7 +223,7 @@ async function ingestOne(
   source: SourceDocument,
   deps: PipelineDeps,
 ): Promise<{ chunksCreated: number }> {
-  const { db, parser, chunker, embedder, logger } = deps;
+  const { db, parser, chunker, embedder, objectStore, logger } = deps;
   const log = logger.child({
     externalId: source.externalId,
     title: source.title,
@@ -192,6 +256,27 @@ async function ingestOne(
       Record<string, unknown>,
     markdown: parsed.markdown,
   });
+
+  // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.
+  // Only on content change (new/updated) — unchanged re-ingest skips the upload
+  // (idempotent). A storage failure must NOT fail text ingestion: the document
+  // stays searchable; it just isn't downloadable until the next successful sync.
+  if (contentChanged && objectStore) {
+    const storageKey = documentStorageKey(sourceId, source.externalId);
+    try {
+      await objectStore.put(storageKey, source.content, source.mimeType);
+      await setDocumentStorage(db, documentId, {
+        storageKey,
+        storageBucket: objectStore.bucket,
+        originalSizeBytes: source.content.byteLength,
+      });
+    } catch (err) {
+      log.error(
+        { err, marker: "ingest.store.put_failed" },
+        "failed to store original document bytes",
+      );
+    }
+  }
 
   if (!contentChanged) {
     // Normally an unchanged hash means the document is already fully ingested,

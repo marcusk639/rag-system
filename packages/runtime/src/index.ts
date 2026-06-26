@@ -1,10 +1,17 @@
-import { createAuthProvider, type AuthProvider, type Config } from "@rag/core";
+import {
+  createAuthProvider,
+  type AuthProvider,
+  type Config,
+  type ObjectStore,
+} from "@rag/core";
 import { createDb, type Db } from "@rag/db";
 import { createQueue } from "@rag/ingestion";
 import {
   Retriever,
   createEmbeddingProvider,
   createGenerator,
+  createObjectStore,
+  createReranker,
   type Generator,
 } from "@rag/rag";
 import type { Logger } from "pino";
@@ -31,6 +38,12 @@ export interface CoreDeps {
   queue: Queue;
   /** Null when `config.generation` is not configured. */
   generator: Generator | null;
+  /**
+   * Object store for original document bytes. Null when object storage is
+   * disabled (`OBJECT_STORE_PROVIDER=none`) — ingestion skips uploads and the
+   * download route returns 404.
+   */
+  objectStore: ObjectStore | null;
   /** Drain pg-boss (graceful) then the DB pool. Idempotent. */
   close: () => Promise<void>;
 }
@@ -95,11 +108,25 @@ export async function buildCoreDeps(
 
   const embedder = createEmbeddingProvider(config.embedding);
 
-  const retriever = new Retriever(db, embedder, {
-    topK: config.retrieval.defaultTopK,
-    denseWeight: config.retrieval.hybridDenseWeight,
-    sparseWeight: config.retrieval.hybridSparseWeight,
-  });
+  const objectStore = createObjectStore(config.objectStore);
+
+  const reranker = createReranker(config.rerank);
+
+  const retriever = new Retriever(
+    db,
+    embedder,
+    {
+      topK: config.retrieval.defaultTopK,
+      denseWeight: config.retrieval.hybridDenseWeight,
+      sparseWeight: config.retrieval.hybridSparseWeight,
+    },
+    {
+      reranker,
+      poolMultiplier: config.rerank.poolMultiplier,
+      onError: (err) =>
+        logger.warn({ err }, "reranker failed — falling back to RRF order"),
+    },
+  );
 
   const queue = await createQueue({
     databaseUrl: config.databaseUrl,
@@ -121,6 +148,7 @@ export async function buildCoreDeps(
         provider: config.generation.provider,
         model: config.generation.model,
         apiKey,
+        maxOutputTokens: config.generation.maxOutputTokens,
       });
     }
   }
@@ -143,5 +171,5 @@ export async function buildCoreDeps(
     }
   };
 
-  return { db, embedder, retriever, queue, generator, close };
+  return { db, embedder, retriever, queue, generator, objectStore, close };
 }

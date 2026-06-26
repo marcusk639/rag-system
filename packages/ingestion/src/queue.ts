@@ -20,7 +20,26 @@ export interface SyncSourcePayload {
    * instead of creating its own — keeping `triggerSync` the sole writer.
    */
   ingestionId: string;
+  /**
+   * True on a self-re-enqueued continuation (the source spans more pages than
+   * one job processes). A continuation resumes from the persisted cursor
+   * regardless of `mode`, does NOT reset the history row to "running", and does
+   * NOT re-validate connector credentials.
+   */
+  continuation?: boolean;
+  /** How many continuations have fired for this logical sync (loop-safety bound). */
+  continuationCount?: number;
 }
+
+/**
+ * Per-page jobs are short, so size expiry to a page-budget's worst-case
+ * DURATION (a handful of large PDFs through parser + embedder), not a whole
+ * source. A job stuck `active` past this is reclaimed → retried/failed.
+ */
+export const SYNC_EXPIRE_SECONDS = 1800;
+
+/** Hard cap on continuations per logical sync — a runaway-connector backstop. */
+export const MAX_SYNC_CONTINUATIONS = 100_000;
 
 export interface QueueOptions {
   databaseUrl: string;
@@ -53,6 +72,19 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
     await boss.createQueue(name);
   }
 
+  // Serialize sync jobs per source. Under the DEFAULT `standard` policy a
+  // `singletonKey` provides NO dedup or serialization (the uniqueness indexes
+  // are gated on policy), so two syncs — or a self-re-enqueued continuation and
+  // a retried predecessor — could run concurrently and race `sources.cursor`.
+  // `singleton` policy enforces exactly ONE active job per `singletonKey` while
+  // letting the next one QUEUE behind it. updateQueue is idempotent on an
+  // existing queue and reversible (set back to "standard"); it does NOT require
+  // dropping/recreating the queue, so no jobs are lost.
+  await boss.updateQueue(JOB_NAMES.syncSource, {
+    name: JOB_NAMES.syncSource,
+    policy: "singleton",
+  });
+
   return boss;
 }
 
@@ -62,15 +94,46 @@ export async function enqueueSync(
   payload: SyncSourcePayload,
 ): Promise<string> {
   const id = await boss.send(JOB_NAMES.syncSource, payload, {
-    // Dedupe — if a sync is already pending/active for this source, don't pile up.
+    // One active per source (singleton policy). A second concurrent external
+    // trigger QUEUES behind the active one rather than returning null, so this
+    // throws only when pg-boss rejects the insert outright.
     singletonKey: `sync:${payload.sourceId}`,
     retryLimit: 3,
     retryDelay: 60,
     retryBackoff: true,
-    expireInHours: 6,
+    expireInSeconds: SYNC_EXPIRE_SECONDS,
   });
   if (!id) {
     throw new SyncAlreadyRunningError(payload.sourceId);
   }
   return id;
+}
+
+/**
+ * Re-enqueue a continuation of an in-flight sync (the source has more pages).
+ * Carries the SAME `ingestionId` (one history row per logical sync) and the
+ * same `singletonKey`, so under the singleton policy it queues behind the
+ * still-active current job and runs once that completes — never concurrently.
+ * Returns the new job id, or `null` if pg-boss unexpectedly dropped the insert
+ * (the caller treats `null` as an error).
+ */
+export async function enqueueContinuation(
+  boss: PgBoss,
+  payload: SyncSourcePayload,
+): Promise<string | null> {
+  return boss.send(
+    JOB_NAMES.syncSource,
+    {
+      ...payload,
+      continuation: true,
+      continuationCount: (payload.continuationCount ?? 0) + 1,
+    },
+    {
+      singletonKey: `sync:${payload.sourceId}`,
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+      expireInSeconds: SYNC_EXPIRE_SECONDS,
+    },
+  );
 }

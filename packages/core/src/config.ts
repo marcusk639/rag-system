@@ -88,15 +88,46 @@ export const Config = z.object({
   retrieval: z.object({
     chunkSize: z.number().int().positive().default(800),
     chunkOverlap: z.number().int().nonnegative().default(120),
-    defaultTopK: z.number().int().positive().default(8),
+    defaultTopK: z.number().int().positive().default(12),
     hybridDenseWeight: z.number().min(0).max(1).default(0.7),
     hybridSparseWeight: z.number().min(0).max(1).default(0.3),
+    /**
+     * Per-document diversity cap applied to retrieved chunks before they reach
+     * the generator (and any caller of `searchDocuments`/`askQuestion`). Stops
+     * one long file from crowding out other sources. `0` disables the cap.
+     */
+    maxChunksPerDocument: z.number().int().nonnegative().default(3),
+  }),
+
+  /**
+   * Reranking stage (Phase F). After hybrid RRF fusion, an optional reranker
+   * re-orders the over-fetched candidate pool by true query relevance before
+   * the top-K is handed to the caller/generator. `none` (default) is a
+   * pass-through so deployments opt in; `cohere`/`jina` use a hosted
+   * cross-encoder; `llm` reuses the configured generation client.
+   */
+  rerank: z.object({
+    provider: z.enum(["none", "cohere", "jina", "llm"]).default("none"),
+    model: z.string().optional(),
+    apiKey: z.string().optional(),
+    /**
+     * How many candidates (as a multiple of the effective topK) to pull from
+     * hybrid search and feed the reranker. Larger = better recall before
+     * re-ranking, more rerank cost. Ignored when provider is `none`.
+     */
+    poolMultiplier: z.number().int().positive().default(5),
   }),
 
   generation: z
     .object({
       provider: z.enum(["gemini", "openai"]).default("gemini"),
       model: z.string().default("gemini-2.5-flash"),
+      /**
+       * Upper bound on generated answer length. Generous by default so
+       * substantive, multi-source answers aren't truncated at provider
+       * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
+       */
+      maxOutputTokens: z.number().int().positive().default(2048),
     })
     .optional(),
 
@@ -116,6 +147,26 @@ export const Config = z.object({
       refreshToken: z.string().optional(),
     })
     .optional(),
+
+  /**
+   * Where original document bytes are persisted so cited documents can be
+   * downloaded later. `none` (default) keeps the historical behavior — originals
+   * are not stored and the download route returns 404. `s3` targets any
+   * S3-compatible store (AWS S3, Railway buckets, MinIO, GCS S3-mode).
+   */
+  objectStore: z.object({
+    provider: z.enum(["none", "s3"]).default("none"),
+    bucket: z.string().optional(),
+    endpoint: z.string().url().optional(),
+    region: z.string().default("us-east-1"),
+    accessKeyId: z.string().optional(),
+    secretAccessKey: z.string().optional(),
+    // Path-style addressing is required by most S3-compatible stores
+    // (MinIO/Railway); virtual-hosted style is AWS-only.
+    forcePathStyle: z.boolean().default(true),
+    // Optional prefix applied to every object key (e.g. "originals/").
+    keyPrefix: z.string().default(""),
+  }),
 });
 export type Config = z.infer<typeof Config>;
 
@@ -306,18 +357,50 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     retrieval: {
       chunkSize: Number(env.CHUNK_SIZE ?? 800),
       chunkOverlap: Number(env.CHUNK_OVERLAP ?? 120),
-      defaultTopK: Number(env.DEFAULT_TOP_K ?? 8),
+      defaultTopK: env.DEFAULT_TOP_K ? Number(env.DEFAULT_TOP_K) : undefined,
       hybridDenseWeight: Number(env.HYBRID_DENSE_WEIGHT ?? 0.7),
       hybridSparseWeight: Number(env.HYBRID_SPARSE_WEIGHT ?? 0.3),
+      maxChunksPerDocument:
+        env.MAX_CHUNKS_PER_DOCUMENT !== undefined
+          ? Number(env.MAX_CHUNKS_PER_DOCUMENT)
+          : undefined,
+    },
+    rerank: {
+      provider: (env.RERANK_PROVIDER ?? "none") as
+        | "none"
+        | "cohere"
+        | "jina"
+        | "llm",
+      model: env.RERANK_MODEL || undefined,
+      apiKey: env.RERANK_API_KEY || undefined,
+      poolMultiplier: env.RERANK_POOL_MULTIPLIER
+        ? Number(env.RERANK_POOL_MULTIPLIER)
+        : undefined,
     },
     generation:
       env.GENERATION_PROVIDER && env.GENERATION_MODEL
         ? {
             provider: env.GENERATION_PROVIDER as "gemini" | "openai",
             model: env.GENERATION_MODEL,
+            maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
+              ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
+              : undefined,
           }
         : undefined,
     microsoft,
     google,
+    objectStore: {
+      provider: (env.OBJECT_STORE_PROVIDER ?? "none") as "none" | "s3",
+      bucket: env.OBJECT_STORE_BUCKET || undefined,
+      endpoint: env.OBJECT_STORE_ENDPOINT || undefined,
+      region: env.OBJECT_STORE_REGION || undefined,
+      accessKeyId: env.OBJECT_STORE_ACCESS_KEY_ID || undefined,
+      secretAccessKey: env.OBJECT_STORE_SECRET_ACCESS_KEY || undefined,
+      forcePathStyle:
+        env.OBJECT_STORE_FORCE_PATH_STYLE !== undefined
+          ? env.OBJECT_STORE_FORCE_PATH_STYLE === "true"
+          : undefined,
+      keyPrefix: env.OBJECT_STORE_KEY_PREFIX || undefined,
+    },
   });
 }

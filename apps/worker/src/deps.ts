@@ -1,5 +1,10 @@
-import type { Config, Connector } from "@rag/core";
-import type { Db } from "@rag/db";
+import type { Config, Connector, ObjectStore } from "@rag/core";
+import {
+  claimPendingUploads,
+  getPendingUploadByExternalId,
+  type Db,
+  type PendingUpload,
+} from "@rag/db";
 import { HttpParserClient, CompositeChunker } from "@rag/rag";
 import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 // NOTE: The connector factory signature is:
@@ -9,8 +14,15 @@ import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 //     logger,
 //   ): Connector
 // This import (and the `makeConnector` adapter below) is the single point to
-// reconcile if the connectors package signature changes.
-import { createConnector } from "@rag/connectors";
+// reconcile if the connectors package signature changes. The `custom` kind is
+// NOT built by the factory (it rejects it) — we construct CustomConnector
+// directly with a db-backed staging store below.
+import {
+  createConnector,
+  CustomConnector,
+  type StagedUpload,
+  type UploadStagingStore,
+} from "@rag/connectors";
 import { SourceKind } from "@rag/core";
 import type { Logger } from "pino";
 
@@ -28,6 +40,8 @@ export interface WorkerDeps {
   chunker: CompositeChunker;
   embedder: Embedder;
   queue: Queue;
+  /** Where original document bytes are persisted; null when storage is disabled. */
+  objectStore: ObjectStore | null;
   /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
@@ -48,7 +62,10 @@ export async function buildDeps(
 ): Promise<WorkerDeps> {
   // Shared core graph (db/embedder/queue/close + an unused generator). Worker-
   // only resources (parser, chunker, connector factory) are layered on below.
-  const { db, embedder, queue, close } = await buildCoreDeps(config, logger);
+  const { db, embedder, queue, objectStore, close } = await buildCoreDeps(
+    config,
+    logger,
+  );
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -69,8 +86,34 @@ export async function buildDeps(
     },
   });
 
-  const makeConnector: WorkerDeps["makeConnector"] = (source) =>
-    createConnector(
+  // Staging store for the `custom` (upload) connector, backed by the
+  // `pending_uploads` table. Kept here (not in @rag/connectors) so the
+  // connectors package stays free of any database dependency.
+  const toStaged = (row: PendingUpload): StagedUpload => ({
+    externalId: row.externalId,
+    filename: row.filename,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    storageKey: row.storageKey,
+    uploadedAt: row.createdAt.toISOString(),
+  });
+  const uploadStore: UploadStagingStore = {
+    claim: async (sourceId, limit) =>
+      (await claimPendingUploads(db, sourceId, limit)).map(toStaged),
+    get: async (sourceId, externalId) => {
+      const row = await getPendingUploadByExternalId(db, sourceId, externalId);
+      return row ? toStaged(row) : null;
+    },
+  };
+
+  const makeConnector: WorkerDeps["makeConnector"] = (source) => {
+    // `custom` sources are browser uploads staged in our own DB, not an
+    // external system — build the connector directly (the factory rejects
+    // `custom`) with the staging store + object store.
+    if (source.kind === "custom") {
+      return new CustomConnector(source.id, uploadStore, objectStore, logger);
+    }
+    return createConnector(
       {
         id: source.id,
         // Validate at the boundary instead of trusting the DB blindly: a new
@@ -83,6 +126,7 @@ export async function buildDeps(
       { microsoft: config.microsoft, google: config.google },
       logger,
     );
+  };
 
   return {
     config,
@@ -92,6 +136,7 @@ export async function buildDeps(
     chunker,
     embedder,
     queue,
+    objectStore,
     makeConnector,
     close,
   };

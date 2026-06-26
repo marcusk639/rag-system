@@ -1,44 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
-import type { RetrievalResult } from "@rag/core";
+import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
 
 /**
- * Answer a question grounded in retrieved chunks. Returns the answer text
- * plus the source citations that were available to the model.
- *
- * Prompting strategy:
- *   - Numbered context blocks ([1], [2], ...) so the model can cite.
- *   - Explicit instruction to admit ignorance rather than hallucinate.
- *   - Low temperature for stable, factual answers.
+ * The `Generator` / `GenerationResult` contracts live in `@rag/core` alongside
+ * the other provider interfaces. Re-exported here so existing importers of
+ * these types from `@rag/rag` keep compiling unchanged. The concrete provider
+ * implementations and the `createGenerator` factory remain in this module.
  */
-export interface Generator {
-  answer(
-    question: string,
-    context: RetrievalResult[],
-  ): Promise<GenerationResult>;
-  /**
-   * Streaming counterpart of `answer`. Yields answer text incrementally as the
-   * model produces it. Citations are derived deterministically from `context`
-   * (see `buildCitations`), so the stream carries text only — the caller
-   * attaches citations once the stream completes.
-   */
-  answerStream(
-    question: string,
-    context: RetrievalResult[],
-  ): AsyncIterable<string>;
-}
-
-export interface GenerationResult {
-  answer: string;
-  citations: Array<{
-    index: number; // matches [N] in the answer
-    documentId: string;
-    title: string;
-    url?: string;
-    chunkId: string;
-    score: number;
-  }>;
-}
+export type { Generator, GenerationResult } from "@rag/core";
 
 const SYSTEM_PROMPT = `You are a careful, accurate assistant answering questions strictly from the provided context.
 
@@ -53,7 +23,12 @@ Rules for your answer:
 2. Cite every claim using [N] notation matching the document indices.
 3. If the context does not contain the answer, say: "The available documents do not contain enough information to answer that."
 4. Quote sparingly. Prefer concise, paraphrased answers with citations.
-5. If sources disagree, surface the disagreement and cite both.`;
+5. If sources disagree, surface the disagreement and cite both.
+
+Answer thoroughly:
+6. Draw on ALL relevant context blocks, not just the first match — synthesize information that spans multiple documents into a single coherent answer.
+7. Be thorough and well-structured. For multi-part questions, organize the answer into short paragraphs or bullet points rather than a single terse sentence.
+8. When the context answers the question only partially, give the partial answer AND explicitly state what the documents do not cover — never pad with outside knowledge or over-claim completeness.`;
 
 /**
  * Wrap each retrieved chunk in a tagged block. Strip any inline closing tag
@@ -65,9 +40,12 @@ function buildPrompt(question: string, context: RetrievalResult[]): string {
       const heading = r.chunk.headingPath.length
         ? ` (section: ${r.chunk.headingPath.join(" › ")})`
         : "";
-      // Defense-in-depth: a malicious chunk could contain `</document>` to
-      // try to escape the wrapper. Replace the literal close-tag sequence.
-      const safeText = r.text.replace(/<\/document>/gi, "&lt;/document&gt;");
+      // Defense-in-depth: a malicious chunk could contain a `<document>` /
+      // `</document>` tag to try to forge or escape a wrapper block. Neutralize
+      // both the opening and closing tag sequences.
+      const safeText = r.text
+        .replace(/<\/document>/gi, "&lt;/document&gt;")
+        .replace(/<document/gi, "&lt;document");
       return `<document index="${i + 1}" title="${r.document.title}"${heading ? ` section="${heading.trim()}"` : ""}>\n${safeText}\n</document>`;
     })
     .join("\n\n");
@@ -83,6 +61,7 @@ export function buildCitations(
     documentId: r.document.id,
     title: r.document.title,
     url: r.document.url,
+    downloadable: r.document.hasOriginal ?? false,
     chunkId: r.chunk.id,
     score: r.score,
   }));
@@ -93,7 +72,13 @@ export function buildCitations(
 // ----------------------------------------------------------------------------
 export class GeminiGenerator implements Generator {
   private client: GoogleGenAI;
-  constructor(private readonly opts: { apiKey: string; model: string }) {
+  constructor(
+    private readonly opts: {
+      apiKey: string;
+      model: string;
+      maxOutputTokens?: number;
+    },
+  ) {
     this.client = new GoogleGenAI({ apiKey: opts.apiKey });
   }
 
@@ -108,6 +93,7 @@ export class GeminiGenerator implements Generator {
       config: {
         systemInstruction: SYSTEM_PROMPT,
         temperature: 0.2,
+        maxOutputTokens: this.opts.maxOutputTokens,
       },
     });
 
@@ -128,6 +114,7 @@ export class GeminiGenerator implements Generator {
       config: {
         systemInstruction: SYSTEM_PROMPT,
         temperature: 0.2,
+        maxOutputTokens: this.opts.maxOutputTokens,
       },
     });
     for await (const chunk of stream) {
@@ -142,7 +129,13 @@ export class GeminiGenerator implements Generator {
 // ----------------------------------------------------------------------------
 export class OpenAIGenerator implements Generator {
   private client: OpenAI;
-  constructor(private readonly opts: { apiKey: string; model: string }) {
+  constructor(
+    private readonly opts: {
+      apiKey: string;
+      model: string;
+      maxOutputTokens?: number;
+    },
+  ) {
     this.client = new OpenAI({ apiKey: opts.apiKey });
   }
 
@@ -154,6 +147,7 @@ export class OpenAIGenerator implements Generator {
     const response = await this.client.chat.completions.create({
       model: this.opts.model,
       temperature: 0.2,
+      max_tokens: this.opts.maxOutputTokens,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt },
@@ -173,6 +167,7 @@ export class OpenAIGenerator implements Generator {
     const stream = await this.client.chat.completions.create({
       model: this.opts.model,
       temperature: 0.2,
+      max_tokens: this.opts.maxOutputTokens,
       stream: true,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -193,11 +188,20 @@ export function createGenerator(opts: {
   provider: "gemini" | "openai";
   model: string;
   apiKey: string;
+  maxOutputTokens?: number;
 }): Generator {
   switch (opts.provider) {
     case "gemini":
-      return new GeminiGenerator({ apiKey: opts.apiKey, model: opts.model });
+      return new GeminiGenerator({
+        apiKey: opts.apiKey,
+        model: opts.model,
+        maxOutputTokens: opts.maxOutputTokens,
+      });
     case "openai":
-      return new OpenAIGenerator({ apiKey: opts.apiKey, model: opts.model });
+      return new OpenAIGenerator({
+        apiKey: opts.apiKey,
+        model: opts.model,
+        maxOutputTokens: opts.maxOutputTokens,
+      });
   }
 }

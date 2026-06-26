@@ -2,6 +2,7 @@ import {
   effectiveSourceFilter,
   type AuthorizationScope,
   type EmbeddingProvider,
+  type Reranker,
   type RetrievalQuery,
   type RetrievalResult,
 } from "@rag/core";
@@ -11,7 +12,7 @@ import { hybridSearch, type Db } from "@rag/db";
  * Orchestrates a single retrieval call:
  *   1. Embed the query (one provider call).
  *   2. Run hybrid dense + sparse search in Postgres.
- *   3. Optionally rerank (placeholder — wire in a cross-encoder here later).
+ *   3. Optionally rerank the over-fetched candidate pool by true relevance.
  *   4. Return ranked results with citation metadata.
  *
  * Why the embed happens here and not in the SQL: pgvector doesn't have a
@@ -19,6 +20,10 @@ import { hybridSearch, type Db } from "@rag/db";
  * variants (HyDE, query expansion) before the SQL round-trip.
  */
 export class Retriever {
+  private readonly reranker: Reranker | null;
+  private readonly rerankPoolMultiplier: number;
+  private readonly onRerankError: (err: unknown) => void;
+
   constructor(
     private readonly db: Db,
     private readonly embedder: EmbeddingProvider,
@@ -27,7 +32,24 @@ export class Retriever {
       denseWeight: number;
       sparseWeight: number;
     },
-  ) {}
+    /**
+     * Optional reranking stage. When a reranker is provided, the retriever
+     * over-fetches `poolMultiplier × topK` candidates from hybrid search, asks
+     * the reranker to re-order them by true relevance, and returns the top
+     * `topK`. When null (the default), behavior is identical to plain hybrid
+     * search — no over-fetch. `onError` is invoked (not thrown) if the reranker
+     * fails, after which we degrade to the RRF order.
+     */
+    rerank?: {
+      reranker: Reranker | null;
+      poolMultiplier?: number;
+      onError?: (err: unknown) => void;
+    },
+  ) {
+    this.reranker = rerank?.reranker ?? null;
+    this.rerankPoolMultiplier = rerank?.poolMultiplier ?? 5;
+    this.onRerankError = rerank?.onError ?? (() => {});
+  }
 
   /**
    * Run a retrieval.
@@ -56,10 +78,15 @@ export class Retriever {
       ? await this.embedder.embedQuery(query.query)
       : await this.embedder.embed(query.query);
 
-    return hybridSearch(this.db, {
+    const topK = query.topK ?? this.defaults.topK;
+    // With a reranker, over-fetch a candidate pool so it has more than `topK`
+    // to choose from. Without one, fetch exactly `topK` (no behavior change).
+    const fetchK = this.reranker ? topK * this.rerankPoolMultiplier : topK;
+
+    const results = await hybridSearch(this.db, {
       query: query.query,
       queryEmbedding: embedding.vector,
-      topK: query.topK ?? this.defaults.topK,
+      topK: fetchK,
       // Mandatory ACL boundary (already intersected with the caller filter).
       enforcedSourceIds,
       // The optional caller filter is folded into `enforcedSourceIds` above,
@@ -71,5 +98,16 @@ export class Retriever {
         sparse: this.defaults.sparseWeight,
       },
     });
+
+    if (!this.reranker) return results;
+
+    // Rerank the pool by true relevance, returning the top `topK`. A reranker
+    // failure must never fail the query — degrade to the RRF order (truncated).
+    try {
+      return await this.reranker.rerank(query.query, results, topK);
+    } catch (err) {
+      this.onRerankError(err);
+      return results.slice(0, topK);
+    }
   }
 }

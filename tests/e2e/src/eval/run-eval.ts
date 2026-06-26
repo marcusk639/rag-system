@@ -2,9 +2,7 @@ import { sql } from "drizzle-orm";
 import { ADMIN_SCOPE } from "@rag/core";
 import { Retriever } from "@rag/rag";
 import type { Db } from "@rag/db";
-import { FakeConnector } from "../fakes/fake-connector.js";
-import { plainTextDoc } from "../fakes/factories.js";
-import { FakeEmbedder } from "../fakes/fake-embedder.js";
+import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
 import { runOneIngestion } from "../helpers/ingestion.js";
 import { EVAL_DOCS, EVAL_QUESTIONS, type EvalQuestion } from "./corpus.js";
 import {

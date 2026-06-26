@@ -189,6 +189,22 @@ This phase is **already substantially complete** — the discovery was done duri
 
 **Becomes a hard gate** for any future tenant classified HIGH (real taxpayer return info / PII). At that point steps 3–4 are mandatory.
 
+### Source intel — domain-owner classification (2026-06-22)
+
+Firsthand confirmation from the firm's domain owner (Chris, tenant #1) on the SharePoint KB contents, corroborating the LOW–MODERATE classification this phase assumes:
+
+- **System of record for client data is Onvio, NOT the SharePoint KB.** Client engagement files live in Thomson Reuters Onvio (a separate system). The SharePoint KB the connector ingests is firm work-product, not client files.
+- **KB content is "mostly general research, strategies, templates, how-to's, SOPs."** → LOW-sensitivity firm work-product; standard security is proportionate.
+- **"Probably some actual client examples, but shouldn't be many."** ← this is the residual risk and the entire point of **D2a**. A handful of docs may carry real client specifics (potentially tax-return information / PII).
+
+**Implications / decisions:**
+
+1. **Scope the connector to research/SOP libraries, exclude client-engagement libraries by construction.** Onvio being the system of record means the SharePoint sync should never be pointed at client files — this removes most risk at the source rather than relying on downstream detection. Prefer source-scope exclusion + a `dataClass` tag on known-sensitive folders over trusting a scrubber.
+2. **Automated PII scrubbing is defense-in-depth, NOT a §7216 compliance control.** The domain owner's plan ("have the code scrub anything sensitive") catches SSNs/obvious PII but misses contextual client-identifying detail; it does not substitute for curating/tagging the client examples out (D2a). Treat scrubbing as a second layer behind curation, not the primary control.
+3. **Still verify, don't assume.** "Shouldn't be many" is an estimate — keep the verification-checklist spot-check (below) to confirm no real client return info reaches the index.
+
+> Provenance: iMessage screenshot from the domain owner, 2026-06-14 thread (recorded 2026-06-22). Pending corroborating §7216/GLBA citations from the in-flight compliance research (`/deep-research`).
+
 ### What to implement
 
 1. **D2a — curate client examples (tenant #1).** Identify the handful of docs/folders with real client specifics; exclude them from the ingested source scope, or tag them `client-confidential`. One-time domain-owner pass.

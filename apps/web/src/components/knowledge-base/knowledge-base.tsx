@@ -99,7 +99,10 @@ export const KnowledgeBase = () => {
       </div>
 
       {uploadModalOpen && (
-        <UploadModal onClose={() => setUploadModalOpen(false)} />
+        <UploadModal
+          source={selectedSource}
+          onClose={() => setUploadModalOpen(false)}
+        />
       )}
 
       {activeCitation && (
@@ -116,7 +119,7 @@ export const KnowledgeBase = () => {
                 Close
               </button>
             </CardHeader>
-            <div className="p-6 pt-0 text-sm text-gray-600">
+            <div className="p-6 pt-0 text-sm text-gray-600 flex flex-col gap-2">
               {(() => {
                 // Document URLs originate from ingested source metadata, which
                 // is attacker-influenceable. Only render the link for http(s)
@@ -145,6 +148,17 @@ export const KnowledgeBase = () => {
                   <span>Document id: {activeCitation.documentId}</span>
                 );
               })()}
+              {/* Download the ORIGINAL file via the same-origin BFF proxy (which
+                  forwards auth server-side). Shown only when the original is
+                  stored. The documentId is a validated UUID. */}
+              {activeCitation.downloadable && (
+                <a
+                  href={`/api/documents/${activeCitation.documentId}/download`}
+                  className="text-blue-600 hover:underline"
+                >
+                  Download original
+                </a>
+              )}
             </div>
           </Card>
         </div>
