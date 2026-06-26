@@ -31,6 +31,9 @@ vi.mock("./tools/trigger-sync.js", () => ({
 vi.mock("./tools/ask.js", () => ({
   registerAsk: vi.fn(),
 }));
+vi.mock("./tools/purge-source.js", () => ({
+  registerPurgeSource: vi.fn(),
+}));
 // Mock @rag/db so the resource handler's getDocument import resolves without
 // a real DB connection or any pg/drizzle side-effects.
 vi.mock("@rag/db", () => ({ getDocument: vi.fn() }));
@@ -41,6 +44,7 @@ import { registerGetDocument } from "./tools/get-document.js";
 import { registerListSources } from "./tools/list-sources.js";
 import { registerTriggerSync } from "./tools/trigger-sync.js";
 import { registerAsk } from "./tools/ask.js";
+import { registerPurgeSource } from "./tools/purge-source.js";
 import { buildServer } from "./server.js";
 
 const ADMIN_SCOPE: AuthorizationScope = { enforcedSourceIds: null };
@@ -61,7 +65,7 @@ function makeDeps(): Deps {
 }
 
 describe("MCP buildServer", () => {
-  it("builds without throwing and registers all 5 tools", () => {
+  it("builds without throwing and registers all 6 tools", () => {
     const deps = makeDeps();
     const server = buildServer({
       deps,
@@ -75,6 +79,7 @@ describe("MCP buildServer", () => {
     expect(registerGetDocument).toHaveBeenCalledOnce();
     expect(registerListSources).toHaveBeenCalledOnce();
     expect(registerTriggerSync).toHaveBeenCalledOnce();
+    expect(registerPurgeSource).toHaveBeenCalledOnce();
     expect(registerAsk).toHaveBeenCalledOnce();
   });
 
@@ -102,6 +107,11 @@ describe("MCP buildServer", () => {
     );
     expect(registerListSources).toHaveBeenCalledWith(expect.anything(), deps);
     expect(registerTriggerSync).toHaveBeenCalledWith(expect.anything(), deps);
+    expect(registerPurgeSource).toHaveBeenCalledWith(
+      expect.anything(),
+      deps,
+      SCOPED_SCOPE,
+    );
   });
 
   it("builds a distinct server per call (per-session isolation)", () => {

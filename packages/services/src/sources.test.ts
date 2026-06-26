@@ -8,6 +8,8 @@ const deleteIngestionJob = vi.fn();
 const updateIngestionJob = vi.fn();
 const enqueueSync = vi.fn();
 
+const purgeSourceQuery = vi.fn();
+
 // Real subclass so `triggerSync`'s `instanceof` check behaves like production.
 class SyncAlreadyRunningError extends Error {
   readonly code = "SYNC_ALREADY_RUNNING";
@@ -18,7 +20,8 @@ vi.mock("@rag/db", () => ({
   createIngestionJob: (...args: unknown[]) => createIngestionJob(...args),
   deleteIngestionJob: (...args: unknown[]) => deleteIngestionJob(...args),
   updateIngestionJob: (...args: unknown[]) => updateIngestionJob(...args),
-  // Referenced elsewhere in the module but not by triggerSync.
+  purgeSource: (...args: unknown[]) => purgeSourceQuery(...args),
+  // Referenced elsewhere in the module but not by triggerSync/purgeSource.
   listSources: vi.fn(),
   toPublicSource: vi.fn(),
 }));
@@ -28,7 +31,7 @@ vi.mock("@rag/ingestion", () => ({
   SyncAlreadyRunningError,
 }));
 
-const { triggerSync } = await import("./sources.js");
+const { triggerSync, purgeSource } = await import("./sources.js");
 import type { ServiceDeps } from "./deps.js";
 
 const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
@@ -124,5 +127,20 @@ describe("triggerSync", () => {
 
     expect(createIngestionJob).not.toHaveBeenCalled();
     expect(enqueueSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("purgeSource", () => {
+  it("resolves when the db query returns true (source existed)", async () => {
+    purgeSourceQuery.mockResolvedValue(true);
+
+    await expect(purgeSource(deps, "src-1")).resolves.toBeUndefined();
+    expect(purgeSourceQuery).toHaveBeenCalledWith(deps.db, "src-1");
+  });
+
+  it("throws NotFoundError when the db query returns false (source not found)", async () => {
+    purgeSourceQuery.mockResolvedValue(false);
+
+    await expect(purgeSource(deps, "src-missing")).rejects.toThrow(/not found/i);
   });
 });

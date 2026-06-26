@@ -10,6 +10,7 @@ import { registerSearchDocuments } from "./tools/search-documents.js";
 import { registerGetDocument } from "./tools/get-document.js";
 import { registerListSources } from "./tools/list-sources.js";
 import { registerTriggerSync } from "./tools/trigger-sync.js";
+import { registerPurgeSource } from "./tools/purge-source.js";
 import { registerAsk } from "./tools/ask.js";
 
 /**
@@ -41,6 +42,7 @@ export function buildServer(opts: {
   registerGetDocument(server, deps, scope);
   registerListSources(server, deps);
   registerTriggerSync(server, deps);
+  registerPurgeSource(server, deps, scope);
   registerAsk(server, deps, scope);
 
   // Resource: documents://{id} — agents can read a single document by id
@@ -88,6 +90,7 @@ export function buildServer(opts: {
         "get_document",
         "list_sources",
         "trigger_sync",
+        "purge_source",
         "ask",
       ],
       resources: ["documents://{id}"],

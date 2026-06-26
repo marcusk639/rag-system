@@ -11,6 +11,7 @@ export {
 export {
   triggerSync,
   listPublicSources,
+  purgeSource,
   type TriggerSyncInput,
   type TriggerSyncResult,
 } from "./sources.js";
