@@ -99,6 +99,9 @@ export async function registerSourceRoutes(
   );
 
   // POST /sources/:id/sync — enqueue ingestion
+  // Tighter per-route rate limit (6/min) — triggers a full connector sync job
+  // that may hit external rate-limited APIs (Graph, Drive, Gmail) and queue
+  // many embedding/parse tasks. The global 60/min bucket is too permissive here.
   typed.post(
     "/sources/:id/sync",
     {
@@ -106,6 +109,7 @@ export async function registerSourceRoutes(
         params: IdParams,
         body: SyncBody,
       },
+      config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
       const { id } = request.params;
