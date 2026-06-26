@@ -62,12 +62,8 @@ export async function buildServer(opts: {
     },
     allowList: (request) =>
       request.url === "/health" || request.url === "/ready",
-    // 429 response matches the API's error-envelope shape.
-    errorResponseBuilder: (_request, context) => ({
-      error: "TooManyRequests",
-      message: `Rate limit exceeded. Retry after ${Math.ceil(context.ttl / 1000)}s.`,
-      retryAfter: Math.ceil(context.ttl / 1000),
-    }),
+    // Default errorResponseBuilder returns new Error(msg) with statusCode=429
+    // which our setErrorHandler maps to a 429 CLIENT_ERROR envelope.
   });
 
   // Global error handler — must register BEFORE routes so it catches their throws.
