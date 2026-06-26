@@ -1,3 +1,5 @@
+export { initMonitoring, captureException } from "./monitoring.js";
+
 import {
   createAuthProvider,
   type AuthProvider,

@@ -1,5 +1,6 @@
 import pino from "pino";
 import { loadConfig } from "@rag/core";
+import { initMonitoring } from "@rag/runtime";
 import {
   assertEmbeddingDimensions,
   assertRequiredIndexes,
@@ -15,6 +16,7 @@ import { buildServer } from "./server.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  initMonitoring(config.monitoring?.sentryDsn);
   // Fail fast before building deps / embedding the first /ask query: the
   // configured provider's vector size must match the chunks.embedding column.
   assertEmbeddingDimensions(config.embedding.dimensions);

@@ -10,6 +10,8 @@ import {
   runIngestion,
   type SyncSourcePayload,
 } from "@rag/ingestion";
+import { captureException } from "@rag/runtime";
+import type PgBoss from "pg-boss";
 import type { WorkerDeps } from "../deps.js";
 
 /**
@@ -32,7 +34,7 @@ const PAGES_PER_RUN = 5;
  * as job failure and applies its retry policy (configured at enqueue time).
  */
 export async function handleSyncSource(
-  job: { id: string; data: SyncSourcePayload },
+  job: PgBoss.JobWithMetadata<SyncSourcePayload>,
   deps: WorkerDeps,
 ): Promise<void> {
   const {
@@ -169,6 +171,18 @@ export async function handleSyncSource(
       error: message,
     });
     log.error({ err, marker: "ingest.sync.failed" }, "sync failed");
+    // Alert only when this is the terminal failure (retries exhausted). Intermediate
+    // failures will be retried by pg-boss — alerting on each attempt would produce
+    // duplicate noise for a transient error that recovers on the next attempt.
+    if (job.retryCount >= job.retryLimit) {
+      captureException(err, {
+        sourceId,
+        ingestionId,
+        jobId: job.id,
+        retryCount: job.retryCount,
+        retryLimit: job.retryLimit,
+      });
+    }
     // Re-throw so pg-boss records the job as failed and applies retries.
     throw err;
   }

@@ -22,6 +22,7 @@
     "@rag/db": "workspace:*",
     "@rag/rag": "workspace:*",
     "@rag/ingestion": "workspace:*",
+    "@sentry/node": "^8",
     "pino": "^9.5.0"
   },
   "devDependencies": {

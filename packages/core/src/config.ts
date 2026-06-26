@@ -168,6 +168,16 @@ export const Config = z
       .optional(),
 
     /**
+     * Optional error-reporting DSN (Sentry-compatible). When set, unhandled
+     * errors and failed sync jobs are reported to Sentry. Safe to omit in dev.
+     */
+    monitoring: z
+      .object({
+        sentryDsn: z.string().url(),
+      })
+      .optional(),
+
+    /**
      * Where original document bytes are persisted so cited documents can be
      * downloaded later. `none` (default) keeps the historical behavior — originals
      * are not stored and the download route returns 404. `s3` targets any
@@ -438,6 +448,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
               : undefined,
           }
         : undefined,
+    monitoring: env.SENTRY_DSN ? { sentryDsn: env.SENTRY_DSN } : undefined,
     microsoft,
     google,
     objectStore: {

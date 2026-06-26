@@ -1,4 +1,5 @@
 import { RagError } from "@rag/core";
+import { captureException } from "@rag/runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -62,6 +63,13 @@ export function registerErrorHandler(app: FastifyInstance): void {
           { err: error, code: error.code, cause: error.cause },
           "rag error",
         );
+        if (status >= 500) {
+          captureException(error, {
+            url: request.url,
+            method: request.method,
+            code: error.code,
+          });
+        }
         return reply.code(status).send(payload(error.code, error.message));
       }
 
@@ -93,8 +101,9 @@ export function registerErrorHandler(app: FastifyInstance): void {
           .send(payload("CLIENT_ERROR", maybeFastify.message ?? "Bad request"));
       }
 
-      // Unknown — log full detail, return generic 500.
+      // Unknown — log full detail, capture to Sentry, return generic 500.
       request.log.error({ err: error }, "unhandled error");
+      captureException(error, { url: request.url, method: request.method });
       return reply
         .code(500)
         .send(payload("INTERNAL_ERROR", "Internal server error"));
