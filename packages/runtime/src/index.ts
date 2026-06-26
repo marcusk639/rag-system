@@ -4,7 +4,7 @@ import {
   type Config,
   type ObjectStore,
 } from "@rag/core";
-import { createDb, type Db } from "@rag/db";
+import { createDb, pgSslOption, type Db } from "@rag/db";
 import { createQueue } from "@rag/ingestion";
 import {
   Retriever,
@@ -75,6 +75,7 @@ export function buildAuthProvider(
   const base = {
     tokens: config.api.tokens,
     principals: config.api.principals,
+    enforceScoping: config.api.enforceScoping,
   };
   switch (config.auth.provider) {
     case "static-token":
@@ -104,7 +105,23 @@ export async function buildCoreDeps(
   config: Config,
   logger: Logger,
 ): Promise<CoreDeps> {
-  const { db, close: closeDb } = createDb(config.databaseUrl);
+  const urlHasTls = /sslmode=(require|verify-ca|verify-full)/.test(
+    config.databaseUrl,
+  );
+  const tlsActive = config.databaseSsl
+    ? config.databaseSsl !== "disable"
+    : urlHasTls;
+  if (config.environment === "production" && !tlsActive) {
+    logger.warn(
+      "Postgres connection has no TLS in production: DATABASE_SSL is unset/disable " +
+        "and DATABASE_URL has no sslmode=require. DB traffic may be unencrypted. " +
+        "Set DATABASE_SSL=require (or no-verify for managed certs), or add " +
+        "?sslmode=require to DATABASE_URL for pool+pg-boss+migration coverage.",
+    );
+  }
+  const { db, close: closeDb } = createDb(config.databaseUrl, {
+    ssl: pgSslOption(config.databaseSsl),
+  });
 
   const embedder = createEmbeddingProvider(config.embedding);
 

@@ -102,7 +102,13 @@ describe("askQuestion", () => {
       ADMIN_SCOPE,
     );
     expect(answer).toHaveBeenCalledWith("q", retrieved);
-    expect(result).toEqual({ answer: "grounded", citations, retrieved });
+    expect(result).toEqual({
+      answer: "grounded",
+      citations,
+      retrieved,
+      reviewStatus: "draft_requires_practitioner_review",
+      disclaimer: expect.any(String),
+    });
   });
 
   it("uses an explicit topK over the default and forwards sourceIds/filter", async () => {

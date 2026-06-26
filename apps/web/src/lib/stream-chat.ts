@@ -16,7 +16,7 @@ interface AskRequest {
  * POST a question to the same-origin BFF (/api/chat) and parse the SSE response.
  * Event contract (from apps/api ask/stream):
  *   event: token  data: <JSON-encoded string chunk>
- *   event: done   data: {citations, retrieved}
+ *   event: done   data: {citations, retrieved, reviewStatus, disclaimer}
  *   event: error  data: {message}
  */
 export async function askStream(

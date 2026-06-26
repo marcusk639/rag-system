@@ -84,7 +84,7 @@ export class TableChunker {
     const chunks: Chunk[] = [];
     let buffer: string[] = [];
     let bufferTokens = 0;
-    let bufferStartIdx = 0; // index of first row in `buffer` (for overlap accounting)
+    let _bufferStartIdx = 0; // index of first row in `buffer` (for overlap accounting)
     let ordinal = startOrdinal;
 
     const flush = (endIdx: number) => {
@@ -97,7 +97,7 @@ export class TableChunker {
       if (this.opts.rowOverlap <= 0) {
         buffer = [];
         bufferTokens = 0;
-        bufferStartIdx = endIdx;
+        _bufferStartIdx = endIdx;
         return;
       }
 
@@ -110,7 +110,7 @@ export class TableChunker {
       }, 0);
       buffer = carry;
       bufferTokens = carryTokens;
-      bufferStartIdx = endIdx - overlapCount;
+      _bufferStartIdx = endIdx - overlapCount;
     };
 
     for (let i = 0; i < renderedRows.length; i++) {
@@ -133,7 +133,7 @@ export class TableChunker {
         );
         buffer = [];
         bufferTokens = 0;
-        bufferStartIdx = i + 1;
+        _bufferStartIdx = i + 1;
         continue;
       }
 

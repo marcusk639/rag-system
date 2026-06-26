@@ -49,6 +49,22 @@ export async function listSources(db: Db) {
 }
 
 /**
+ * Permanently delete a source and all associated rows (documents, chunks,
+ * ingestion_jobs, pending_uploads). All child tables carry
+ * `ON DELETE CASCADE → sources`, so a single statement handles everything.
+ *
+ * Returns `true` when a row was found and deleted, `false` when no source with
+ * that id exists — the caller decides whether that warrants an error.
+ */
+export async function purgeSource(db: Db, id: string): Promise<boolean> {
+  const deleted = await db
+    .delete(sources)
+    .where(eq(sources.id, id))
+    .returning({ id: sources.id });
+  return deleted.length > 0;
+}
+
+/**
  * Persist the delta cursor for a source. CURSOR ONLY — this no longer stamps
  * `lastSyncedAt`. It runs after every page of an ingestion run (including
  * intermediate pages of a multi-page sync), so it must NOT advance the

@@ -102,13 +102,22 @@ export function registerAsk(
 
       // `askQuestion` already enforced the confidentiality scope and short-
       // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
-      const { answer, citations, retrieved } = result;
+      const { answer, citations, retrieved, reviewStatus, disclaimer } = result;
       return {
-        content: [{ type: "text", text: renderAnswer(answer, citations) }],
+        // Lead with the practitioner-review disclaimer so a consuming agent
+        // cannot present the draft as a finished answer (Circular 230 §10.37).
+        content: [
+          {
+            type: "text",
+            text: `⚠ ${disclaimer}\n\n${renderAnswer(answer, citations)}`,
+          },
+        ],
         structuredContent: {
           answer,
           citations,
           retrievedCount: retrieved.length,
+          reviewStatus,
+          disclaimer,
         },
       };
     },

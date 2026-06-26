@@ -16,12 +16,16 @@ export type AuthProviderConfig =
       provider: "static-token";
       tokens: readonly string[];
       principals?: readonly ScopedPrincipalConfig[];
+      /** When true, plain `tokens` resolve to deny-all (admin needs `isAdmin`). */
+      enforceScoping?: boolean;
     }
   | { provider: "oidc"; oidc: OidcConfig }
   | {
       provider: "composite";
       tokens: readonly string[];
       principals?: readonly ScopedPrincipalConfig[];
+      /** When true, plain `tokens` resolve to deny-all (admin needs `isAdmin`). */
+      enforceScoping?: boolean;
       /** Omit to build a composite with static-token only (OIDC disabled). */
       oidc?: OidcConfig;
       /** Per-provider error sink (logger-backed) — never console.log. */
@@ -41,6 +45,7 @@ export function createAuthProvider(config: AuthProviderConfig): AuthProvider {
       return new StaticTokenAuthProvider(
         config.tokens,
         config.principals ?? [],
+        config.enforceScoping ?? false,
       );
 
     case "oidc":
@@ -48,7 +53,11 @@ export function createAuthProvider(config: AuthProviderConfig): AuthProvider {
 
     case "composite": {
       const providers: AuthProvider[] = [
-        new StaticTokenAuthProvider(config.tokens, config.principals ?? []),
+        new StaticTokenAuthProvider(
+          config.tokens,
+          config.principals ?? [],
+          config.enforceScoping ?? false,
+        ),
       ];
       if (config.oidc) providers.push(new OidcAuthProvider(config.oidc));
       return new CompositeAuthProvider(providers, config.onError);

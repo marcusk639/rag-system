@@ -1,5 +1,6 @@
 import { pingDb } from "@rag/db";
 import fastifyMultipart from "@fastify/multipart";
+import fastifyRateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import {
   serializerCompiler,
@@ -27,19 +28,12 @@ export async function buildServer(opts: {
 }): Promise<FastifyInstance> {
   const { config, logger, deps } = opts;
 
-  // Fastify v5's `FastifyBaseLogger` adds an `msgPrefix` field that pino's
-  // own `Logger` doesn't declare. The implementations are runtime-compatible —
-  // pino has a `child()` that produces the same shape — so we cast through
-  // the structural intersection rather than mutate the pino logger.
   const app = Fastify({
     loggerInstance: logger as unknown as FastifyBaseLogger,
-    // 25 MB body limit — large enough for inline-uploaded documents, small
-    // enough to avoid accidental OOM from a malformed client.
     bodyLimit: 25 * 1024 * 1024,
     disableRequestLogging: false,
   });
 
-  // Zod-aware validation + serialization.
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
@@ -51,15 +45,34 @@ export async function buildServer(opts: {
     limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   });
 
+  // H5 Rate limiting — protect cost-heavy endpoints from abuse.
+  //
+  // Default (all authenticated routes): 60 requests per minute per credential.
+  // Per-route overrides tighten this for endpoints that trigger LLM calls or
+  // full source syncs. The key is the bearer token so each credential has its
+  // own independent bucket; probes (/health, /ready) are skipped entirely so
+  // they always pass even under high load.
+  await app.register(fastifyRateLimit, {
+    max: 60,
+    timeWindow: "1 minute",
+    keyGenerator: (request) => {
+      const auth = request.headers.authorization;
+      // Bearer token is the natural per-principal key. Trim to first 48 chars
+      // (all entropy needed for a bucket key; avoids storing the full token).
+      if (auth?.startsWith("Bearer ")) return auth.slice(7, 55);
+      // Unauthenticated requests fall through to the auth hook and get 401
+      // before reaching any handler, but we still assign a bucket to them.
+      return request.ip ?? "unknown";
+    },
+    allowList: (request) =>
+      request.url === "/health" || request.url === "/ready",
+    // Default errorResponseBuilder returns new Error(msg) with statusCode=429
+    // which our setErrorHandler maps to a 429 CLIENT_ERROR envelope.
+  });
   // Global error handler — must register BEFORE routes so it catches their throws.
   registerErrorHandler(app);
 
-  // Bearer-credential auth on every route except /health and /ready. The
-  // pluggable AuthProvider (static tokens, OIDC JWTs, or both via composite —
-  // selected by AUTH_PROVIDER) resolves each credential to a Principal (admin
-  // for plain API_TOKENS, scoped for API_PRINCIPALS or OIDC scope-map) and
-  // decorates `request.principal` — the source of the MANDATORY retrieval
-  // authorization scope used by /search and /ask.
+  // Bearer-credential auth on every route except /health and /ready.
   app.addHook("onRequest", createAuthHook(buildAuthProvider(config, logger)));
 
   // -------- Liveness/readiness probes --------
@@ -70,8 +83,6 @@ export async function buildServer(opts: {
       return { status: "ready" };
     } catch (err) {
       app.log.error({ err }, "readiness check failed");
-      // Do not echo the raw error — pg connection errors include the
-      // DATABASE_URL (with credentials). The detail is logged server-side above.
       return reply
         .code(503)
         .send({ status: "not-ready", error: "database unavailable" });

@@ -4,6 +4,7 @@ import {
   deleteIngestionJob,
   getSource,
   listSources,
+  purgeSource as purgeSourceQuery,
   toPublicSource,
   updateIngestionJob,
   type Source,
@@ -107,4 +108,19 @@ export async function listPublicSources(
 ): Promise<Omit<Source, "config">[]> {
   const rows = await listSources(deps.db);
   return rows.map(toPublicSource);
+}
+
+/**
+ * Permanently delete a source and all associated data (documents, chunks,
+ * ingestion jobs, pending uploads). Transport-agnostic core of
+ * DELETE /sources/:id and the `purge_source` MCP tool.
+ *
+ * Throws `NotFoundError` when no source with that id exists.
+ */
+export async function purgeSource(
+  deps: ServiceDeps,
+  sourceId: string,
+): Promise<void> {
+  const deleted = await purgeSourceQuery(deps.db, sourceId);
+  if (!deleted) throw new NotFoundError(`Source ${sourceId} not found`);
 }

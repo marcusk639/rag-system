@@ -99,6 +99,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         ))}
                       </div>
                     )}
+                    {message.content && (
+                      // Non-dismissible practitioner-review disclaimer on every
+                      // AI answer (Circular 230 §10.37). Server-enforced too —
+                      // the /ask response carries `reviewStatus`/`disclaimer`.
+                      <p
+                        role="note"
+                        className="mt-2 border-t border-amber-200 pt-2 text-xs italic text-amber-700"
+                      >
+                        Draft — AI-generated and may be inaccurate. Requires
+                        review by a qualified practitioner before use.
+                      </p>
+                    )}
                   </>
                 ) : (
                   message.content

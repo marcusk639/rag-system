@@ -27,27 +27,22 @@ Source-specific credentials (Microsoft, Google) only need to be present on the *
 
 ## Docker images
 
-The repo doesn't ship a polished Dockerfile per app yet (TODO), but the rough recipe per Node app:
+Each Node app has a production-ready multi-stage Dockerfile at `apps/<name>/Dockerfile`.
+Build context is always the **repo root** (required for pnpm workspace resolution):
 
-```dockerfile
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY packages ./packages
-COPY apps ./apps
-RUN corepack enable && pnpm install --frozen-lockfile && pnpm build
-
-FROM node:22-alpine AS runtime
-WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/apps/api/dist ./dist
-ENV NODE_ENV=production
-EXPOSE 3000
-CMD ["node", "dist/main.js"]
+```bash
+docker build -f apps/api/Dockerfile    -t rag-api    .
+docker build -f apps/mcp/Dockerfile    -t rag-mcp    .
+docker build -f apps/worker/Dockerfile -t rag-worker  .
 ```
 
-The parser image already exists at `services/parser-py/Dockerfile`.
+The Dockerfiles use `pnpm deploy --prod` in a pruner stage to produce a
+self-contained bundle (prod deps only, no other workspace apps). The parser image
+is at `services/parser-py/Dockerfile`.
+
+For a single-VM production stack use `docker/compose.prod.yml`. See
+`docs/DEPLOYMENT-TARGET.md` for the deployment-target rationale (D1) and
+provisioning steps.
 
 ## Database
 

@@ -86,7 +86,6 @@ export class HttpParserClient implements Parser {
  * MIME parts into the body we send to the parser sidecar.
  */
 function sanitizeHeader(value: string): string {
-  // eslint-disable-next-line no-control-regex
   return value.replace(/[\r\n\x00]/g, "");
 }
 
