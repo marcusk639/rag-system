@@ -4,6 +4,7 @@
   "private": true,
   "description": "Generic RAG service with multi-source ingestion, MCP access, and pgvector storage",
   "license": "MIT",
+  "type": "module",
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=22.0.0"
@@ -17,7 +18,7 @@
     "db:migrate": "pnpm --filter @rag/db migrate",
     "db:studio": "pnpm --filter @rag/db studio",
     "gen:parser-types": "openapi-typescript http://localhost:8000/openapi.json -o packages/core/src/parser-types.generated.ts",
-    "lint": "pnpm -r run lint",
+    "lint": "eslint .",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "e2e": "pnpm --filter @rag/e2e test",
@@ -28,9 +29,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "eslint": "^9.0.0",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.0.0",
     "vitest": "^2.1.8"
   }
 }
