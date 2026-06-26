@@ -79,10 +79,12 @@ export class StaticTokenAuthProvider implements AuthProvider {
   private readonly verify: (presented: string) => boolean;
   private readonly tokens: readonly string[];
   private readonly principals: readonly ScopedPrincipalConfig[];
+  private readonly enforceScoping: boolean;
 
   constructor(
     tokens: readonly string[],
     principals: readonly ScopedPrincipalConfig[] = [],
+    enforceScoping = false,
   ) {
     // Reuse the constant-time verifier — it throws on an empty allow-list, so a
     // misconfigured token set fails loud at construction (consistent with the
@@ -93,6 +95,7 @@ export class StaticTokenAuthProvider implements AuthProvider {
     ]);
     this.tokens = tokens;
     this.principals = principals;
+    this.enforceScoping = enforceScoping;
   }
 
   authenticate(credential: string): Promise<Principal | null> {
@@ -101,7 +104,9 @@ export class StaticTokenAuthProvider implements AuthProvider {
     // interface is async so JWT-style providers can do real I/O.
     if (!this.verify(credential)) return Promise.resolve(null);
     return Promise.resolve(
-      resolvePrincipal(credential, this.tokens, this.principals),
+      resolvePrincipal(credential, this.tokens, this.principals, {
+        enforceScoping: this.enforceScoping,
+      }),
     );
   }
 }

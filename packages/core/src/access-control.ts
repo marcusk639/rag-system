@@ -66,6 +66,13 @@ export const DENY_ALL_SCOPE: AuthorizationScope = { enforcedSourceIds: [] };
 export interface ScopedPrincipalConfig {
   token: string;
   allowedSourceIds: string[];
+  /**
+   * Explicit admin grant. When true, this token resolves to an `admin`
+   * (all-corpus) principal regardless of `allowedSourceIds`. This is the ONLY
+   * way to get admin once `enforceScoping` is on, so admin is always a
+   * deliberate, auditable choice rather than a silent default.
+   */
+  isAdmin?: boolean;
 }
 
 /**
@@ -113,8 +120,17 @@ export function parsePrincipalsConfig(
           `{"token": string, "allowedSourceIds": string[]}.`,
       );
     }
-    const e = entry as ScopedPrincipalConfig;
-    return { token: e.token, allowedSourceIds: e.allowedSourceIds };
+    const e = entry as Record<string, unknown>;
+    if (e.isAdmin !== undefined && typeof e.isAdmin !== "boolean") {
+      throw new Error(
+        `API_PRINCIPALS[${i}].isAdmin must be a boolean when present.`,
+      );
+    }
+    return {
+      token: e.token as string,
+      allowedSourceIds: e.allowedSourceIds as string[],
+      ...(e.isAdmin === true ? { isAdmin: true } : {}),
+    };
   });
 
   // Fail LOUDLY on a duplicate token. A repeated token is a silent footgun on a
@@ -153,13 +169,23 @@ export function resolvePrincipal(
   token: string,
   adminTokens: readonly string[],
   scopedPrincipals: readonly ScopedPrincipalConfig[],
+  opts?: { enforceScoping?: boolean },
 ): Principal | null {
   const scoped = scopedPrincipals.find((p) => p.token === token);
   if (scoped) {
-    return { kind: "scoped", allowedSourceIds: scoped.allowedSourceIds };
+    // An explicit `isAdmin` principal is the only way to get admin once scoping
+    // enforcement is on; otherwise the entry is enforced to its source set.
+    return scoped.isAdmin
+      ? { kind: "admin" }
+      : { kind: "scoped", allowedSourceIds: scoped.allowedSourceIds };
   }
   if (adminTokens.includes(token)) {
-    return { kind: "admin" };
+    // Plain `API_TOKENS` tokens are admin for backward compatibility. With
+    // scoping enforcement on, they authenticate but resolve to deny-all — admin
+    // must be granted explicitly via an `isAdmin` principal.
+    return opts?.enforceScoping
+      ? { kind: "scoped", allowedSourceIds: [] }
+      : { kind: "admin" };
   }
   return null;
 }

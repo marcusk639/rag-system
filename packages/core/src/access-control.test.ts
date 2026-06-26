@@ -95,6 +95,32 @@ describe("resolvePrincipal", () => {
     expect(p).toEqual({ kind: "scoped", allowedSourceIds: ["s9"] });
   });
 
+  it("resolves an isAdmin principal to admin regardless of allowedSourceIds", () => {
+    const p = resolvePrincipal(
+      "tok-x",
+      [],
+      [{ token: "tok-x", allowedSourceIds: [], isAdmin: true }],
+    );
+    expect(p).toEqual({ kind: "admin" });
+  });
+
+  it("with enforceScoping, a plain API_TOKENS token resolves to deny-all (not admin)", () => {
+    const p = resolvePrincipal("tok-admin", adminTokens, scoped, {
+      enforceScoping: true,
+    });
+    expect(p).toEqual({ kind: "scoped", allowedSourceIds: [] });
+  });
+
+  it("with enforceScoping, an explicit isAdmin principal still resolves to admin", () => {
+    const p = resolvePrincipal(
+      "tok-x",
+      [],
+      [{ token: "tok-x", allowedSourceIds: [], isAdmin: true }],
+      { enforceScoping: true },
+    );
+    expect(p).toEqual({ kind: "admin" });
+  });
+
   it("resolves two distinct tokens to two DISTINCT scopes (multi-tenant guarantee)", () => {
     const principals = [
       { token: "tokenA", allowedSourceIds: ["s1"] },
