@@ -79,5 +79,6 @@ export function makeTestConfig(): Config {
       forcePathStyle: true,
       keyPrefix: "",
     },
+    environment: "test",
   };
 }
