@@ -49,7 +49,7 @@ export async function registerAskRoute(
   //
   // SSE event contract (consumed by apps/web/src/lib/stream-chat.ts):
   //   event: token  data: <JSON-encoded string chunk>
-  //   event: done   data: {citations, retrieved}
+  //   event: done   data: {citations, retrieved, reviewStatus, disclaimer}
   //   event: error  data: {message}
   typed.post(
     "/ask/stream",
@@ -83,6 +83,8 @@ export async function registerAskRoute(
               `event: done\ndata: ${JSON.stringify({
                 citations: event.citations,
                 retrieved: event.retrieved,
+                reviewStatus: event.reviewStatus,
+                disclaimer: event.disclaimer,
               })}\n\n`,
             );
           }

@@ -46,10 +46,25 @@ export interface AskInput {
   filter?: Record<string, string | string[]>;
 }
 
+/**
+ * Server-sourced review status stamped on every generated answer. Circular 230
+ * §10.37: AI output is a DRAFT that a qualified practitioner must review before
+ * use. It is a typed field (not free text in the answer body) so a transport or
+ * UI cannot silently drop it, and it is set HERE — never by the client.
+ */
+export const REVIEW_STATUS = "draft_requires_practitioner_review" as const;
+export const ANSWER_DISCLAIMER =
+  "Draft — AI-generated and may be inaccurate. Requires review by a qualified " +
+  "practitioner before use.";
+
 export interface AskResult {
   answer: string;
   citations: GenerationResult["citations"];
   retrieved: SanitizedRetrievalResult[];
+  /** Always present; AI answers are drafts pending practitioner review. */
+  reviewStatus: typeof REVIEW_STATUS;
+  /** Human-readable form of `reviewStatus` for direct display. */
+  disclaimer: string;
 }
 
 const EMPTY_ANSWER =
@@ -112,7 +127,13 @@ async function ask(
   );
 
   if (retrieved.length === 0) {
-    return { answer: EMPTY_ANSWER, citations: [], retrieved: [] };
+    return {
+      answer: EMPTY_ANSWER,
+      citations: [],
+      retrieved: [],
+      reviewStatus: REVIEW_STATUS,
+      disclaimer: ANSWER_DISCLAIMER,
+    };
   }
 
   const result = await deps.generator.answer(input.question, retrieved);
@@ -120,6 +141,8 @@ async function ask(
     answer: result.answer,
     citations: result.citations,
     retrieved: sanitizeRetrievalResults(retrieved),
+    reviewStatus: REVIEW_STATUS,
+    disclaimer: ANSWER_DISCLAIMER,
   };
 }
 
@@ -134,6 +157,8 @@ export type AskStreamEvent =
       type: "done";
       citations: GenerationResult["citations"];
       retrieved: SanitizedRetrievalResult[];
+      reviewStatus: typeof REVIEW_STATUS;
+      disclaimer: string;
     };
 
 /**
@@ -178,7 +203,13 @@ async function* askStream(
 
   if (retrieved.length === 0) {
     yield { type: "token", text: EMPTY_ANSWER };
-    yield { type: "done", citations: [], retrieved: [] };
+    yield {
+      type: "done",
+      citations: [],
+      retrieved: [],
+      reviewStatus: REVIEW_STATUS,
+      disclaimer: ANSWER_DISCLAIMER,
+    };
     return;
   }
 
@@ -193,5 +224,7 @@ async function* askStream(
     type: "done",
     citations: buildCitations(retrieved),
     retrieved: sanitizeRetrievalResults(retrieved),
+    reviewStatus: REVIEW_STATUS,
+    disclaimer: ANSWER_DISCLAIMER,
   };
 }
