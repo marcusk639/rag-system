@@ -7,167 +7,192 @@ import { OidcConfig } from "./oidc-auth.js";
  * calls `loadConfig()` once at startup and passes the result into its modules
  * so nothing else reads `process.env` directly.
  */
-export const Config = z.object({
-  databaseUrl: z.string().url(),
-  pgBossSchema: z.string().default("pgboss"),
+export const Config = z
+  .object({
+    databaseUrl: z.string().url(),
+    pgBossSchema: z.string().default("pgboss"),
 
-  embedding: z.object({
-    provider: z.enum(["gemini", "openai", "local"]),
-    model: z.string(),
-    dimensions: z.number().int().positive(),
-    apiKey: z.string().optional(),
-    // Retries (after the first attempt) on transient 429 / RESOURCE_EXHAUSTED
-    // from the embedding API, using exponential backoff + jitter. Lets bulk
-    // embeds ride out rate limits (esp. the Gemini free tier) instead of
-    // failing whole documents. 0 disables retrying.
-    maxRetries: z.number().int().min(0).default(5),
-  }),
+    embedding: z.object({
+      provider: z.enum(["gemini", "openai", "local"]),
+      model: z.string(),
+      dimensions: z.number().int().positive(),
+      apiKey: z.string().optional(),
+      // Retries (after the first attempt) on transient 429 / RESOURCE_EXHAUSTED
+      // from the embedding API, using exponential backoff + jitter. Lets bulk
+      // embeds ride out rate limits (esp. the Gemini free tier) instead of
+      // failing whole documents. 0 disables retrying.
+      maxRetries: z.number().int().min(0).default(5),
+    }),
 
-  parser: z.object({
-    url: z.string().url(),
-    timeoutMs: z.number().int().positive().default(60_000),
-    // Opt-in shared secret. When set, the sidecar requires a matching
-    // X-Parser-Token header and the client sends it. Undefined = no auth
-    // (acceptable only for loopback-bound single-host dev).
-    secret: z.string().min(1).optional(),
-  }),
+    parser: z.object({
+      url: z.string().url(),
+      timeoutMs: z.number().int().positive().default(60_000),
+      // Opt-in shared secret. When set, the sidecar requires a matching
+      // X-Parser-Token header and the client sends it. Undefined = no auth
+      // (acceptable only for loopback-bound single-host dev).
+      secret: z.string().min(1).optional(),
+    }),
 
-  api: z.object({
-    host: z.string().default("0.0.0.0"),
-    port: z.number().int().positive().default(3000),
-    /**
-     * Plain (unscoped) bearer tokens. Each resolves to an ADMIN / all-access
-     * principal (unrestricted retrieval) — backward-compatible with the
-     * pre-ACL behavior. Reserve these for admin/service callers; use
-     * `principals` to wall off scoped staff. See @rag/core access-control.
-     */
-    tokens: z.array(z.string()).min(1),
-    /**
-     * Scoped principals (opt-in confidentiality boundary). Any token here is
-     * ENFORCED to its `allowedSourceIds` in retrieval and CANNOT see anything
-     * else — scoped wins over `tokens` if a string appears in both (least
-     * privilege). Sourced from the `API_PRINCIPALS` JSON env. Empty by default.
-     */
-    principals: z.array(
-      z.object({
-        token: z.string().min(1),
-        allowedSourceIds: z.array(z.string()),
-      }),
-    ),
-  }),
-
-  mcp: z.object({
-    transport: z.enum(["stdio", "http"]).default("stdio"),
-    httpPort: z.number().int().positive().default(3001),
-  }),
-
-  /**
-   * Authentication strategy. Provider-neutral: the static-token path is the
-   * legacy behavior (admin/scoped tokens), and `oidc` is optional federated
-   * JWT auth (e.g. Microsoft Entra ID) configured purely from env. `composite`
-   * (the default) accepts both — static tokens AND OIDC JWTs — so existing
-   * token deployments keep working while OIDC is layered on.
-   *
-   * `oidc` is undefined unless OIDC env is present. The runtime fails LOUD if
-   * `provider` is "oidc"/"composite" but the OIDC env is incomplete (see
-   * loadConfig); a "composite" with no OIDC env gracefully degrades to
-   * static-token-only.
-   */
-  auth: z.object({
-    provider: z
-      .enum(["static-token", "oidc", "composite"])
-      .default("composite"),
-    oidc: OidcConfig.optional(),
-  }),
-
-  worker: z.object({
-    concurrency: z.number().int().positive().default(4),
-    pollIntervalMs: z.number().int().positive().default(2_000),
-  }),
-
-  retrieval: z.object({
-    chunkSize: z.number().int().positive().default(800),
-    chunkOverlap: z.number().int().nonnegative().default(120),
-    defaultTopK: z.number().int().positive().default(12),
-    hybridDenseWeight: z.number().min(0).max(1).default(0.7),
-    hybridSparseWeight: z.number().min(0).max(1).default(0.3),
-    /**
-     * Per-document diversity cap applied to retrieved chunks before they reach
-     * the generator (and any caller of `searchDocuments`/`askQuestion`). Stops
-     * one long file from crowding out other sources. `0` disables the cap.
-     */
-    maxChunksPerDocument: z.number().int().nonnegative().default(3),
-  }),
-
-  /**
-   * Reranking stage (Phase F). After hybrid RRF fusion, an optional reranker
-   * re-orders the over-fetched candidate pool by true query relevance before
-   * the top-K is handed to the caller/generator. `none` (default) is a
-   * pass-through so deployments opt in; `cohere`/`jina` use a hosted
-   * cross-encoder; `llm` reuses the configured generation client.
-   */
-  rerank: z.object({
-    provider: z.enum(["none", "cohere", "jina", "llm"]).default("none"),
-    model: z.string().optional(),
-    apiKey: z.string().optional(),
-    /**
-     * How many candidates (as a multiple of the effective topK) to pull from
-     * hybrid search and feed the reranker. Larger = better recall before
-     * re-ranking, more rerank cost. Ignored when provider is `none`.
-     */
-    poolMultiplier: z.number().int().positive().default(5),
-  }),
-
-  generation: z
-    .object({
-      provider: z.enum(["gemini", "openai"]).default("gemini"),
-      model: z.string().default("gemini-2.5-flash"),
+    api: z.object({
+      host: z.string().default("0.0.0.0"),
+      port: z.number().int().positive().default(3000),
       /**
-       * Upper bound on generated answer length. Generous by default so
-       * substantive, multi-source answers aren't truncated at provider
-       * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
+       * Plain (unscoped) bearer tokens. Each resolves to an ADMIN / all-access
+       * principal (unrestricted retrieval) — backward-compatible with the
+       * pre-ACL behavior. Reserve these for admin/service callers; use
+       * `principals` to wall off scoped staff. See @rag/core access-control.
        */
-      maxOutputTokens: z.number().int().positive().default(2048),
-    })
-    .optional(),
+      tokens: z.array(z.string()).min(1),
+      /**
+       * Scoped principals (opt-in confidentiality boundary). Any token here is
+       * ENFORCED to its `allowedSourceIds` in retrieval and CANNOT see anything
+       * else — scoped wins over `tokens` if a string appears in both (least
+       * privilege). Sourced from the `API_PRINCIPALS` JSON env. Empty by default.
+       */
+      principals: z.array(
+        z.object({
+          token: z.string().min(1),
+          allowedSourceIds: z.array(z.string()),
+        }),
+      ),
+    }),
 
-  microsoft: z
-    .object({
-      tenantId: z.string(),
-      clientId: z.string(),
-      clientSecret: z.string(),
-    })
-    .optional(),
+    mcp: z.object({
+      transport: z.enum(["stdio", "http"]).default("stdio"),
+      httpPort: z.number().int().positive().default(3001),
+    }),
 
-  google: z
-    .object({
-      serviceAccountJson: z.string().optional(),
-      clientId: z.string().optional(),
-      clientSecret: z.string().optional(),
-      refreshToken: z.string().optional(),
-    })
-    .optional(),
+    /**
+     * Authentication strategy. Provider-neutral: the static-token path is the
+     * legacy behavior (admin/scoped tokens), and `oidc` is optional federated
+     * JWT auth (e.g. Microsoft Entra ID) configured purely from env. `composite`
+     * (the default) accepts both — static tokens AND OIDC JWTs — so existing
+     * token deployments keep working while OIDC is layered on.
+     *
+     * `oidc` is undefined unless OIDC env is present. The runtime fails LOUD if
+     * `provider` is "oidc"/"composite" but the OIDC env is incomplete (see
+     * loadConfig); a "composite" with no OIDC env gracefully degrades to
+     * static-token-only.
+     */
+    auth: z.object({
+      provider: z
+        .enum(["static-token", "oidc", "composite"])
+        .default("composite"),
+      oidc: OidcConfig.optional(),
+    }),
 
-  /**
-   * Where original document bytes are persisted so cited documents can be
-   * downloaded later. `none` (default) keeps the historical behavior — originals
-   * are not stored and the download route returns 404. `s3` targets any
-   * S3-compatible store (AWS S3, Railway buckets, MinIO, GCS S3-mode).
-   */
-  objectStore: z.object({
-    provider: z.enum(["none", "s3"]).default("none"),
-    bucket: z.string().optional(),
-    endpoint: z.string().url().optional(),
-    region: z.string().default("us-east-1"),
-    accessKeyId: z.string().optional(),
-    secretAccessKey: z.string().optional(),
-    // Path-style addressing is required by most S3-compatible stores
-    // (MinIO/Railway); virtual-hosted style is AWS-only.
-    forcePathStyle: z.boolean().default(true),
-    // Optional prefix applied to every object key (e.g. "originals/").
-    keyPrefix: z.string().default(""),
-  }),
-});
+    worker: z.object({
+      concurrency: z.number().int().positive().default(4),
+      pollIntervalMs: z.number().int().positive().default(2_000),
+    }),
+
+    retrieval: z.object({
+      chunkSize: z.number().int().positive().default(800),
+      chunkOverlap: z.number().int().nonnegative().default(120),
+      defaultTopK: z.number().int().positive().default(12),
+      hybridDenseWeight: z.number().min(0).max(1).default(0.7),
+      hybridSparseWeight: z.number().min(0).max(1).default(0.3),
+      /**
+       * Per-document diversity cap applied to retrieved chunks before they reach
+       * the generator (and any caller of `searchDocuments`/`askQuestion`). Stops
+       * one long file from crowding out other sources. `0` disables the cap.
+       */
+      maxChunksPerDocument: z.number().int().nonnegative().default(3),
+    }),
+
+    /**
+     * Reranking stage (Phase F). After hybrid RRF fusion, an optional reranker
+     * re-orders the over-fetched candidate pool by true query relevance before
+     * the top-K is handed to the caller/generator. `none` (default) is a
+     * pass-through so deployments opt in; `cohere`/`jina` use a hosted
+     * cross-encoder; `llm` reuses the configured generation client.
+     */
+    rerank: z.object({
+      provider: z.enum(["none", "cohere", "jina", "llm"]).default("none"),
+      model: z.string().optional(),
+      apiKey: z.string().optional(),
+      /**
+       * How many candidates (as a multiple of the effective topK) to pull from
+       * hybrid search and feed the reranker. Larger = better recall before
+       * re-ranking, more rerank cost. Ignored when provider is `none`.
+       */
+      poolMultiplier: z.number().int().positive().default(5),
+    }),
+
+    generation: z
+      .object({
+        provider: z.enum(["gemini", "openai"]).default("gemini"),
+        model: z.string().default("gemini-2.5-flash"),
+        /**
+         * Upper bound on generated answer length. Generous by default so
+         * substantive, multi-source answers aren't truncated at provider
+         * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
+         */
+        maxOutputTokens: z.number().int().positive().default(2048),
+      })
+      .optional(),
+
+    microsoft: z
+      .object({
+        tenantId: z.string(),
+        clientId: z.string(),
+        clientSecret: z.string(),
+      })
+      .optional(),
+
+    google: z
+      .object({
+        serviceAccountJson: z.string().optional(),
+        clientId: z.string().optional(),
+        clientSecret: z.string().optional(),
+        refreshToken: z.string().optional(),
+      })
+      .optional(),
+
+    /**
+     * Where original document bytes are persisted so cited documents can be
+     * downloaded later. `none` (default) keeps the historical behavior — originals
+     * are not stored and the download route returns 404. `s3` targets any
+     * S3-compatible store (AWS S3, Railway buckets, MinIO, GCS S3-mode).
+     */
+    objectStore: z.object({
+      provider: z.enum(["none", "s3"]).default("none"),
+      bucket: z.string().optional(),
+      endpoint: z.string().url().optional(),
+      region: z.string().default("us-east-1"),
+      accessKeyId: z.string().optional(),
+      secretAccessKey: z.string().optional(),
+      // Path-style addressing is required by most S3-compatible stores
+      // (MinIO/Railway); virtual-hosted style is AWS-only.
+      forcePathStyle: z.boolean().default(true),
+      // Optional prefix applied to every object key (e.g. "originals/").
+      keyPrefix: z.string().default(""),
+    }),
+
+    /**
+     * Deployment environment, derived from NODE_ENV. Drives fail-loud production
+     * gates (e.g. PARSER_SECRET is mandatory in production). `test`/`development`
+     * keep the relaxed local/CI behavior.
+     */
+    environment: z
+      .enum(["development", "test", "production"])
+      .default("development"),
+  })
+  .superRefine((cfg, ctx) => {
+    // Production gate: the parser shared secret is mandatory in production so the
+    // sidecar's /parse endpoint can't be called unauthenticated over a network.
+    // Loopback-only dev/CI may omit it.
+    if (cfg.environment === "production" && !cfg.parser.secret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["parser", "secret"],
+        message:
+          "PARSER_SECRET is required in production (set it on every service and " +
+          "the parser sidecar). Empty/unset is only allowed for loopback-bound " +
+          "development.",
+      });
+    }
+  });
 export type Config = z.infer<typeof Config>;
 
 /**
@@ -319,6 +344,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return Config.parse({
     databaseUrl: env.DATABASE_URL,
     pgBossSchema: env.PG_BOSS_SCHEMA,
+    environment:
+      env.NODE_ENV === "production"
+        ? "production"
+        : env.NODE_ENV === "test"
+          ? "test"
+          : "development",
     embedding: {
       provider,
       model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
