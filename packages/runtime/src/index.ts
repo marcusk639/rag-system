@@ -75,6 +75,7 @@ export function buildAuthProvider(
   const base = {
     tokens: config.api.tokens,
     principals: config.api.principals,
+    enforceScoping: config.api.enforceScoping,
   };
   switch (config.auth.provider) {
     case "static-token":

@@ -57,13 +57,22 @@ export const Config = z
        * ENFORCED to its `allowedSourceIds` in retrieval and CANNOT see anything
        * else — scoped wins over `tokens` if a string appears in both (least
        * privilege). Sourced from the `API_PRINCIPALS` JSON env. Empty by default.
+       * An entry with `isAdmin: true` grants explicit all-corpus admin.
        */
       principals: z.array(
         z.object({
           token: z.string().min(1),
           allowedSourceIds: z.array(z.string()),
+          isAdmin: z.boolean().optional(),
         }),
       ),
+      /**
+       * When true (`API_ENFORCE_SCOPING=true`), plain `tokens` no longer grant
+       * admin — they authenticate but resolve to deny-all. Admin must then be
+       * granted explicitly via an `isAdmin` principal. Default false preserves
+       * the backward-compatible "API_TOKENS = admin" behavior.
+       */
+      enforceScoping: z.boolean().default(false),
     }),
 
     mcp: z.object({
@@ -385,6 +394,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       // Throws loudly on malformed API_PRINCIPALS so a misconfig is caught at
       // startup rather than silently re-opening the corpus-wide read.
       principals: parsePrincipalsConfig(env.API_PRINCIPALS),
+      enforceScoping: env.API_ENFORCE_SCOPING === "true",
     },
     mcp: {
       transport: env.MCP_TRANSPORT,
