@@ -1,0 +1,193 @@
+# Production docker-compose stack for the RAG system.
+#
+# ── Parameterization ──────────────────────────────────────────────────────────
+# Copy env.example → .env.prod and fill in all required values before running.
+# Launch with:
+#   docker compose -f docker/compose.prod.yml --env-file .env.prod up -d
+#
+# ── Migration order ───────────────────────────────────────────────────────────
+# The worker is the sole migration owner. On a schema-changing release:
+#   1. docker compose ... up -d postgres parser    # infra first
+#   2. docker compose ... run --rm worker node -e  # pnpm --filter @rag/db migrate
+#      (or use the preDeployCommand in Railway)
+#   3. docker compose ... up -d api mcp worker     # then services
+# Never run migrations from api or mcp — concurrent bootstrap races on 0000_init.
+#
+# ── Tenant isolation ─────────────────────────────────────────────────────────
+# This file is the per-tenant provisioning unit. Each tenant gets:
+#   - Its own Postgres volume (encrypted at the host level; see DEPLOYMENT.md)
+#   - Its own secrets (.env.<tenant> or a secrets manager)
+#   - Its own stack instance (docker compose -p <tenant> ...)
+# Do NOT share one Postgres instance between tenants with sensitive data.
+
+name: rag
+
+services:
+  # ── Postgres + pgvector ─────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      # Named volume — pin to an encrypted disk/partition at provisioning time.
+      # See DEPLOYMENT.md §Encryption for host-level encryption setup.
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Do NOT expose Postgres to the host network in production.
+    # Services reach it via the compose network as `postgres:5432`.
+
+  # ── Python parser sidecar ───────────────────────────────────────────────────
+  parser:
+    image: ${PARSER_IMAGE:-rag-parser:latest}
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PARSER_SECRET: ${PARSER_SECRET}
+      # Optional: enable LLM image-to-text in MarkItDown. Leave blank to disable.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Parser is only reachable via the compose network (parser:8000), not the host.
+
+  # ── HTTP API ─────────────────────────────────────────────────────────────────
+  api:
+    image: ${API_IMAGE:-rag-api:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      parser:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      PARSER_URL: http://parser:8000
+      PARSER_SECRET: ${PARSER_SECRET}
+      PARSER_TIMEOUT_MS: ${PARSER_TIMEOUT_MS:-60000}
+      # Auth — at least one of API_TOKENS or API_PRINCIPALS must be set.
+      API_TOKENS: ${API_TOKENS:-}
+      API_PRINCIPALS: ${API_PRINCIPALS:-}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-composite}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      # Embedding
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+      # Generation
+      GENERATION_PROVIDER: ${GENERATION_PROVIDER:-gemini}
+      GENERATION_MODEL: ${GENERATION_MODEL:-gemini-1.5-flash}
+      # Object store (for original-document download)
+      OBJECT_STORE_PROVIDER: ${OBJECT_STORE_PROVIDER:-none}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-}
+      GCS_KEY_FILE: ${GCS_KEY_FILE:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── MCP server (HTTP transport) ──────────────────────────────────────────────
+  mcp:
+    image: ${MCP_IMAGE:-rag-mcp:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      parser:
+        condition: service_healthy
+    ports:
+      - "${MCP_HTTP_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      MCP_TRANSPORT: http
+      MCP_HTTP_PORT: "3001"
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      PARSER_URL: http://parser:8000
+      PARSER_SECRET: ${PARSER_SECRET}
+      PARSER_TIMEOUT_MS: ${PARSER_TIMEOUT_MS:-60000}
+      API_TOKENS: ${API_TOKENS:-}
+      API_PRINCIPALS: ${API_PRINCIPALS:-}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-composite}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+      GENERATION_PROVIDER: ${GENERATION_PROVIDER:-gemini}
+      GENERATION_MODEL: ${GENERATION_MODEL:-gemini-1.5-flash}
+      OBJECT_STORE_PROVIDER: ${OBJECT_STORE_PROVIDER:-none}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  # ── Ingestion worker ─────────────────────────────────────────────────────────
+  worker:
+    image: ${WORKER_IMAGE:-rag-worker:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      parser:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      PARSER_URL: http://parser:8000
+      PARSER_SECRET: ${PARSER_SECRET}
+      PARSER_TIMEOUT_MS: ${PARSER_TIMEOUT_MS:-60000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+      OBJECT_STORE_PROVIDER: ${OBJECT_STORE_PROVIDER:-none}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-}
+      GCS_KEY_FILE: ${GCS_KEY_FILE:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      # SharePoint connector
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      # Google connector
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+volumes:
+  postgres_data:
+    # Mount this named volume on an encrypted disk partition at the host level.
+    # See DEPLOYMENT.md §Encryption for setup instructions.
+    driver: local
