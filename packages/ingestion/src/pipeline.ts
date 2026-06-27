@@ -17,6 +17,7 @@ import {
   type Db,
   deleteDocumentByExternalId,
   documentHasChunks,
+  logIngestEvent,
   replaceChunks,
   setDocumentStorage,
   updateSourceCursor,
@@ -240,7 +241,16 @@ async function ingestOne(
   // exist. This is a programming error if reached (the source should not have
   // been created with a C/D class in Phase 1), so we throw rather than skip.
   if (docClass === "C" || docClass === "D") {
-    throw new ClassBlockedError(docClass, sourceId);
+    const blocked = new ClassBlockedError(docClass, sourceId);
+    await logIngestEvent(deps.db, {
+      sourceId,
+      docId: null,
+      externalId: source.externalId,
+      docClass,
+      action: "blocked",
+      rejectionReason: blocked.message,
+    });
+    throw blocked;
   }
 
   const { db, parser, chunker, embedder, objectStore, logger } = deps;
@@ -280,6 +290,15 @@ async function ingestOne(
       docClass,
     } as DocumentMetadata & Record<string, unknown>,
     markdown: parsed.markdown,
+  });
+
+  // Audit: record a successful ingest event for compliance tracking.
+  await logIngestEvent(db, {
+    sourceId,
+    docId: documentId,
+    externalId: source.externalId,
+    docClass,
+    action: "ingested",
   });
 
   // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.

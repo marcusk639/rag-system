@@ -336,4 +336,46 @@ export const auditLog = pgTable(
   }),
 );
 export type NewAuditLog = typeof auditLog.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// ingest_log — one row per document ingestion attempt, regardless of outcome.
+// Written by the pipeline immediately after upsert (action="ingested") or on
+// ClassBlockedError before re-throwing (action="blocked"). Provides a durable
+// audit trail of what was indexed and what was rejected, keyed by source.
+// ----------------------------------------------------------------------------
+export const ingestLog = pgTable(
+  "ingest_log",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    /**
+     * Null when the document was blocked before a DB row was created
+     * (ClassBlockedError fires before upsertDocument).
+     */
+    docId: uuid("doc_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    /** Connector-assigned stable id — lets callers cross-reference the source. */
+    externalId: text("external_id").notNull(),
+    /** DocumentClass at ingest time (A | B | C | D). */
+    docClass: text("doc_class").notNull(),
+    /** "ingested" | "blocked" */
+    action: text("action").notNull(),
+    /** Non-null only when action = "blocked". */
+    rejectionReason: text("rejection_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    sourceIdx: index("ingest_log_source_idx").on(table.sourceId),
+    createdIdx: index("ingest_log_created_idx").on(table.createdAt),
+  }),
+);
+
+export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

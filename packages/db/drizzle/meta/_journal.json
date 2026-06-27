@@ -29,6 +29,13 @@
       "when": 1782548147382,
       "tag": "0004_data_class",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782634547382,
+      "tag": "0005_ingest_log",
+      "breakpoints": true
     }
   ]
 }

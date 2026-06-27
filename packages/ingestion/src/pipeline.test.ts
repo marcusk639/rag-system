@@ -14,6 +14,7 @@ const {
   documentHasChunksMock,
   deleteDocumentByExternalIdMock,
   setDocumentStorageMock,
+  logIngestEventMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   documentHasChunksMock: vi.fn(),
   deleteDocumentByExternalIdMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
+  logIngestEventMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -30,6 +32,7 @@ vi.mock("@rag/db", () => ({
   documentHasChunks: documentHasChunksMock,
   deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
+  logIngestEvent: logIngestEventMock,
 }));
 
 interface FakePage {
@@ -122,6 +125,7 @@ beforeEach(() => {
     storageKey: null,
   });
   setDocumentStorageMock.mockResolvedValue(undefined);
+  logIngestEventMock.mockResolvedValue(undefined);
 });
 
 describe("runIngestion page budgeting", () => {
@@ -495,5 +499,44 @@ describe("document classification enforcement", () => {
     await runIngestion("src", connector, null, OPTS, deps);
     expect(captured).toBeInstanceOf(ClassBlockedError);
     expect((captured as ClassBlockedError).docClass).toBe("C");
+  });
+
+  it("logIngestEvent is called with action=ingested for Class A documents", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "A" as const };
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: "doc-1",
+        docClass: "A",
+        action: "ingested",
+      }),
+    );
+  });
+
+  it("logIngestEvent is called with action=blocked for Class C documents", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const { connector } = makeConnector([
+      { documents: ["c1"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: null,
+        docClass: "C",
+        action: "blocked",
+        rejectionReason: expect.stringContaining("cannot be indexed in Phase 1"),
+      }),
+    );
+    // The doc must NOT have been upserted into the DB
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
   });
 });
