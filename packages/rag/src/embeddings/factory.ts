@@ -1,6 +1,7 @@
 import type { Config, EmbeddingProvider } from "@rag/core";
 import { ValidationError } from "@rag/core";
 import { GeminiEmbeddingProvider } from "./gemini.js";
+import { LocalEmbeddingProvider } from "./local.js";
 import { OpenAIEmbeddingProvider } from "./openai.js";
 
 /**
@@ -40,8 +41,11 @@ export function createEmbeddingProvider(
         maxRetries: cfg.maxRetries,
       });
     case "local":
-      throw new ValidationError(
-        "local provider not yet implemented — install @xenova/transformers and add a LocalEmbeddingProvider",
-      );
+      // No API key required — all inference runs on-process via ONNX.
+      // Satisfies CR-1/CR-3: no TRI egress for embeddings (§7216 compliance).
+      return new LocalEmbeddingProvider({
+        model: cfg.model,
+        dimensions: cfg.dimensions,
+      });
   }
 }

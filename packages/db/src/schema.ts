@@ -34,13 +34,7 @@ export const sourceKindEnum = pgEnum("source_kind", [
   "gmail",
   "outlook",
   "custom",
-])
-
-/**
- * A/B/C/D document classification. Phase 1 ingests A and B only;
- * C and D are rejected at the application layer (ClassBlockedError).
- */
-export const documentClassEnum = pgEnum("document_class", ["A", "B", "C", "D"]);
+]);
 
 export const ingestionStatusEnum = pgEnum("ingestion_status", [
   "pending",
@@ -75,12 +69,6 @@ export const sources = pgTable(
     config: jsonb("config").notNull().$type<Record<string, unknown>>(),
     /** Opaque delta cursor for incremental sync. Null = next sync is full. */
     cursor: text("cursor"),
-    /**
-     * Data classification for all documents from this source.
-     * Every source must declare its class; the ingestion pipeline stamps every
-     * document with this value and blocks C/D in Phase 1.
-     */
-    docClass: documentClassEnum("doc_class").notNull().default("A"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -119,12 +107,6 @@ export const documents = pgTable(
     /** SHA-256 of the parsed markdown — if unchanged, skip re-chunking + re-embedding */
     contentHash: text("content_hash").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }),
-    /**
-     * Data classification inherited from the source at ingest time.
-     * Stamped once on first insert; immutable thereafter (a re-ingest of the
-     * same source cannot change the class of an existing document).
-     */
-    docClass: documentClassEnum("doc_class").notNull().default("A"),
     /** Free-form metadata (path, author, url, email fields, etc.) */
     metadata: jsonb("metadata").notNull().$type<Record<string, unknown>>(),
     /** Cached parsed markdown for quick retrieval of full document */

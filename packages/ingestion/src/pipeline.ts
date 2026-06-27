@@ -280,7 +280,6 @@ async function ingestOne(
       docClass,
     } as DocumentMetadata & Record<string, unknown>,
     markdown: parsed.markdown,
-    docClass,
   });
 
   // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.

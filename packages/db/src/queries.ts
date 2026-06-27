@@ -125,13 +125,13 @@ export async function upsertDocument(
     upserted AS (
       INSERT INTO documents (
         source_id, external_id, title, mime_type, source_modified_at,
-        content_hash, size_bytes, metadata, markdown, doc_class
+        content_hash, size_bytes, metadata, markdown
       )
       VALUES (
         ${row.sourceId}, ${row.externalId}, ${row.title}, ${row.mimeType},
         ${row.sourceModifiedAt ?? null}, ${row.contentHash},
         ${row.sizeBytes ?? null}, ${JSON.stringify(row.metadata)}::jsonb,
-        ${row.markdown}, ${row.docClass}
+        ${row.markdown}
       )
       ON CONFLICT (source_id, external_id) DO UPDATE SET
         title              = EXCLUDED.title,
@@ -140,8 +140,7 @@ export async function upsertDocument(
         content_hash       = EXCLUDED.content_hash,
         size_bytes         = EXCLUDED.size_bytes,
         metadata           = EXCLUDED.metadata,
-        markdown           = EXCLUDED.markdown,
-        doc_class          = EXCLUDED.doc_class
+        markdown           = EXCLUDED.markdown
       RETURNING id, xmax
     )
     SELECT
