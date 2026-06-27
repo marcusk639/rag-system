@@ -31,6 +31,10 @@ jobs:
       PARSER_URL: http://localhost:8000
       E2E_SKIP_DOCKER_UP: "1"
       E2E_PGBOSS_SCHEMA: pgboss_e2e_ci
+      # Use the deterministic in-process embedder so CI needs no Gemini API key.
+      # The e2e suite injects FakeEmbedder directly; this env var makes the
+      # intent explicit and guards any loadConfig() path that might surface.
+      EMBEDDING_PROVIDER: local
 
     steps:
       - uses: actions/checkout@v4
