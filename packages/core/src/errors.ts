@@ -82,3 +82,32 @@ export class ClassBlockedError extends RagError {
     this.docClass = docClass;
   }
 }
+
+/**
+ * Thrown when an outbound call would reach a host not on the egress allow-list.
+ * Fail-closed: this is a hard block — the caller must not silently retry.
+ * Add the host to EGRESS_ALLOWED_HOSTS (and confirm a DPA is on file) to allow it.
+ */
+export class EgressError extends RagError {
+  readonly host: string;
+  constructor(host: string) {
+    super(
+      `Outbound call to "${host}" blocked — not in EGRESS_ALLOWED_HOSTS. ` +
+        `Add the host to the allow-list only after confirming a signed DPA is on file.`,
+      "EGRESS_BLOCKED",
+      undefined,
+    );
+    this.host = host;
+  }
+}
+
+/**
+ * Thrown when a compliance pre-flight check blocks an operation.
+ * Currently used when TRI (taxpayer return information, IRC §7216) patterns
+ * are detected in text destined for an external generation API.
+ */
+export class ComplianceError extends RagError {
+  constructor(message: string) {
+    super(message, "COMPLIANCE_VIOLATION", undefined);
+  }
+}

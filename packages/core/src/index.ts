@@ -8,3 +8,5 @@ export * from "./validation.js";
 export * from "./auth.js";
 export * from "./oidc-auth.js";
 export * from "./auth-provider-factory.js";
+export * from "./egress-policy.js";
+export * from "./tri-scanner.js";
