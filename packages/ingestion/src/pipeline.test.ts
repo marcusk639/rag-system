@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import type { Chunk, Connector, ConnectorListResult, Parser } from "@rag/core";
+import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
 import { runIngestion, type PipelineDeps } from "./pipeline.js";
 
@@ -430,5 +431,69 @@ describe("runIngestion original-bytes storage", () => {
     // Document still processed (searchable); storage location not recorded.
     expect(result.documentsProcessed).toBe(1);
     expect(setDocumentStorageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("document classification enforcement", () => {
+  it("Class A documents are ingested normally", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "A" as const };
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.documentsFailed).toBe(0);
+  });
+
+  it("Class B documents are ingested normally", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "B" as const };
+    const { connector } = makeConnector([
+      { documents: ["b"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.documentsFailed).toBe(0);
+  });
+
+  it("Class C documents throw ClassBlockedError — zero documents ingested", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const { connector } = makeConnector([
+      { documents: ["c1", "c2"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    // Both docs fail; none processed
+    expect(result.documentsProcessed).toBe(0);
+    expect(result.documentsFailed).toBe(2);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("Class D documents throw ClassBlockedError — zero documents ingested", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "D" as const };
+    const { connector } = makeConnector([
+      { documents: ["d1"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(0);
+    expect(result.documentsFailed).toBe(1);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("ClassBlockedError carries the correct docClass and is instanceof ClassBlockedError", async () => {
+    // Capture the error thrown by the pipeline for a Class C document
+    let captured: unknown;
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const originalLog = deps.logger.error.bind(deps.logger);
+    (deps.logger as unknown as Record<string, unknown>).error = (
+      obj: unknown,
+    ) => {
+      captured = (obj as { err: unknown }).err;
+      originalLog(obj as Parameters<typeof originalLog>[0], "");
+    };
+    const { connector } = makeConnector([
+      { documents: ["x"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src", connector, null, OPTS, deps);
+    expect(captured).toBeInstanceOf(ClassBlockedError);
+    expect((captured as ClassBlockedError).docClass).toBe("C");
   });
 });

@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import pLimit from "p-limit";
 import type { Logger } from "pino";
 import {
+  ClassBlockedError,
   EmbeddingError,
   type Chunker,
   type Connector,
+  type DocumentClass,
   type DocumentMetadata,
   type EmbeddingProvider,
   type ObjectStore,
@@ -60,6 +62,13 @@ export interface PipelineDeps {
   chunker: Chunker;
   embedder: EmbeddingProvider;
   logger: Logger;
+  /**
+   * Data classification declared by the source being ingested.
+   * Inherited from `sources.doc_class` and stamped onto every document.
+   * Phase 1 accepts A and B; C and D throw ClassBlockedError.
+   * Defaults to 'A' for backwards compatibility with tests that don't set it.
+   */
+  sourceDocClass?: DocumentClass;
   /**
    * Where original document bytes are persisted so cited documents can be
    * downloaded later. Null/undefined disables storage (the document is still
@@ -133,9 +142,12 @@ export async function runIngestion(
       "fetched page",
     );
 
+    const docClass: DocumentClass = deps.sourceDocClass ?? "A";
     const limit = pLimit(opts.concurrency);
     const results = await Promise.allSettled(
-      page.documents.map((doc) => limit(() => ingestOne(sourceId, doc, deps))),
+      page.documents.map((doc) =>
+        limit(() => ingestOne(sourceId, doc, deps, docClass)),
+      ),
     );
 
     for (const r of results) {
@@ -222,7 +234,15 @@ async function ingestOne(
   sourceId: string,
   source: SourceDocument,
   deps: PipelineDeps,
+  docClass: DocumentClass,
 ): Promise<{ chunksCreated: number }> {
+  // Phase 1 hard block — C and D require compliance workflows that do not yet
+  // exist. This is a programming error if reached (the source should not have
+  // been created with a C/D class in Phase 1), so we throw rather than skip.
+  if (docClass === "C" || docClass === "D") {
+    throw new ClassBlockedError(docClass, sourceId);
+  }
+
   const { db, parser, chunker, embedder, objectStore, logger } = deps;
   const log = logger.child({
     externalId: source.externalId,
@@ -252,9 +272,15 @@ async function ingestOne(
     // The connector's typed DocumentMetadata plus the parser's free-form bag
     // (validated to a plain object at the parser-client boundary). Typed as the
     // union so the stored shape is honest about both halves.
-    metadata: { ...source.metadata, ...parsed.metadata } as DocumentMetadata &
-      Record<string, unknown>,
+    metadata: {
+      ...source.metadata,
+      ...parsed.metadata,
+      // Stamp the classification tag into the stored metadata so it is
+      // available for retrieval filtering and citation display.
+      docClass,
+    } as DocumentMetadata & Record<string, unknown>,
     markdown: parsed.markdown,
+    docClass,
   });
 
   // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.

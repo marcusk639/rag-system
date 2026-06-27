@@ -113,7 +113,7 @@ export async function handleSyncSource(
         pageSize: 50,
         maxPagesPerRun: PAGES_PER_RUN,
       },
-      { db, parser, chunker, embedder, objectStore, logger: log },
+      { db, parser, chunker, embedder, objectStore, logger: log, sourceDocClass: source.docClass },
     );
 
     // Accumulate this run's counts into the single history row (additive, not

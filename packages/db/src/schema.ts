@@ -34,7 +34,13 @@ export const sourceKindEnum = pgEnum("source_kind", [
   "gmail",
   "outlook",
   "custom",
-]);
+])
+
+/**
+ * A/B/C/D document classification. Phase 1 ingests A and B only;
+ * C and D are rejected at the application layer (ClassBlockedError).
+ */
+export const documentClassEnum = pgEnum("document_class", ["A", "B", "C", "D"]);
 
 export const ingestionStatusEnum = pgEnum("ingestion_status", [
   "pending",
@@ -42,6 +48,16 @@ export const ingestionStatusEnum = pgEnum("ingestion_status", [
   "completed",
   "failed",
 ]);
+
+/** §7216 / GLBA data classification for a source.
+ *  `client_confidential` ingestion is refused at the pipeline level. */
+export const dataClassEnum = pgEnum("data_class", [
+  "general",
+  "research",
+  "sop",
+  "client_confidential",
+]);
+export type DataClass = (typeof dataClassEnum.enumValues)[number];
 
 // ----------------------------------------------------------------------------
 // sources — one row per configured external system (a SharePoint site, a
@@ -59,6 +75,12 @@ export const sources = pgTable(
     config: jsonb("config").notNull().$type<Record<string, unknown>>(),
     /** Opaque delta cursor for incremental sync. Null = next sync is full. */
     cursor: text("cursor"),
+    /**
+     * Data classification for all documents from this source.
+     * Every source must declare its class; the ingestion pipeline stamps every
+     * document with this value and blocks C/D in Phase 1.
+     */
+    docClass: documentClassEnum("doc_class").notNull().default("A"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -66,6 +88,8 @@ export const sources = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /** §7216/GLBA classification — controls ingestion gate and retrieval filter. */
+    dataClass: dataClassEnum("data_class").notNull().default("general"),
   },
   (table) => ({
     kindIdx: index("sources_kind_idx").on(table.kind),
@@ -95,6 +119,12 @@ export const documents = pgTable(
     /** SHA-256 of the parsed markdown — if unchanged, skip re-chunking + re-embedding */
     contentHash: text("content_hash").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }),
+    /**
+     * Data classification inherited from the source at ingest time.
+     * Stamped once on first insert; immutable thereafter (a re-ingest of the
+     * same source cannot change the class of an existing document).
+     */
+    docClass: documentClassEnum("doc_class").notNull().default("A"),
     /** Free-form metadata (path, author, url, email fields, etc.) */
     metadata: jsonb("metadata").notNull().$type<Record<string, unknown>>(),
     /** Cached parsed markdown for quick retrieval of full document */
@@ -287,4 +317,41 @@ export type NewChunk = typeof chunks.$inferInsert;
 export type IngestionJob = typeof ingestionJobs.$inferSelect;
 export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
 export type PendingUpload = typeof pendingUploads.$inferSelect;
+
+// ----------------------------------------------------------------------------
+// audit_log — one row per ask()/askStream() call for §7216 / Circular 230
+// accountability. Written async (fire-and-forget); does NOT block the response.
+// ----------------------------------------------------------------------------
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    /** "admin" | "scoped" */
+    principalKind: text("principal_kind").notNull(),
+    /** Null for admin principals; source-ID list for scoped ones. */
+    principalSources: text("principal_sources").array(),
+    /** SHA-256 of the question text (no raw PII stored here). */
+    questionHash: text("question_hash").notNull(),
+    /** "api" | "mcp" */
+    channel: text("channel").notNull(),
+    /** Generation model identifier (null when not applicable). */
+    model: text("model"),
+    sourceIds: text("source_ids").array().notNull(),
+    chunkIds: text("chunk_ids").array().notNull(),
+    docIds: text("doc_ids").array().notNull(),
+    retrievedCount: integer("retrieved_count").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    createdIdx: index("audit_log_created_idx").on(table.createdAt),
+    principalKindIdx: index("audit_log_principal_kind_idx").on(
+      table.principalKind,
+    ),
+  }),
+);
+export type NewAuditLog = typeof auditLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

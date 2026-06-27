@@ -49,6 +49,9 @@ export const EXPOSABLE_METADATA_FIELDS = [
   "createdAt",
   "modifiedAt",
   "path",
+  // Classification tag — non-PII; needed for citation display and
+  // index-boundary enforcement at the retrieval layer.
+  "docClass",
 ] as const satisfies readonly (keyof DocumentMetadata)[];
 
 /** The subset of `DocumentMetadata` that is safe to return across a boundary. */
