@@ -2,13 +2,13 @@
  * TRI (Taxpayer Return Information) pre-flight scanner.
  *
  * Scans text for patterns that indicate IRC §7216 Taxpayer Return Information
- * before it is sent to an external API. Callers decide the action — the scanner
- * only detects and reports; it does not throw.
+ * before it is sent to an external API, and at ingest time to flag documents
+ * containing TRI for the compliance audit log. Callers decide the action —
+ * the scanner only detects and reports; it does not throw.
  *
  * Patterns:
- *   - US SSN: ###-##-#### (dashes required to avoid false positives on
- *     phone numbers and dates)
- *   - US EIN: ##-####### (employer identification number)
+ *   - US SSN: ###-##-#### or ### ##-#### (dashes or spaces)
+ *   - US EIN: ##-####### or ## ####### (dashes or spaces)
  *   - "taxpayer" near a dollar amount (loose; covers narrative TRI)
  *   - Named tax-form reference near a dollar amount (Form 1040 / 1065 / 1041 / 1120)
  */
@@ -28,12 +28,16 @@ interface TRIPattern {
 const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "SSN",
-    // Require word boundaries + dashes to reduce false positives.
-    regex: /\b\d{3}-\d{2}-\d{4}\b/,
+    // Match dash-separated (123-45-6789) and space-separated (123 45 6789).
+    // Unformatted 9-digit strings are too broad (overlap with account numbers,
+    // phone digits, etc.) — those are caught by taxpayer+amount and
+    // tax-form+amount contextual patterns.
+    regex: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/,
   },
   {
     label: "EIN",
-    regex: /\b\d{2}-\d{7}\b/,
+    // Match dash-separated (12-3456789) and space-separated (12 3456789).
+    regex: /\b\d{2}[-\s]\d{7}\b/,
   },
   {
     label: "taxpayer+amount",

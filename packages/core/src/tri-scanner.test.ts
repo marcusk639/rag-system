@@ -25,8 +25,14 @@ describe("scanForTRI", () => {
     expect(result.patterns).toContain("SSN");
   });
 
+  it("detects a space-separated SSN (### ## ####)", () => {
+    const result = scanForTRI("SSN: 123 45 6789 on file.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("SSN");
+  });
+
   it("does not false-positive on a phone number without SSN dashes", () => {
-    // Phone numbers lack the SSN dash pattern
+    // Phone numbers lack the SSN digit-group pattern
     const result = scanForTRI("Call us at (800) 555-1234 for assistance.");
     expect(result.patterns).not.toContain("SSN");
   });
@@ -35,6 +41,12 @@ describe("scanForTRI", () => {
 
   it("detects a US EIN (##-#######)", () => {
     const result = scanForTRI("Employer ID: 12-3456789");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("EIN");
+  });
+
+  it("detects a space-separated EIN (## #######)", () => {
+    const result = scanForTRI("EIN 12 3456789 per IRS records.");
     expect(result.detected).toBe(true);
     expect(result.patterns).toContain("EIN");
   });

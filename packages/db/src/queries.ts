@@ -632,9 +632,15 @@ export interface IngestEventRow {
   externalId: string;
   /** DocumentClass at ingest time (A | B | C | D). */
   docClass: string;
-  /** "ingested" on success; "blocked" when ClassBlockedError fires. */
-  action: "ingested" | "blocked";
-  /** Error message when action = "blocked"; null otherwise. */
+  /**
+   * "ingested"    — normal success path.
+   * "blocked"     — ClassBlockedError fired before the document was written.
+   * "tri-flagged" — TRI patterns detected in parsed content; ingestion
+   *   continued but a compliance event was logged. Matched pattern labels
+   *   are stored in rejectionReason.
+   */
+  action: "ingested" | "blocked" | "tri-flagged";
+  /** Non-null for "blocked" (error message) and "tri-flagged" (pattern list). */
   rejectionReason?: string | null;
 }
 
@@ -642,6 +648,7 @@ export interface IngestEventRow {
  * Write one row to `ingest_log`. Called by the ingestion pipeline:
  *   - after a successful `upsertDocument` with action="ingested"
  *   - before re-throwing a ClassBlockedError with action="blocked"
+ *   - after TRI patterns are detected in parsed content with action="tri-flagged"
  *
  * Logging errors are NOT swallowed — a failed write is surfaced to the
  * caller so audit integrity issues don't pass silently.

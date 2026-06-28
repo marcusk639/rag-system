@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import {
   ClassBlockedError,
   EmbeddingError,
+  scanForTRI,
   type Chunker,
   type Connector,
   type DocumentClass,
@@ -300,6 +301,25 @@ async function ingestOne(
     docClass,
     action: "ingested",
   });
+
+  // Compliance: scan parsed content for TRI patterns (§7216). Ingestion is
+  // NOT blocked — these are client tax documents and storing them is the
+  // purpose of the system. The audit event provides the compliance trail.
+  const triScan = scanForTRI(parsed.markdown);
+  if (triScan.detected) {
+    await logIngestEvent(db, {
+      sourceId,
+      docId: documentId,
+      externalId: source.externalId,
+      docClass,
+      action: "tri-flagged",
+      rejectionReason: `TRI patterns: ${triScan.patterns.join(", ")}`,
+    });
+    log.warn(
+      { triPatterns: triScan.patterns, marker: "ingest.tri.flagged" },
+      "TRI patterns detected in document content; compliance event logged",
+    );
+  }
 
   // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.
   // Only on content change (new/updated) — unchanged re-ingest skips the upload

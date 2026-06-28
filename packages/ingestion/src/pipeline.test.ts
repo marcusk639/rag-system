@@ -533,10 +533,61 @@ describe("document classification enforcement", () => {
         docId: null,
         docClass: "C",
         action: "blocked",
-        rejectionReason: expect.stringContaining("cannot be indexed in Phase 1"),
+        rejectionReason: expect.stringContaining(
+          "cannot be indexed in Phase 1",
+        ),
       }),
     );
     // The doc must NOT have been upserted into the DB
     expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("TRI compliance scanning at ingest", () => {
+  it("logs a tri-flagged event when parsed content contains an SSN", async () => {
+    const deps = makeDeps();
+    // Override parser to return content containing a Social Security Number.
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
+      title: "client-return",
+      markdown: "Client SSN: 123-45-6789. Total income: $150,000.",
+      tables: [],
+      metadata: {},
+    });
+    const { connector } = makeConnector([
+      { documents: ["tax-return"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    // Both "ingested" and "tri-flagged" events must be logged.
+    expect(logIngestEventMock).toHaveBeenCalledTimes(2);
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ action: "ingested" }),
+    );
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: "doc-1",
+        action: "tri-flagged",
+        rejectionReason: expect.stringContaining("SSN"),
+      }),
+    );
+  });
+
+  it("does NOT log tri-flagged for clean documents", async () => {
+    // makeDeps returns "# filename\n\nbody" — no TRI patterns.
+    const deps = makeDeps();
+    const { connector } = makeConnector([
+      { documents: ["clean-doc"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    // Only the "ingested" event — no tri-flagged.
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ action: "ingested" }),
+    );
   });
 });
