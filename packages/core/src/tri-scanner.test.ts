@@ -103,6 +103,84 @@ describe("scanForTRI", () => {
     expect(result.patterns).not.toContain("tax-form+amount");
   });
 
+  // ── Newline-spanning contextual patterns (finding 2 regression) ──────────────
+
+  it("detects taxpayer+amount when the amount is on the next line", () => {
+    // The 's' (dotAll) flag is required; without it '.' stops at '\n'.
+    const result = scanForTRI("The taxpayer\nowes $4,200 in penalties.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("taxpayer+amount");
+  });
+
+  it("detects tax-form+amount when the amount is on the next line", () => {
+    const result = scanForTRI("Form 1040\nline 15: $85,000 taxable income.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("tax-form+amount");
+  });
+
+  // ── 1099 series ───────────────────────────────────────────────────────────────
+
+  it("detects 1099-NEC with a dollar amount", () => {
+    const result = scanForTRI("1099-NEC shows non-employee compensation of $18,500.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
+  it("detects 1099-MISC with a dollar amount", () => {
+    const result = scanForTRI("The client received a 1099-MISC for $3,200 in rents.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
+  it("does not flag a bare 1099 reference without an amount", () => {
+    const result = scanForTRI("Please attach your 1099-NEC from the payer.");
+    expect(result.patterns).not.toContain("1099+amount");
+  });
+
+  // ── W-2 / W2 ─────────────────────────────────────────────────────────────────
+
+  it("detects W-2 with a dollar amount", () => {
+    const result = scanForTRI("W-2 wages reported: $72,000.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("W2+amount");
+  });
+
+  it("detects W2 (no hyphen) with a dollar amount", () => {
+    const result = scanForTRI("The W2 shows federal withholding of $14,400.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("W2+amount");
+  });
+
+  it("does not flag a W-2 reference without a nearby dollar amount", () => {
+    const result = scanForTRI("Please provide your W-2 from your employer.");
+    expect(result.patterns).not.toContain("W2+amount");
+  });
+
+  // ── IRS Schedules ─────────────────────────────────────────────────────────────
+
+  it("detects Schedule C with a dollar amount", () => {
+    const result = scanForTRI("Schedule C reports net profit of $42,000.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("schedule+amount");
+  });
+
+  it("detects Schedule SE with a dollar amount", () => {
+    const result = scanForTRI("Sch SE self-employment tax: $5,936.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("schedule+amount");
+  });
+
+  it("detects abbreviated Sch. D with a dollar amount", () => {
+    const result = scanForTRI("Sch. D shows long-term gain of $15,000.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("schedule+amount");
+  });
+
+  it("does not flag a Schedule reference without a nearby dollar amount", () => {
+    const result = scanForTRI("Please complete Schedule C for your business income.");
+    expect(result.patterns).not.toContain("schedule+amount");
+  });
+
   // ── Multiple patterns ─────────────────────────────────────────────────────────
 
   it("reports all matched patterns when multiple are present", () => {

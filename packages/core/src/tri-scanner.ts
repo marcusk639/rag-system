@@ -7,10 +7,13 @@
  * the scanner only detects and reports; it does not throw.
  *
  * Patterns:
- *   - US SSN: ###-##-#### or ### ##-#### (dashes or spaces)
+ *   - US SSN / ITIN: ###-##-#### or ### ## #### (dashes or spaces)
  *   - US EIN: ##-####### or ## ####### (dashes or spaces)
  *   - "taxpayer" near a dollar amount (loose; covers narrative TRI)
- *   - Named tax-form reference near a dollar amount (Form 1040 / 1065 / 1041 / 1120)
+ *   - Named IRS income-tax form (1040/1065/1041/1120) near a dollar amount
+ *   - 1099 series (1099-MISC, 1099-NEC, 1099-DIV, …) near a dollar amount
+ *   - W-2 / W2 wage form near a dollar amount
+ *   - IRS Schedule reference (Schedule C/D/E/F/SE …) near a dollar amount
  */
 
 export interface TRIScanResult {
@@ -31,7 +34,9 @@ const TRI_PATTERNS: TRIPattern[] = [
     // Match dash-separated (123-45-6789) and space-separated (123 45 6789).
     // Unformatted 9-digit strings are too broad (overlap with account numbers,
     // phone digits, etc.) — those are caught by taxpayer+amount and
-    // tax-form+amount contextual patterns.
+    // tax-form+amount contextual patterns. ITIN (9XX-XX-XXXX) shares this
+    // format and is intentionally matched here; the audit label "SSN" covers
+    // both identifiers since both are protected TRI under §7216.
     regex: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/,
   },
   {
@@ -42,12 +47,36 @@ const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "taxpayer+amount",
     // "taxpayer" followed by a dollar amount within ~30 chars.
-    regex: /taxpayer.{0,30}\$[\d,]+/i,
+    // 's' flag (dotAll): '.' matches newlines so a cross-line "taxpayer\n$X"
+    // phrase is not bypassed.
+    regex: /taxpayer.{0,30}\$[\d,]+/is,
   },
   {
     label: "tax-form+amount",
-    // Named IRS tax form reference followed by a dollar amount within ~50 chars.
-    regex: /\b(Form\s+)?(1040|1065|1041|1120)[A-Z-]*.{0,50}\$[\d,]+/i,
+    // Named IRS income-tax return form followed by a dollar amount within ~50 chars.
+    // 's' flag (dotAll): prevents bypass via a newline between form reference
+    // and the dollar figure.
+    regex: /\b(Form\s+)?(1040|1065|1041|1120)[A-Z-]*.{0,50}\$[\d,]+/is,
+  },
+  {
+    label: "1099+amount",
+    // 1099 series (1099-MISC, 1099-NEC, 1099-DIV, 1099-INT, 1099-B, 1099-R …)
+    // with a dollar amount within ~50 chars. The hyphen or space after "1099"
+    // is required to avoid matching zip codes and account numbers.
+    regex: /\b1099[-\s][A-Z]{1,4}.{0,50}\$[\d,]+/is,
+  },
+  {
+    label: "W2+amount",
+    // W-2 or W2 wage/salary statement with a nearby dollar amount.
+    // Word boundary after the digit prevents matching "W2000" or "W2C" tool names.
+    regex: /\bW[-\s]?2\b.{0,50}\$[\d,]+/is,
+  },
+  {
+    label: "schedule+amount",
+    // IRS Schedule references (Schedule C, Sch D, Sch. SE, etc.) with amounts.
+    // Matches one- or two-letter schedules (C, D, E, F, SE) but not numeric
+    // schedule references (Schedule 2, etc.) to reduce false positives.
+    regex: /\b(?:Schedule|Sch\.?)\s+[A-Z]{1,2}\b.{0,50}\$[\d,]+/is,
   },
 ];
 
