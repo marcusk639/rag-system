@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from "fs";
+import { join } from "path";
 import { z } from "zod";
 import { parsePrincipalsConfig } from "./access-control.js";
 import { OidcConfig } from "./oidc-auth.js";
@@ -168,6 +170,16 @@ export const Config = z
       .optional(),
 
     /**
+     * Optional error-reporting DSN (Sentry-compatible). When set, unhandled
+     * errors and failed sync jobs are reported to Sentry. Safe to omit in dev.
+     */
+    monitoring: z
+      .object({
+        sentryDsn: z.string().url(),
+      })
+      .optional(),
+
+    /**
      * Where original document bytes are persisted so cited documents can be
      * downloaded later. `none` (default) keeps the historical behavior — originals
      * are not stored and the download route returns 404. `s3` targets any
@@ -195,6 +207,19 @@ export const Config = z
     environment: z
       .enum(["development", "test", "production"])
       .default("development"),
+
+    /**
+     * Compliance enforcement level (§7216 / CPA deployment).
+     *
+     * `none` (default) — no additional startup checks beyond the standard gates.
+     * `client-data` — enforces that a DPA document is on file for every external
+     *   generation vendor before the service boots. Startup aborts if no
+     *   `docs/compliance/vendor-dpa-*.md` file exists. Use this mode in any
+     *   environment where real firm/taxpayer documents may enter the pipeline.
+     *
+     * Set via `COMPLIANCE_MODE` env. Leave unset (or `none`) for dev/CI.
+     */
+    complianceMode: z.enum(["none", "client-data"]).default("none"),
   })
   .superRefine((cfg, ctx) => {
     // Production gate: the parser shared secret is mandatory in production so the
@@ -326,8 +351,27 @@ function buildAuthConfig(env: NodeJS.ProcessEnv): {
   };
 }
 
+/**
+ * Default DPA presence check: returns true when at least one
+ * `docs/compliance/vendor-dpa-*.md` file exists relative to `cwd`.
+ * Injected as `opts.checkDpa` in tests so no real FS access is needed.
+ */
+function defaultCheckDpa(cwd = process.cwd()): boolean {
+  const dir = join(cwd, "docs", "compliance");
+  if (!existsSync(dir)) return false;
+  return readdirSync(dir).some(
+    (f) => f.startsWith("vendor-dpa-") && f.endsWith(".md"),
+  );
+}
+
 /** Read env into a typed Config. Centralizes all env access in one place. */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  opts?: {
+    /** Override the DPA presence check for tests. Defaults to `defaultCheckDpa`. */
+    checkDpa?: () => boolean;
+  },
+): Config {
   const provider = (env.EMBEDDING_PROVIDER ?? "gemini") as
     | "gemini"
     | "openai"
@@ -359,7 +403,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         }
       : undefined;
 
-  return Config.parse({
+  const cfg = Config.parse({
     databaseUrl: env.DATABASE_URL,
     pgBossSchema: env.PG_BOSS_SCHEMA,
     environment:
@@ -438,6 +482,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
               : undefined,
           }
         : undefined,
+    monitoring: env.SENTRY_DSN ? { sentryDsn: env.SENTRY_DSN } : undefined,
     microsoft,
     google,
     objectStore: {
@@ -453,5 +498,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           : undefined,
       keyPrefix: env.OBJECT_STORE_KEY_PREFIX || undefined,
     },
+    complianceMode: (env.COMPLIANCE_MODE ?? "none") as "none" | "client-data",
   });
+
+  // Compliance gate: in client-data mode a signed DPA must be on file before
+  // any service boots. Fail loud so the operator can't accidentally run the
+  // pipeline against real firm documents without a recorded legal agreement.
+  if (cfg.complianceMode === "client-data") {
+    const hasDpa = opts?.checkDpa ? opts.checkDpa() : defaultCheckDpa();
+    if (!hasDpa) {
+      throw new Error(
+        "COMPLIANCE_MODE=client-data requires a signed DPA document at " +
+          "docs/compliance/vendor-dpa-<vendor>.md. " +
+          "Create the file (see docs/compliance/README.md) or set " +
+          "COMPLIANCE_MODE=none to run without the gate.",
+      );
+    }
+  }
+
+  return cfg;
 }

@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
+import { ComplianceError, EgressPolicy, scanForTRI } from "@rag/core";
 import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
 
 /**
@@ -72,14 +73,32 @@ export function buildCitations(
 // ----------------------------------------------------------------------------
 export class GeminiGenerator implements Generator {
   private client: GoogleGenAI;
+  private readonly _egressPolicy: EgressPolicy;
+
   constructor(
     private readonly opts: {
       apiKey: string;
       model: string;
       maxOutputTokens?: number;
+      egressPolicy?: EgressPolicy;
     },
   ) {
     this.client = new GoogleGenAI({ apiKey: opts.apiKey });
+    this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
+  }
+
+  /** TRI + egress pre-flight. Throws ComplianceError or EgressError on violation. */
+  private preFlight(prompt: string): void {
+    const tri = scanForTRI(prompt);
+    if (tri.detected) {
+      throw new ComplianceError(
+        `TRI detected in generation input (patterns: ${tri.patterns.join(", ")}). ` +
+          `Use self-hosted generation or obtain §7216 consent before sending client data to an external API.`,
+      );
+    }
+    this._egressPolicy.assertAllowed(
+      "https://generativelanguage.googleapis.com",
+    );
   }
 
   async answer(
@@ -87,6 +106,7 @@ export class GeminiGenerator implements Generator {
     context: RetrievalResult[],
   ): Promise<GenerationResult> {
     const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
     const response = await this.client.models.generateContent({
       model: this.opts.model,
       contents: prompt,
@@ -108,6 +128,7 @@ export class GeminiGenerator implements Generator {
     context: RetrievalResult[],
   ): AsyncIterable<string> {
     const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
     const stream = await this.client.models.generateContentStream({
       model: this.opts.model,
       contents: prompt,
@@ -129,14 +150,30 @@ export class GeminiGenerator implements Generator {
 // ----------------------------------------------------------------------------
 export class OpenAIGenerator implements Generator {
   private client: OpenAI;
+  private readonly _egressPolicy: EgressPolicy;
+
   constructor(
     private readonly opts: {
       apiKey: string;
       model: string;
       maxOutputTokens?: number;
+      egressPolicy?: EgressPolicy;
     },
   ) {
     this.client = new OpenAI({ apiKey: opts.apiKey });
+    this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
+  }
+
+  /** TRI + egress pre-flight. Throws ComplianceError or EgressError on violation. */
+  private preFlight(prompt: string): void {
+    const tri = scanForTRI(prompt);
+    if (tri.detected) {
+      throw new ComplianceError(
+        `TRI detected in generation input (patterns: ${tri.patterns.join(", ")}). ` +
+          `Use self-hosted generation or obtain §7216 consent before sending client data to an external API.`,
+      );
+    }
+    this._egressPolicy.assertAllowed("https://api.openai.com");
   }
 
   async answer(
@@ -144,6 +181,7 @@ export class OpenAIGenerator implements Generator {
     context: RetrievalResult[],
   ): Promise<GenerationResult> {
     const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
     const response = await this.client.chat.completions.create({
       model: this.opts.model,
       temperature: 0.2,
@@ -164,6 +202,7 @@ export class OpenAIGenerator implements Generator {
     context: RetrievalResult[],
   ): AsyncIterable<string> {
     const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
     const stream = await this.client.chat.completions.create({
       model: this.opts.model,
       temperature: 0.2,
@@ -189,6 +228,7 @@ export function createGenerator(opts: {
   model: string;
   apiKey: string;
   maxOutputTokens?: number;
+  egressPolicy?: EgressPolicy;
 }): Generator {
   switch (opts.provider) {
     case "gemini":
@@ -196,12 +236,14 @@ export function createGenerator(opts: {
         apiKey: opts.apiKey,
         model: opts.model,
         maxOutputTokens: opts.maxOutputTokens,
+        egressPolicy: opts.egressPolicy,
       });
     case "openai":
       return new OpenAIGenerator({
         apiKey: opts.apiKey,
         model: opts.model,
         maxOutputTokens: opts.maxOutputTokens,
+        egressPolicy: opts.egressPolicy,
       });
   }
 }

@@ -105,3 +105,66 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 - Prettier auto-formats `.ts/.tsx/.js/.json/.md` on every Edit/Write.
 - Do not edit `.env` files — they're blocked at the hook layer. The template lives at `env.example`.
 - Do not edit `pnpm-lock.yaml` — it's blocked. Run `pnpm install` to update.
+
+---
+
+## Model Tier Policy (80/15/5 Rule)
+
+### Tier A — Reasoning (5% of tasks) — Claude Opus / Sonnet full context
+
+Use ONLY for:
+
+- Cross-product architectural decisions affecting multiple modules
+- Security-critical code (auth, token handling, PII flows)
+- Complex bugs requiring deep multi-file causal reasoning
+- Final review of client-facing or legally sensitive output
+- Anything requiring genuine architectural judgment
+
+### Tier B — Planning (15% of tasks) — Claude Sonnet or OpenRouter Auto
+
+Use for:
+
+- Single-module feature implementation
+- Database schema changes and migrations
+- Code reviews of non-trivial PRs
+- Research synthesis and strategy document drafting
+- Debugging with a clear hypothesis
+
+### Tier C — Execution (80% of tasks) — OpenRouter DeepSeek V4 Flash or Haiku
+
+Use for:
+
+- Test stub generation and boilerplate
+- Repetitive file patches and linting fixes
+- Type annotation passes
+- Document reformatting and collateral variations
+- Firebase function scaffolding from established patterns
+- Content calendar generation, email drafts, standard templates
+
+### Anti-pattern guard
+
+NEVER use Tier A for tasks completable by Tier C.
+When in doubt, start at Tier C and escalate if output quality is insufficient.
+
+## RAG System Tier Calibration
+
+Tier A tasks:
+
+- Retrieval pipeline architecture changes (RRF weights, embedding strategy)
+- Auth provider changes (OIDC, JWT, composite)
+- pg-boss job handler orchestration
+- Cross-package API contract changes (@rag/core types)
+
+Tier B tasks:
+
+- New connector implementation (follow connector/ pattern)
+- New MCP tool (follow tools/ pattern)
+- Drizzle migration authoring
+- Vitest e2e spec authoring
+
+Tier C tasks:
+
+- Zod schema boilerplate for new entities
+- Pino log statement additions
+- New Fastify route (copy from routes/ pattern)
+- Python parser endpoint expansion (copy from parse endpoint pattern)

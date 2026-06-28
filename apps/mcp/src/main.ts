@@ -1,5 +1,5 @@
 import { ADMIN_SCOPE, loadConfig } from "@rag/core";
-import { buildAuthProvider } from "@rag/runtime";
+import { buildAuthProvider, initMonitoring } from "@rag/runtime";
 import {
   assertEmbeddingDimensions,
   assertRequiredIndexes,
@@ -22,6 +22,7 @@ import { startHttp } from "./transports/http.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  initMonitoring(config.monitoring?.sentryDsn);
   // Fail fast before building deps / embedding any retrieval query: the
   // configured provider's vector size must match the chunks.embedding column.
   assertEmbeddingDimensions(config.embedding.dimensions);

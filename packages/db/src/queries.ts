@@ -4,12 +4,14 @@ import type { Db } from "./client.js";
 import {
   chunks,
   documents,
+  ingestLog,
   ingestionJobs,
   pendingUploads,
   sources,
   type NewChunk,
   type NewDocument,
   type NewIngestionJob,
+  type NewIngestLog,
   type NewPendingUpload,
   type NewSource,
   type PendingUpload,
@@ -616,6 +618,54 @@ export async function deleteIngestionJob(db: Db, id: string) {
 export function toPublicSource(row: Source): Omit<Source, "config"> {
   const { config: _config, ...safe } = row;
   return safe;
+}
+
+// ============================================================================
+// Ingestion audit log
+// ============================================================================
+
+export interface IngestEventRow {
+  sourceId: string;
+  /** Null when the document was blocked before a DB row existed. */
+  docId: string | null;
+  /** Connector-assigned stable document id. */
+  externalId: string;
+  /** DocumentClass at ingest time (A | B | C | D). */
+  docClass: string;
+  /**
+   * "ingested"    — normal success path.
+   * "blocked"     — ClassBlockedError fired before the document was written.
+   * "tri-flagged" — TRI patterns detected in parsed content; ingestion
+   *   continued but a compliance event was logged. Matched pattern labels
+   *   are stored in rejectionReason.
+   */
+  action: "ingested" | "blocked" | "tri-flagged";
+  /** Non-null for "blocked" (error message) and "tri-flagged" (pattern list). */
+  rejectionReason?: string | null;
+}
+
+/**
+ * Write one row to `ingest_log`. Called by the ingestion pipeline:
+ *   - after a successful `upsertDocument` with action="ingested"
+ *   - before re-throwing a ClassBlockedError with action="blocked"
+ *   - after TRI patterns are detected in parsed content with action="tri-flagged"
+ *
+ * Logging errors are NOT swallowed — a failed write is surfaced to the
+ * caller so audit integrity issues don't pass silently.
+ */
+export async function logIngestEvent(
+  db: Db,
+  row: IngestEventRow,
+): Promise<void> {
+  const values: NewIngestLog = {
+    sourceId: row.sourceId,
+    docId: row.docId ?? null,
+    externalId: row.externalId,
+    docClass: row.docClass,
+    action: row.action,
+    rejectionReason: row.rejectionReason ?? null,
+  };
+  await db.insert(ingestLog).values(values);
 }
 
 // ============================================================================

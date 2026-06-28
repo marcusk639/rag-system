@@ -15,6 +15,24 @@ export const SourceKind = z.enum([
 ]);
 export type SourceKind = z.infer<typeof SourceKind>;
 
+// ============================================================================
+// Document classification — controls index access and egress enforcement
+// ============================================================================
+
+/**
+ * A/B/C/D data classification for documents ingested into the RAG system.
+ *
+ * Phase 1 scope: A and B only. C and D are declared here so the type is
+ * complete, but the ingestion pipeline blocks them with ClassBlockedError.
+ *
+ * A — Firm-internal, non-sensitive  (SOPs, templates, research notes)
+ * B — Firm-internal, de-ID required  (research memos with client mentions)
+ * C — Per-client business data        (Blocked: requires §314.4(f) addendum)
+ * D — Client tax return data          (Blocked: requires §7216 consent workflow)
+ */
+export const DocumentClass = z.enum(["A", "B", "C", "D"]);
+export type DocumentClass = z.infer<typeof DocumentClass>;
+
 export const SourceConfig = z.object({
   id: z.string().uuid(),
   kind: SourceKind,
@@ -24,6 +42,9 @@ export const SourceConfig = z.object({
   config: z.record(z.unknown()),
   // Last successful delta cursor (opaque to the core, interpreted by the connector).
   cursor: z.string().nullable(),
+  // Data classification — every source must declare its class. Controls which
+  // index the source's documents may enter; deny-by-default at ingestion.
+  docClass: DocumentClass,
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -48,6 +69,9 @@ export const DocumentMetadata = z
     subject: z.string().optional(),
     from: z.string().optional(),
     to: z.array(z.string()).optional(),
+    // Data classification tag — set at ingest from source config.
+    // A/B only in Phase 1; C/D blocked by ingestion pipeline.
+    docClass: DocumentClass.optional(),
     // Free-form for connector-specific extras (drive id, sharepoint site id, etc.)
     extra: z.record(z.unknown()).optional(),
   })

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import type { Chunk, Connector, ConnectorListResult, Parser } from "@rag/core";
+import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
 import { runIngestion, type PipelineDeps } from "./pipeline.js";
 
@@ -13,6 +14,7 @@ const {
   documentHasChunksMock,
   deleteDocumentByExternalIdMock,
   setDocumentStorageMock,
+  logIngestEventMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
@@ -20,6 +22,7 @@ const {
   documentHasChunksMock: vi.fn(),
   deleteDocumentByExternalIdMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
+  logIngestEventMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -29,6 +32,7 @@ vi.mock("@rag/db", () => ({
   documentHasChunks: documentHasChunksMock,
   deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
+  logIngestEvent: logIngestEventMock,
 }));
 
 interface FakePage {
@@ -121,6 +125,7 @@ beforeEach(() => {
     storageKey: null,
   });
   setDocumentStorageMock.mockResolvedValue(undefined);
+  logIngestEventMock.mockResolvedValue(undefined);
 });
 
 describe("runIngestion page budgeting", () => {
@@ -430,5 +435,159 @@ describe("runIngestion original-bytes storage", () => {
     // Document still processed (searchable); storage location not recorded.
     expect(result.documentsProcessed).toBe(1);
     expect(setDocumentStorageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("document classification enforcement", () => {
+  it("Class A documents are ingested normally", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "A" as const };
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.documentsFailed).toBe(0);
+  });
+
+  it("Class B documents are ingested normally", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "B" as const };
+    const { connector } = makeConnector([
+      { documents: ["b"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(1);
+    expect(result.documentsFailed).toBe(0);
+  });
+
+  it("Class C documents throw ClassBlockedError — zero documents ingested", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const { connector } = makeConnector([
+      { documents: ["c1", "c2"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    // Both docs fail; none processed
+    expect(result.documentsProcessed).toBe(0);
+    expect(result.documentsFailed).toBe(2);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("Class D documents throw ClassBlockedError — zero documents ingested", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "D" as const };
+    const { connector } = makeConnector([
+      { documents: ["d1"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+    expect(result.documentsProcessed).toBe(0);
+    expect(result.documentsFailed).toBe(1);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("ClassBlockedError carries the correct docClass and is instanceof ClassBlockedError", async () => {
+    // Capture the error thrown by the pipeline for a Class C document
+    let captured: unknown;
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const originalLog = deps.logger.error.bind(deps.logger);
+    (deps.logger as unknown as Record<string, unknown>).error = (
+      obj: unknown,
+    ) => {
+      captured = (obj as { err: unknown }).err;
+      originalLog(obj as Parameters<typeof originalLog>[0], "");
+    };
+    const { connector } = makeConnector([
+      { documents: ["x"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src", connector, null, OPTS, deps);
+    expect(captured).toBeInstanceOf(ClassBlockedError);
+    expect((captured as ClassBlockedError).docClass).toBe("C");
+  });
+
+  it("logIngestEvent is called with action=ingested for Class A documents", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "A" as const };
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: "doc-1",
+        docClass: "A",
+        action: "ingested",
+      }),
+    );
+  });
+
+  it("logIngestEvent is called with action=blocked for Class C documents", async () => {
+    const deps = { ...makeDeps(), sourceDocClass: "C" as const };
+    const { connector } = makeConnector([
+      { documents: ["c1"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: null,
+        docClass: "C",
+        action: "blocked",
+        rejectionReason: expect.stringContaining(
+          "cannot be indexed in Phase 1",
+        ),
+      }),
+    );
+    // The doc must NOT have been upserted into the DB
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("TRI compliance scanning at ingest", () => {
+  it("logs a tri-flagged event when parsed content contains an SSN", async () => {
+    const deps = makeDeps();
+    // Override parser to return content containing a Social Security Number.
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
+      title: "client-return",
+      markdown: "Client SSN: 123-45-6789. Total income: $150,000.",
+      tables: [],
+      metadata: {},
+    });
+    const { connector } = makeConnector([
+      { documents: ["tax-return"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    // Both "ingested" and "tri-flagged" events must be logged.
+    expect(logIngestEventMock).toHaveBeenCalledTimes(2);
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ action: "ingested" }),
+    );
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: "doc-1",
+        action: "tri-flagged",
+        rejectionReason: expect.stringContaining("SSN"),
+      }),
+    );
+  });
+
+  it("does NOT log tri-flagged for clean documents", async () => {
+    // makeDeps returns "# filename\n\nbody" — no TRI patterns.
+    const deps = makeDeps();
+    const { connector } = makeConnector([
+      { documents: ["clean-doc"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    // Only the "ingested" event — no tri-flagged.
+    expect(logIngestEventMock).toHaveBeenCalledOnce();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ action: "ingested" }),
+    );
   });
 });

@@ -20,3 +20,6 @@ openpyxl==3.1.5
 pydantic==2.10.4
 # python-magic for MIME sniffing when extension is missing
 python-magic==0.4.27
+# Sentry error reporting. The fastapi extra auto-instruments routes to capture
+# 5xx exceptions. No-op when SENTRY_DSN is absent.
+sentry-sdk[fastapi]==2.29.1

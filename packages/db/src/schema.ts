@@ -43,6 +43,16 @@ export const ingestionStatusEnum = pgEnum("ingestion_status", [
   "failed",
 ]);
 
+/** §7216 / GLBA data classification for a source.
+ *  `client_confidential` ingestion is refused at the pipeline level. */
+export const dataClassEnum = pgEnum("data_class", [
+  "general",
+  "research",
+  "sop",
+  "client_confidential",
+]);
+export type DataClass = (typeof dataClassEnum.enumValues)[number];
+
 // ----------------------------------------------------------------------------
 // sources — one row per configured external system (a SharePoint site, a
 // Gmail mailbox, a Drive folder, etc.)
@@ -66,6 +76,8 @@ export const sources = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /** §7216/GLBA classification — controls ingestion gate and retrieval filter. */
+    dataClass: dataClassEnum("data_class").notNull().default("general"),
   },
   (table) => ({
     kindIdx: index("sources_kind_idx").on(table.kind),
@@ -287,4 +299,83 @@ export type NewChunk = typeof chunks.$inferInsert;
 export type IngestionJob = typeof ingestionJobs.$inferSelect;
 export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
 export type PendingUpload = typeof pendingUploads.$inferSelect;
+
+// ----------------------------------------------------------------------------
+// audit_log — one row per ask()/askStream() call for §7216 / Circular 230
+// accountability. Written async (fire-and-forget); does NOT block the response.
+// ----------------------------------------------------------------------------
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    /** "admin" | "scoped" */
+    principalKind: text("principal_kind").notNull(),
+    /** Null for admin principals; source-ID list for scoped ones. */
+    principalSources: text("principal_sources").array(),
+    /** SHA-256 of the question text (no raw PII stored here). */
+    questionHash: text("question_hash").notNull(),
+    /** "api" | "mcp" */
+    channel: text("channel").notNull(),
+    /** Generation model identifier (null when not applicable). */
+    model: text("model"),
+    sourceIds: text("source_ids").array().notNull(),
+    chunkIds: text("chunk_ids").array().notNull(),
+    docIds: text("doc_ids").array().notNull(),
+    retrievedCount: integer("retrieved_count").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    createdIdx: index("audit_log_created_idx").on(table.createdAt),
+    principalKindIdx: index("audit_log_principal_kind_idx").on(
+      table.principalKind,
+    ),
+  }),
+);
+export type NewAuditLog = typeof auditLog.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// ingest_log — one row per document ingestion attempt, regardless of outcome.
+// Written by the pipeline immediately after upsert (action="ingested") or on
+// ClassBlockedError before re-throwing (action="blocked"). Provides a durable
+// audit trail of what was indexed and what was rejected, keyed by source.
+// ----------------------------------------------------------------------------
+export const ingestLog = pgTable(
+  "ingest_log",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    /**
+     * Null when the document was blocked before a DB row was created
+     * (ClassBlockedError fires before upsertDocument).
+     */
+    docId: uuid("doc_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    /** Connector-assigned stable id — lets callers cross-reference the source. */
+    externalId: text("external_id").notNull(),
+    /** DocumentClass at ingest time (A | B | C | D). */
+    docClass: text("doc_class").notNull(),
+    /** "ingested" | "blocked" */
+    action: text("action").notNull(),
+    /** Non-null only when action = "blocked". */
+    rejectionReason: text("rejection_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    sourceIdx: index("ingest_log_source_idx").on(table.sourceId),
+    createdIdx: index("ingest_log_created_idx").on(table.createdAt),
+  }),
+);
+
+export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

@@ -58,3 +58,56 @@ export class NotFoundError extends RagError {
     super(message, "NOT_FOUND", undefined);
   }
 }
+
+/**
+ * Thrown when an ingestion attempt is blocked by the document classification
+ * policy. Phase 1 accepts Class A and B only; C and D are denied.
+ *
+ * This is a hard enforcement error — it must NOT be silently swallowed or
+ * retried. A ClassBlockedError means the source itself is misconfigured
+ * (Class C/D source attempted ingestion before the required consent workflow
+ * exists).
+ */
+export class ClassBlockedError extends RagError {
+  readonly docClass: string;
+  constructor(docClass: string, sourceId: string) {
+    super(
+      `Class ${docClass} documents cannot be indexed in Phase 1 ` +
+        `(source ${sourceId}). Class C requires a §314.4(f) addendum; ` +
+        `Class D requires a §7216 consent workflow. ` +
+        `Fix the source configuration or escalate to compliance.`,
+      "CLASS_BLOCKED",
+      undefined,
+    );
+    this.docClass = docClass;
+  }
+}
+
+/**
+ * Thrown when an outbound call would reach a host not on the egress allow-list.
+ * Fail-closed: this is a hard block — the caller must not silently retry.
+ * Add the host to EGRESS_ALLOWED_HOSTS (and confirm a DPA is on file) to allow it.
+ */
+export class EgressError extends RagError {
+  readonly host: string;
+  constructor(host: string) {
+    super(
+      `Outbound call to "${host}" blocked — not in EGRESS_ALLOWED_HOSTS. ` +
+        `Add the host to the allow-list only after confirming a signed DPA is on file.`,
+      "EGRESS_BLOCKED",
+      undefined,
+    );
+    this.host = host;
+  }
+}
+
+/**
+ * Thrown when a compliance pre-flight check blocks an operation.
+ * Currently used when TRI (taxpayer return information, IRC §7216) patterns
+ * are detected in text destined for an external generation API.
+ */
+export class ComplianceError extends RagError {
+  constructor(message: string) {
+    super(message, "COMPLIANCE_VIOLATION", undefined);
+  }
+}

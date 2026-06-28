@@ -61,6 +61,13 @@ MAX_UPLOAD_BYTES = int(os.environ.get("PARSER_MAX_UPLOAD_BYTES", 100 * 1024 * 10
 # libmagic instead.
 _GENERIC_MIMES = {"", "application/octet-stream", "binary/octet-stream"}
 
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+    sentry_sdk.init(dsn=_sentry_dsn, integrations=[FastApiIntegration()])
+
 app = FastAPI(title="rag-parser", version="0.1.0")
 
 # Single shared instance; MarkItDown is stateless and cheap to keep around.

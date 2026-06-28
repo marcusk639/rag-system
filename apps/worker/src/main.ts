@@ -5,6 +5,7 @@ import {
   createIndexExistenceRunner,
 } from "@rag/db";
 import { JOB_NAMES, type SyncSourcePayload } from "@rag/ingestion";
+import { initMonitoring } from "@rag/runtime";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
 import { handleSyncSource } from "./handlers/sync-source.js";
@@ -30,6 +31,7 @@ let shuttingDown = false;
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  initMonitoring(config.monitoring?.sentryDsn);
   // Fail fast before building deps / embedding any documents: the configured
   // provider's vector size must match the chunks.embedding column. Otherwise a
   // mismatch only surfaces at the first INSERT, mid-sync, after credits spent.
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
         1,
         Math.round(config.worker.pollIntervalMs / 1000),
       ),
+      includeMetadata: true,
     },
     async (jobs) => {
       for (const job of jobs) {

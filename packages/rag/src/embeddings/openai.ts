@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
-import { EmbeddingError } from "@rag/core";
+import { EgressPolicy, EmbeddingError } from "@rag/core";
 import { retryOnRateLimit } from "./retry.js";
 
 /**
@@ -17,18 +17,21 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions: number;
   private client: OpenAI;
   private readonly maxRetries: number;
+  private readonly _egressPolicy: EgressPolicy;
 
   constructor(opts: {
     apiKey: string;
     model?: string;
     dimensions?: number;
     maxRetries?: number;
+    egressPolicy?: EgressPolicy;
   }) {
     if (!opts.apiKey) throw new EmbeddingError("OpenAI API key is required");
     this.client = new OpenAI({ apiKey: opts.apiKey });
     this.model = opts.model ?? "text-embedding-3-small";
     this.dimensions = opts.dimensions ?? 1536;
     this.maxRetries = opts.maxRetries ?? 5;
+    this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -39,6 +42,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   async embedBatch(texts: string[]): Promise<Embedding[]> {
     if (texts.length === 0) return [];
+    this._egressPolicy.assertAllowed("https://api.openai.com");
     try {
       const results: Embedding[] = [];
       const batchSize = 2048; // OpenAI limit

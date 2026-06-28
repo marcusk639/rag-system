@@ -37,10 +37,6 @@ export async function buildServer(opts: {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
-  // Multipart support for the document-upload route (POST /sources/:id/documents):
-  // exactly one file per request, capped at the same 25 MB as the JSON body
-  // limit. @fastify/multipart throws a 413 RequestFileTooLargeError past the
-  // cap, which the error handler surfaces as a clean client error.
   await app.register(fastifyMultipart, {
     limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   });
@@ -69,6 +65,7 @@ export async function buildServer(opts: {
     // Default errorResponseBuilder returns new Error(msg) with statusCode=429
     // which our setErrorHandler maps to a 429 CLIENT_ERROR envelope.
   });
+
   // Global error handler — must register BEFORE routes so it catches their throws.
   registerErrorHandler(app);
 

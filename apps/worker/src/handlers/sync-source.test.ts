@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleSyncSource } from "./sync-source.js";
 import type { WorkerDeps } from "../deps.js";
 
+const { captureExceptionMock } = vi.hoisted(() => ({
+  captureExceptionMock: vi.fn(),
+}));
+
+vi.mock("@rag/runtime", () => ({
+  captureException: captureExceptionMock,
+}));
+
 const { getSourceMock, updateIngestionJobMock, incrementMock, markSyncedMock } =
   vi.hoisted(() => ({
     getSourceMock: vi.fn(),
@@ -79,20 +87,41 @@ function runResult(
 
 const SOURCE = { id: "s1", kind: "sharepoint", config: {}, cursor: "cur0" };
 
-function job(data: Record<string, unknown>) {
+function job(
+  data: Record<string, unknown>,
+  meta: { retryCount?: number; retryLimit?: number } = {},
+) {
   return {
     id: "job-1",
+    name: "syncSource",
+    priority: 0,
+    state: "active" as const,
+    retryCount: meta.retryCount ?? 0,
+    retryLimit: meta.retryLimit ?? 0,
+    retryDelay: 0,
+    retryBackoff: false,
+    startAfter: new Date(),
+    startedOn: new Date(),
+    singletonKey: null,
+    expireInSeconds: 60,
+    createdOn: new Date(),
+    completedOn: null,
+    keepUntil: new Date(),
+    on_complete: false,
+    output: {},
     data: {
       sourceId: "s1",
       ingestionId: "ing-1",
       mode: "incremental",
       ...data,
     },
-  } as { id: string; data: never };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  captureExceptionMock.mockReset();
   getSourceMock.mockResolvedValue({ ...SOURCE });
   updateIngestionJobMock.mockResolvedValue(undefined);
   incrementMock.mockResolvedValue(undefined);
@@ -204,6 +233,31 @@ describe("handleSyncSource per-page continuation", () => {
       {},
       "ing-1",
       expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("captures to Sentry only on the terminal (final-retry) failure", async () => {
+    const { deps } = makeDeps();
+    runIngestionMock.mockRejectedValue(new Error("network error"));
+
+    // Mid-flight retry (retryCount 1 of 3) — must NOT alert yet.
+    await expect(
+      handleSyncSource(job({}, { retryCount: 1, retryLimit: 3 }), deps),
+    ).rejects.toThrow("network error");
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    getSourceMock.mockResolvedValue({ ...SOURCE });
+    runIngestionMock.mockRejectedValue(new Error("network error"));
+
+    // Terminal attempt (retryCount === retryLimit) — MUST alert exactly once.
+    await expect(
+      handleSyncSource(job({}, { retryCount: 3, retryLimit: 3 }), deps),
+    ).rejects.toThrow("network error");
+    expect(captureExceptionMock).toHaveBeenCalledOnce();
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ sourceId: "s1", jobId: "job-1" }),
     );
   });
 
