@@ -51,3 +51,4 @@ drizzle/meta/_journal.json.bak
 # Next.js build output / TS build info
 .next/
 *.tsbuildinfo
+scripts/API_PRINCIPALS.json
