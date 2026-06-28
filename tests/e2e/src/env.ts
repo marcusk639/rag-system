@@ -82,5 +82,6 @@ export function makeTestConfig(): Config {
       keyPrefix: "",
     },
     environment: "test",
+    complianceMode: "none",
   };
 }

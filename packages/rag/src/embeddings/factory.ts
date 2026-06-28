@@ -1,5 +1,5 @@
 import type { Config, EmbeddingProvider } from "@rag/core";
-import { ValidationError } from "@rag/core";
+import { ComplianceError, EgressPolicy, ValidationError } from "@rag/core";
 import { GeminiEmbeddingProvider } from "./gemini.js";
 import { LocalEmbeddingProvider } from "./local.js";
 import { OpenAIEmbeddingProvider } from "./openai.js";
@@ -16,7 +16,20 @@ import { OpenAIEmbeddingProvider } from "./openai.js";
  */
 export function createEmbeddingProvider(
   cfg: Config["embedding"],
+  opts?: {
+    egressPolicy?: EgressPolicy;
+    complianceMode?: "none" | "client-data";
+  },
 ): EmbeddingProvider {
+  // Finding 3: compliance-mode hard gate — TRI must never leave the process.
+  if (opts?.complianceMode === "client-data" && cfg.provider !== "local") {
+    throw new ComplianceError(
+      `COMPLIANCE_MODE=client-data requires EMBEDDING_PROVIDER=local, ` +
+        `but provider is "${cfg.provider}". ` +
+        `Sending embeddings to an external API would expose TRI (IRC §7216).`,
+    );
+  }
+
   switch (cfg.provider) {
     case "gemini":
       if (!cfg.apiKey)
@@ -28,6 +41,7 @@ export function createEmbeddingProvider(
         model: cfg.model,
         dimensions: cfg.dimensions,
         maxRetries: cfg.maxRetries,
+        egressPolicy: opts?.egressPolicy,
       });
     case "openai":
       if (!cfg.apiKey)
@@ -39,6 +53,7 @@ export function createEmbeddingProvider(
         model: cfg.model,
         dimensions: cfg.dimensions,
         maxRetries: cfg.maxRetries,
+        egressPolicy: opts?.egressPolicy,
       });
     case "local":
       // No API key required — all inference runs on-process via ONNX.

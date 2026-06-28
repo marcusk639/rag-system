@@ -1,6 +1,7 @@
 export { initMonitoring, captureException } from "./monitoring.js";
 
 import {
+  EgressPolicy,
   createAuthProvider,
   type AuthProvider,
   type Config,
@@ -125,7 +126,10 @@ export async function buildCoreDeps(
     ssl: pgSslOption(config.databaseSsl),
   });
 
-  const embedder = createEmbeddingProvider(config.embedding);
+  const embedder = createEmbeddingProvider(config.embedding, {
+    egressPolicy: EgressPolicy.fromEnv(),
+    complianceMode: config.complianceMode,
+  });
 
   const objectStore = createObjectStore(config.objectStore);
 

@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
-import { EmbeddingError } from "@rag/core";
+import { EgressPolicy, EmbeddingError } from "@rag/core";
 import { retryOnRateLimit } from "./retry.js";
 
 /**
@@ -20,12 +20,14 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions: number;
   private client: GoogleGenAI;
   private readonly maxRetries: number;
+  private readonly _egressPolicy: EgressPolicy;
 
   constructor(opts: {
     apiKey: string;
     model?: string;
     dimensions?: number;
     maxRetries?: number;
+    egressPolicy?: EgressPolicy;
   }) {
     if (!opts.apiKey) {
       throw new EmbeddingError("Gemini API key is required");
@@ -34,6 +36,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     this.model = opts.model ?? "gemini-embedding-001";
     this.dimensions = opts.dimensions ?? 768;
     this.maxRetries = opts.maxRetries ?? 5;
+    this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -64,6 +67,10 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY",
   ): Promise<Embedding[]> {
     if (texts.length === 0) return [];
+
+    this._egressPolicy.assertAllowed(
+      "https://generativelanguage.googleapis.com",
+    );
 
     try {
       // Gemini's batch endpoint accepts up to 100 inputs per call.
