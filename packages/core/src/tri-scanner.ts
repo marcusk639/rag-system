@@ -61,22 +61,26 @@ const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "1099+amount",
     // 1099 series (1099-MISC, 1099-NEC, 1099-DIV, 1099-INT, 1099-B, 1099-R …)
-    // with a dollar amount within ~50 chars. The hyphen or space after "1099"
-    // is required to avoid matching zip codes and account numbers.
-    regex: /\b1099[-\s][A-Z]{1,4}.{0,50}\$[\d,]+/is,
+    // with a dollar amount within ~50 chars. A 1-3 char separator (hyphen,
+    // space, or combinations like "1099 - NEC") is required to avoid matching
+    // zip codes and account numbers, while still catching obfuscated variants.
+    regex: /\b1099[-\s]{1,3}[A-Z]{1,4}.{0,50}\$[\d,]+/is,
   },
   {
     label: "W2+amount",
-    // W-2 or W2 wage/salary statement with a nearby dollar amount.
+    // W-2 or W2 wage/salary statement with a nearby dollar amount. Allows
+    // optional whitespace around an optional hyphen/en-dash/em-dash separator
+    // so "W – 2" and "W - 2" (OCR/PDF variants) are not bypassed.
     // Word boundary after the digit prevents matching "W2000" or "W2C" tool names.
-    regex: /\bW[-\s]?2\b.{0,50}\$[\d,]+/is,
+    regex: /\bW\s*[-–—]?\s*2\b.{0,50}\$[\d,]+/is,
   },
   {
     label: "schedule+amount",
     // IRS Schedule references (Schedule C, Sch D, Sch. SE, etc.) with amounts.
     // Matches one- or two-letter schedules (C, D, E, F, SE) but not numeric
     // schedule references (Schedule 2, etc.) to reduce false positives.
-    regex: /\b(?:Schedule|Sch\.?)\s+[A-Z]{1,2}\b.{0,50}\$[\d,]+/is,
+    // Allows hyphen/dash separators ("Schedule-C") so OCR/PDF variants are caught.
+    regex: /\b(?:Schedule|Sch\.?)[-–—\s]+[A-Z]{1,2}\b.{0,50}\$[\d,]+/is,
   },
 ];
 

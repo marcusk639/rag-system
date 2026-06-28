@@ -12,7 +12,6 @@
  *   EMBEDDING_MODEL   — HuggingFace model id (default: Xenova/bge-base-en-v1.5)
  *   HF_CACHE_DIR      — cache directory (default: ~/.cache/huggingface)
  */
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { createEmbeddingProvider } from "@rag/rag";
 
 const model = process.env["EMBEDDING_MODEL"] ?? "Xenova/bge-base-en-v1.5";

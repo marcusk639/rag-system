@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
 import { filterSchema } from "@rag/core";
+import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
   askQuestionStream,
+  type AskResult,
   GenerationNotConfiguredError,
 } from "@rag/services";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -18,6 +21,31 @@ const AskBody = z.object({
   // Shared bounded metadata filter (@rag/core/validation).
   filter: filterSchema.optional(),
 });
+
+/**
+ * Fire-and-forget audit record for every successful /ask call.
+ * Failures are logged but must not block the response.
+ */
+function auditAsk(
+  deps: Deps,
+  request: FastifyRequest,
+  question: string,
+  retrieved: AskResult["retrieved"],
+  model: string | undefined,
+): void {
+  const p = request.principal;
+  void logAskEvent(deps.db, {
+    principalKind: p?.kind ?? "scoped",
+    principalSources: p?.kind === "scoped" ? p.allowedSourceIds : null,
+    questionHash: createHash("sha256").update(question).digest("hex"),
+    channel: "api",
+    model: model ?? null,
+    sourceIds: [...new Set(retrieved.map((r) => r.document.sourceId))],
+    chunkIds: retrieved.map((r) => r.chunk.id),
+    docIds: [...new Set(retrieved.map((r) => r.document.id))],
+    retrievedCount: retrieved.length,
+  }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
+}
 
 export async function registerAskRoute(
   app: FastifyInstance,
@@ -42,13 +70,15 @@ export async function registerAskRoute(
       config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
     },
     async (request) => {
-      return askQuestion(
+      const result = await askQuestion(
         deps,
         request.body,
         config.retrieval.defaultTopK,
         scopeFromRequest(request),
         config.retrieval.maxChunksPerDocument,
       );
+      auditAsk(deps, request, request.body.question, result.retrieved, config.generation?.model);
+      return result;
     },
   );
 
@@ -93,6 +123,7 @@ export async function registerAskRoute(
           if (event.type === "token") {
             raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
           } else {
+            auditAsk(deps, request, request.body.question, event.retrieved, config.generation?.model);
             raw.write(
               `event: done\ndata: ${JSON.stringify({
                 citations: event.citations,

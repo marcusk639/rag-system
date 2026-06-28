@@ -2,12 +2,14 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
+  auditLog,
   chunks,
   documents,
   ingestLog,
   ingestionJobs,
   pendingUploads,
   sources,
+  type NewAuditLog,
   type NewChunk,
   type NewDocument,
   type NewIngestionJob,
@@ -666,6 +668,68 @@ export async function logIngestEvent(
     rejectionReason: row.rejectionReason ?? null,
   };
   await db.insert(ingestLog).values(values);
+}
+
+export interface AskEventRow {
+  principalKind: "admin" | "scoped";
+  principalSources: string[] | null;
+  questionHash: string;
+  channel: "api" | "mcp";
+  model: string | null;
+  sourceIds: string[];
+  chunkIds: string[];
+  docIds: string[];
+  retrievedCount: number;
+}
+
+/**
+ * Write one row to `audit_log` for every answered ask()/askStream() call.
+ * Called asynchronously — failures are logged but do not block the response.
+ */
+export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
+  const values: NewAuditLog = {
+    principalKind: row.principalKind,
+    principalSources: row.principalSources,
+    questionHash: row.questionHash,
+    channel: row.channel,
+    model: row.model ?? null,
+    sourceIds: row.sourceIds,
+    chunkIds: row.chunkIds,
+    docIds: row.docIds,
+    retrievedCount: row.retrievedCount,
+  };
+  await db.insert(auditLog).values(values);
+}
+
+// ---------------------------------------------------------------------------
+// Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves the source IDs accessible to a given user via client assignments.
+ *
+ * Joins staff_client_assignments → source_client_assignments on clientId to
+ * find every source the user's active (non-revoked) engagements cover.
+ *
+ * Returns [] for unmapped users. Callers MUST treat [] as fail-closed:
+ * pass it as `enforcedSourceIds` to hybridSearch, which short-circuits to an
+ * empty result set without touching the DB. This satisfies CR-5.
+ *
+ * Never hard-deletes grants — soft-delete only (revoked_at IS NULL = active),
+ * preserving §7216 reconstructibility.
+ */
+export async function resolveSourceIdsForUser(
+  db: Db,
+  userId: string,
+): Promise<string[]> {
+  const rows = await db.execute<{ source_id: string }>(sql`
+    SELECT DISTINCT sca.source_id
+    FROM staff_client_assignments sta
+    JOIN source_client_assignments sca ON sca.client_id = sta.client_id
+    WHERE sta.user_id = ${userId}
+      AND sta.revoked_at IS NULL
+  `);
+  return rows.rows.map((r) => r.source_id);
 }
 
 // ============================================================================
