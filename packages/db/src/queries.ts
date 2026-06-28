@@ -2,12 +2,14 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
+  auditLog,
   chunks,
   documents,
   ingestLog,
   ingestionJobs,
   pendingUploads,
   sources,
+  type NewAuditLog,
   type NewChunk,
   type NewDocument,
   type NewIngestionJob,
@@ -666,6 +668,40 @@ export async function logIngestEvent(
     rejectionReason: row.rejectionReason ?? null,
   };
   await db.insert(ingestLog).values(values);
+}
+
+export interface AskEventRow {
+  principalKind: "admin" | "scoped";
+  principalSources: string[] | null;
+  questionHash: string;
+  channel: "api" | "mcp";
+  model: string | null;
+  sourceIds: string[];
+  chunkIds: string[];
+  docIds: string[];
+  retrievedCount: number;
+}
+
+/**
+ * Write one row to `audit_log` for every answered ask()/askStream() call.
+ * Called asynchronously — failures are logged but do not block the response.
+ */
+export async function logAskEvent(
+  db: Db,
+  row: AskEventRow,
+): Promise<void> {
+  const values: NewAuditLog = {
+    principalKind: row.principalKind,
+    principalSources: row.principalSources,
+    questionHash: row.questionHash,
+    channel: row.channel,
+    model: row.model ?? null,
+    sourceIds: row.sourceIds,
+    chunkIds: row.chunkIds,
+    docIds: row.docIds,
+    retrievedCount: row.retrievedCount,
+  };
+  await db.insert(auditLog).values(values);
 }
 
 
