@@ -181,6 +181,38 @@ describe("scanForTRI", () => {
     expect(result.patterns).not.toContain("schedule+amount");
   });
 
+  // ── Separator-variant bypass hardening ────────────────────────────────────────
+
+  it("detects 1099 with space-hyphen-space separator (1099 - MISC)", () => {
+    const result = scanForTRI("1099 - MISC payment of $3,200.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
+  it("detects 1099 with double-space separator (1099  NEC)", () => {
+    const result = scanForTRI("1099  NEC non-employee compensation: $18,500.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
+  it("detects W-2 with en-dash separator (W – 2)", () => {
+    const result = scanForTRI("W – 2 wages reported: $72,000.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("W2+amount");
+  });
+
+  it("detects W-2 with space-hyphen-space separator (W - 2)", () => {
+    const result = scanForTRI("W - 2 shows federal withholding of $14,400.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("W2+amount");
+  });
+
+  it("detects Schedule with hyphen separator (Schedule-C)", () => {
+    const result = scanForTRI("Schedule-C net profit: $42,000.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("schedule+amount");
+  });
+
   // ── Multiple patterns ─────────────────────────────────────────────────────────
 
   it("reports all matched patterns when multiple are present", () => {
