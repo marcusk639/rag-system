@@ -377,5 +377,72 @@ export const ingestLog = pgTable(
   }),
 );
 
+
+// ---------------------------------------------------------------------------
+// Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
+// ---------------------------------------------------------------------------
+// Answers: "which sources may this user access?"
+//
+// staff_client_assignments  — user  ↔ client  (who works which engagements)
+// source_client_assignments — source ↔ client  (which sources belong to which client)
+//
+// resolveSourceIdsForUser joins these two tables to return the source_ids a
+// given userId may query. Soft-delete only (revoked_at) — §7216 requires
+// that grant history be reconstructible; rows are NEVER hard-deleted.
+// ---------------------------------------------------------------------------
+
+export const staffClientAssignments = pgTable(
+  "staff_client_assignments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    /** PropelAuth/IdP userId (opaque string — not a DB FK). */
+    userId: text("user_id").notNull(),
+    /** Firm-defined client identifier (e.g. "smithco", "acme-2024"). */
+    clientId: text("client_id").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** userId of the admin who granted access — audit trail. */
+    grantedBy: text("granted_by").notNull(),
+    /** Null = active. Set to now() to revoke. Never DELETE. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    userIdx: index("sca_user_idx").on(table.userId),
+    clientIdx: index("sca_client_idx").on(table.clientId),
+  }),
+)
+
+export const sourceClientAssignments = pgTable(
+  "source_client_assignments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    /** Must match clientId values used in staff_client_assignments. */
+    clientId: text("client_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    sourceIdx: index("src_client_source_idx").on(table.sourceId),
+    clientIdx: index("src_client_client_idx").on(table.clientId),
+  }),
+)
+
+export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect
+export type NewStaffClientAssignment =
+  typeof staffClientAssignments.$inferInsert
+
+export type SourceClientAssignment = typeof sourceClientAssignments.$inferSelect
+export type NewSourceClientAssignment =
+  typeof sourceClientAssignments.$inferInsert
+
 export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

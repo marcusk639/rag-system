@@ -668,6 +668,38 @@ export async function logIngestEvent(
   await db.insert(ingestLog).values(values);
 }
 
+
+// ---------------------------------------------------------------------------
+// Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves the source IDs accessible to a given user via client assignments.
+ *
+ * Joins staff_client_assignments → source_client_assignments on clientId to
+ * find every source the user's active (non-revoked) engagements cover.
+ *
+ * Returns [] for unmapped users. Callers MUST treat [] as fail-closed:
+ * pass it as `enforcedSourceIds` to hybridSearch, which short-circuits to an
+ * empty result set without touching the DB. This satisfies CR-5.
+ *
+ * Never hard-deletes grants — soft-delete only (revoked_at IS NULL = active),
+ * preserving §7216 reconstructibility.
+ */
+export async function resolveSourceIdsForUser(
+  db: Db,
+  userId: string,
+): Promise<string[]> {
+  const rows = await db.execute<{ source_id: string }>(sql`
+    SELECT DISTINCT sca.source_id
+    FROM staff_client_assignments sta
+    JOIN source_client_assignments sca ON sca.client_id = sta.client_id
+    WHERE sta.user_id = ${userId}
+      AND sta.revoked_at IS NULL
+  `);
+  return rows.rows.map((r) => r.source_id);
+}
+
 // ============================================================================
 // Pending uploads — staging rows for browser-uploaded files (custom sources).
 // ============================================================================
