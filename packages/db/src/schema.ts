@@ -377,7 +377,6 @@ export const ingestLog = pgTable(
   }),
 );
 
-
 // ---------------------------------------------------------------------------
 // Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
 // ---------------------------------------------------------------------------
@@ -413,7 +412,7 @@ export const staffClientAssignments = pgTable(
     userIdx: index("sca_user_idx").on(table.userId),
     clientIdx: index("sca_client_idx").on(table.clientId),
   }),
-)
+);
 
 export const sourceClientAssignments = pgTable(
   "source_client_assignments",
@@ -434,15 +433,16 @@ export const sourceClientAssignments = pgTable(
     sourceIdx: index("src_client_source_idx").on(table.sourceId),
     clientIdx: index("src_client_client_idx").on(table.clientId),
   }),
-)
+);
 
-export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect
+export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =
-  typeof staffClientAssignments.$inferInsert
+  typeof staffClientAssignments.$inferInsert;
 
-export type SourceClientAssignment = typeof sourceClientAssignments.$inferSelect
+export type SourceClientAssignment =
+  typeof sourceClientAssignments.$inferSelect;
 export type NewSourceClientAssignment =
-  typeof sourceClientAssignments.$inferInsert
+  typeof sourceClientAssignments.$inferInsert;
 
 export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

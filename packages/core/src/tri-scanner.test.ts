@@ -121,13 +121,17 @@ describe("scanForTRI", () => {
   // ── 1099 series ───────────────────────────────────────────────────────────────
 
   it("detects 1099-NEC with a dollar amount", () => {
-    const result = scanForTRI("1099-NEC shows non-employee compensation of $18,500.");
+    const result = scanForTRI(
+      "1099-NEC shows non-employee compensation of $18,500.",
+    );
     expect(result.detected).toBe(true);
     expect(result.patterns).toContain("1099+amount");
   });
 
   it("detects 1099-MISC with a dollar amount", () => {
-    const result = scanForTRI("The client received a 1099-MISC for $3,200 in rents.");
+    const result = scanForTRI(
+      "The client received a 1099-MISC for $3,200 in rents.",
+    );
     expect(result.detected).toBe(true);
     expect(result.patterns).toContain("1099+amount");
   });
@@ -177,7 +181,9 @@ describe("scanForTRI", () => {
   });
 
   it("does not flag a Schedule reference without a nearby dollar amount", () => {
-    const result = scanForTRI("Please complete Schedule C for your business income.");
+    const result = scanForTRI(
+      "Please complete Schedule C for your business income.",
+    );
     expect(result.patterns).not.toContain("schedule+amount");
   });
 

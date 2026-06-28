@@ -686,10 +686,7 @@ export interface AskEventRow {
  * Write one row to `audit_log` for every answered ask()/askStream() call.
  * Called asynchronously — failures are logged but do not block the response.
  */
-export async function logAskEvent(
-  db: Db,
-  row: AskEventRow,
-): Promise<void> {
+export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
   const values: NewAuditLog = {
     principalKind: row.principalKind,
     principalSources: row.principalSources,
@@ -703,7 +700,6 @@ export async function logAskEvent(
   };
   await db.insert(auditLog).values(values);
 }
-
 
 // ---------------------------------------------------------------------------
 // Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
