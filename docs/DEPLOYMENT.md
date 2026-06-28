@@ -101,6 +101,54 @@ The HNSW index on `chunks.embedding` is created with `m=16, ef_construction=64`.
 SET hnsw.ef_search = 100;  -- default 40
 ```
 
+## Local embedding provider setup (CPA / §7216 compliance)
+
+When `EMBEDDING_PROVIDER=local`, embeddings run on-process via `@huggingface/transformers` (ONNX runtime) with zero network egress. This is required for any environment where real taxpayer documents may enter the pipeline.
+
+### Required env vars
+
+```env
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=Xenova/bge-base-en-v1.5   # 768-d; must match chunks.embedding column
+EMBEDDING_DIMENSIONS=768
+HF_CACHE_DIR=/opt/hf-cache               # shared across redeploys; avoids re-download
+```
+
+### First-startup model download (~430 MB)
+
+On first boot the ONNX runtime downloads `bge-base-en-v1.5` from HuggingFace Hub to `HF_CACHE_DIR`. In production, pre-warm the cache during the Docker image build so the first live query doesn't time out:
+
+```dockerfile
+# In Dockerfile (worker and api), after `pnpm install`:
+RUN npx tsx scripts/warm-model.ts
+```
+
+Or run it manually before the first deploy:
+
+```sh
+HF_CACHE_DIR=/opt/hf-cache npx tsx scripts/warm-model.ts
+```
+
+Subsequent container restarts read from the cache volume — no network egress, no download delay. Mount `HF_CACHE_DIR` as a persistent volume so it survives redeploys.
+
+### Disk and memory
+
+| Resource | Estimate |
+| -------- | -------- |
+| Model size on disk | ~430 MB |
+| Peak RSS during batch embed | +200–400 MB above baseline |
+| Throughput | ~50–100 chunks/s on a 2-core VM |
+
+### Compliance checklist
+
+- [ ] `EMBEDDING_PROVIDER=local` — confirmed in production `.env`
+- [ ] `HF_CACHE_DIR` — mounted as a persistent volume
+- [ ] `EGRESS_ALLOWED_HOSTS` — set to the generation vendor only (not the embedding API)
+- [ ] `COMPLIANCE_MODE=client-data` — set once a DPA is filed in `docs/compliance/`
+- [ ] `scripts/warm-model.ts` — runs in Dockerfile before first deploy
+
+---
+
 ## Secrets
 
 DO NOT commit `.env`. The hook in this repo's parent setup blocks `.env` writes to enforce that. Production options, ordered by preference:

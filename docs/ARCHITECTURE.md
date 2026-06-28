@@ -136,9 +136,26 @@ The only reason to add Redis here would be the queue. pg-boss runs entirely on t
 
 TypeScript has reasonable PDF/DOCX libraries (`pdf-parse`, `mammoth`), but the long tail — legacy `.doc`, scanned PDFs with OCR, complex Excel sheets with formulas — is materially better in Python. MarkItDown (Microsoft) and Unstructured cover the universe; reimplementing them in TS would be a year of work and inferior output. The sidecar runs in its own container, so heavy deps (LibreOffice, Tesseract, Poppler) don't bloat the TS runtime.
 
-### Gemini text-embedding-004 as default
+### Embedding provider — local ONNX (CPA default) or hosted APIs
 
-Free tier, 768 dimensions, MTEB scores within a few points of `text-embedding-3-small`. The architecture is provider-agnostic — swap to OpenAI/Voyage/local with one env var change (and a column-type migration if dimensions change).
+The embedding layer is provider-agnostic: `EMBEDDING_PROVIDER` selects the backend; all providers return the same `number[]` type to the rest of the pipeline.
+
+**`local` — `@huggingface/transformers` (ONNX runtime)**
+Default for CPA/§7216 deployments. All embedding computation runs on-process with zero network egress (satisfies CR-1 and CR-3).
+
+- Default model: `Xenova/bge-base-en-v1.5` — 768-d, MTEB competitive, ~430 MB on first startup.
+- Lazy-initialise: the ONNX pipeline downloads the model on first call and caches it to `HF_CACHE_DIR` (defaults to `~/.cache/huggingface`). Subsequent restarts read the cache; no download.
+- First-startup warm-up: run `npx tsx scripts/warm-model.ts` during the Docker image build step to pre-warm the cache so the first live query doesn't time out.
+- `embedQuery()` prepends the BGE query instruction prefix (`Represent this sentence for searching relevant passages:`) before encoding, which improves retrieval quality for asymmetric semantic search.
+- Batch processing via `pipeline("feature-extraction")` — mean-pool + L2-normalise per chunk.
+
+**`gemini` — Gemini Embedding API**
+`gemini-embedding-001`, 768-d, US-region API. Requires `GEMINI_API_KEY`. *(Note: `text-embedding-004` is retired — always use `gemini-embedding-001`.)*
+
+**`openai` — OpenAI text-embedding-3-small**
+1536-d. Requires `OPENAI_API_KEY` and a column/index migration if switching from the 768-d default.
+
+Swapping providers requires only an env var change (same dimensions) or a column-type migration + HNSW rebuild (dimension change). The `data_class` column tags every document at ingest so the compliance team can audit which provider touched which data class.
 
 ### Reciprocal Rank Fusion for hybrid search
 
