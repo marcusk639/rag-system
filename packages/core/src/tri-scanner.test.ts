@@ -201,6 +201,18 @@ describe("scanForTRI", () => {
     expect(result.patterns).toContain("1099+amount");
   });
 
+  it("detects 1099 with en-dash separator (1099–MISC, OCR/PDF variant)", () => {
+    const result = scanForTRI("1099–MISC shows $3,200 in rents.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
+  it("detects 1099 with em-dash separator (1099—NEC, OCR/PDF variant)", () => {
+    const result = scanForTRI("1099—NEC non-employee compensation: $18,500.");
+    expect(result.detected).toBe(true);
+    expect(result.patterns).toContain("1099+amount");
+  });
+
   it("detects W-2 with en-dash separator (W – 2)", () => {
     const result = scanForTRI("W – 2 wages reported: $72,000.");
     expect(result.detected).toBe(true);

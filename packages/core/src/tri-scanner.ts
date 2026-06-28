@@ -61,10 +61,11 @@ const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "1099+amount",
     // 1099 series (1099-MISC, 1099-NEC, 1099-DIV, 1099-INT, 1099-B, 1099-R …)
-    // with a dollar amount within ~50 chars. A 1-3 char separator (hyphen,
-    // space, or combinations like "1099 - NEC") is required to avoid matching
-    // zip codes and account numbers, while still catching obfuscated variants.
-    regex: /\b1099[-\s]{1,3}[A-Z]{1,4}.{0,50}\$[\d,]+/is,
+    // with a dollar amount within ~50 chars. A 1-3 char separator (ASCII
+    // hyphen, en-dash U+2013, em-dash U+2014, space, or combinations like
+    // "1099 - NEC") is required to avoid matching zip codes and account
+    // numbers, while still catching OCR/PDF typographic-dash variants.
+    regex: /\b1099[-–—\s]{1,3}[A-Z]{1,4}.{0,50}\$[\d,]+/is,
   },
   {
     label: "W2+amount",
