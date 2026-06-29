@@ -52,3 +52,6 @@ drizzle/meta/_journal.json.bak
 .next/
 *.tsbuildinfo
 scripts/API_PRINCIPALS.json
+
+# VS Code workspace files
+*.code-workspace
