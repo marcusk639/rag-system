@@ -3,9 +3,17 @@
 > **Goal:** Automate the four manual steps required to bring SharePoint ingestion live on
 > the production Railway deployment.
 >
-> **Status:** Ready to execute. Phases are ordered by dependency.
-> **Date authored:** 2026-06-28
+> **Status:** Phase 1 complete. Phase 2 (create source + principals + sync) is next.
+> **Date authored:** 2026-06-28 | **Last updated:** 2026-06-29
 > **Prerequisites checked below in Phase 0.**
+>
+> **Session state (2026-06-29):**
+>
+> - ✅ Phase 1 done: MS_* set on rag-worker; auth canary passed
+> - ✅ Drive enumeration done (see Phase 2 for confirmed IDs)
+> - ✅ Scope locked: sync `Knowledge Base` subfolder only (Documents/Shared Documents drive)
+> - ⬜ Phase 2: create source, update API_PRINCIPALS, trigger sync
+> - ⬜ Phase 3: verify sync completion + E2E happy path
 
 ---
 
