@@ -3,7 +3,11 @@
 > **Goal:** Create the SharePoint source scoped to `Documents/Knowledge Base`, grant user
 > access, trigger the first sync, and verify ingestion.
 >
-> **Status:** Ready to execute in a fresh session. All facts below are confirmed.
+> **Status:** COMPLETE — executed 2026-07-02. Source `b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14`
+> created, `API_PRINCIPALS` deployed to rag-api + rag-mcp, full sync ran to completion,
+> E2E verification passed (substantive answer, 5 unique documents cited, all citation
+> URLs point to `twkcpafirmllc.sharepoint.com/sites/twkcpafirmstaff/...`, no scoping bleed,
+> no oversize/error log entries).
 > **Date authored:** 2026-06-29
 >
 > **Prereqs already complete (do NOT redo):**
@@ -282,5 +286,5 @@ Phase 4: Verify document count + ask a question + scoping check (10 min)
 | ------------------------------- | ---------------------------------------------------------- |
 | `scripts/gen-tokens.sh`         | Generate bearer tokens for named principals                |
 | `scripts/deploy_tokens.sh`      | Set API_PRINCIPALS on rag-api + rag-mcp, redeploy both     |
-| `scripts/set-ms-credentials.sh` | Set MS_* on rag-worker (already done)                      |
+| `scripts/set-ms-credentials.sh` | Set MS\_\* on rag-worker (already done)                    |
 | `scripts/resolve-siteid.sh`     | Resolve composite siteId via rag-worker SSH (already done) |
