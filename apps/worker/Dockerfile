@@ -16,8 +16,7 @@ COPY packages ./packages
 COPY apps ./apps
 COPY tests ./tests
 COPY examples ./examples
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # ── builder: compile all workspace packages (tsconfig per package)
 FROM installer AS builder
