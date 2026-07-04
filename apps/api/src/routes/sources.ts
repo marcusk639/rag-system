@@ -143,6 +143,17 @@ export async function registerSourceRoutes(
       const { id } = request.params;
       const { mode } = request.body;
 
+      // Authz: admin (unrestricted) or a scoped principal whose allow-list
+      // includes this source. A forbidden source returns 404 (no existence
+      // leak) — same convention as DELETE /sources/:id and POST .../documents.
+      // Without this, a source-restricted token could force a (Graph-quota
+      // and embedding-cost consuming) sync against a source it can't read.
+      const scope = scopeFromRequest(request);
+      const permitted =
+        scope.enforcedSourceIds === null ||
+        scope.enforcedSourceIds.includes(id);
+      if (!permitted) throw new NotFoundError(`Source ${id} not found`);
+
       // triggerSync is the sole writer of ingestion_jobs (C2a fix): it creates
       // exactly one row and threads its id into the queue payload. NotFoundError
       // (unknown source) and SyncAlreadyRunningError (duplicate) propagate to the

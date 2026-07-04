@@ -88,8 +88,9 @@ describe("MCP buildServer", () => {
     const deps = makeDeps();
     buildServer({ deps, logger: deps.logger, scope: SCOPED_SCOPE });
 
-    // search, get-document, and ask receive the scope; list-sources and
-    // trigger-sync do not (they are scope-agnostic operations).
+    // search, get-document, ask, trigger-sync, and purge-source all receive
+    // the scope — only list-sources remains scope-agnostic (it lists names/
+    // metadata only, no document content or job-triggering side effect).
     expect(registerSearchDocuments).toHaveBeenCalledWith(
       expect.anything(),
       deps,
@@ -106,7 +107,11 @@ describe("MCP buildServer", () => {
       SCOPED_SCOPE,
     );
     expect(registerListSources).toHaveBeenCalledWith(expect.anything(), deps);
-    expect(registerTriggerSync).toHaveBeenCalledWith(expect.anything(), deps);
+    expect(registerTriggerSync).toHaveBeenCalledWith(
+      expect.anything(),
+      deps,
+      SCOPED_SCOPE,
+    );
     expect(registerPurgeSource).toHaveBeenCalledWith(
       expect.anything(),
       deps,

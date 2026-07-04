@@ -11,6 +11,16 @@ import type { FastifyInstance } from "fastify";
 import { buildServer } from "../server.js";
 import type { Deps } from "../deps.js";
 
+// Override ONLY triggerSync from @rag/services (via importOriginal passthrough)
+// so the /sources/:id/sync tests below don't need a real DB/queue, while the
+// existing /search and /ask tests keep running against the REAL askQuestion/
+// searchDocuments services, untouched.
+const { triggerSyncMock } = vi.hoisted(() => ({ triggerSyncMock: vi.fn() }));
+vi.mock("@rag/services", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rag/services")>();
+  return { ...actual, triggerSync: triggerSyncMock };
+});
+
 /**
  * Integration coverage for the P1 confidentiality boundary as it is actually
  * wired in the HTTP transport: bearer token -> AuthProvider -> Principal ->
@@ -87,7 +97,11 @@ function makeRetriever() {
 function makeGenerator() {
   const answer = vi.fn(
     async (_question: string, retrieved: RetrievalResult[]) => ({
-      answer: `grounded on ${retrieved.length} doc(s)`,
+      // Real generators cite via [N] notation; citations are now filtered to
+      // only the indices the answer text references (see
+      // filterCitationsToAnswer), so the fixture must actually cite them all
+      // to keep asserting "every retrieved doc surfaces as a citation".
+      answer: `grounded on ${retrieved.length} doc(s) ${retrieved.map((_, i) => `[${i + 1}]`).join(" ")}`,
       citations: retrieved.map((r, i) => ({
         index: i + 1,
         documentId: r.document.id,
@@ -315,6 +329,92 @@ describe("auth scope enforcement — /ask", () => {
       expect(res.statusCode).toBe(401);
       expect(retriever.search).not.toHaveBeenCalled();
       expect(generator.answer).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("auth scope enforcement — POST /sources/:id/sync", () => {
+  it("returns 404 for a scoped token attempting to sync a source outside its allow-list (never calls triggerSync)", async () => {
+    triggerSyncMock.mockClear();
+    const app = await buildApp(makeDeps(makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: `/sources/${SRC_B}/sync`,
+        headers: { authorization: `Bearer ${SCOPED_A_TOKEN}` },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(404);
+      expect(triggerSyncMock).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("allows a scoped token to sync a source WITHIN its allow-list", async () => {
+    triggerSyncMock.mockClear();
+    triggerSyncMock.mockResolvedValue({
+      jobId: "job-1",
+      ingestionId: "ing-1",
+      mode: "incremental",
+    });
+    const app = await buildApp(makeDeps(makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: `/sources/${SRC_A}/sync`,
+        headers: { authorization: `Bearer ${SCOPED_A_TOKEN}` },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(202);
+      expect(triggerSyncMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ sourceId: SRC_A }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("allows an admin token to sync ANY source", async () => {
+    triggerSyncMock.mockClear();
+    triggerSyncMock.mockResolvedValue({
+      jobId: "job-2",
+      ingestionId: "ing-2",
+      mode: "full",
+    });
+    const app = await buildApp(makeDeps(makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: `/sources/${SRC_B}/sync`,
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { mode: "full" },
+      });
+      expect(res.statusCode).toBe(202);
+      expect(triggerSyncMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ sourceId: SRC_B, mode: "full" }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns 404 for a deny-all scoped token on any source", async () => {
+    triggerSyncMock.mockClear();
+    const app = await buildApp(makeDeps(makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: `/sources/${SRC_A}/sync`,
+        headers: { authorization: `Bearer ${DENY_ALL_TOKEN}` },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(404);
+      expect(triggerSyncMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

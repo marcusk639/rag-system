@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AuthorizationScope } from "@rag/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getSource } from "@rag/db";
 import { triggerSync } from "@rag/services";
@@ -19,16 +20,35 @@ const inputSchema = {
     ),
 };
 
-export function registerTriggerSync(server: McpServer, deps: Deps): void {
+export function registerTriggerSync(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "trigger_sync",
     {
       title: "Trigger source sync",
       description:
-        "Enqueue a background ingestion job that re-pulls documents from a source, parses them, chunks, embeds, and stores. Returns immediately with the pg-boss job id; sync runs asynchronously in the worker process. This is the correct way to refresh content — never block on sync inside a conversation. Use `list_sources` first to discover ids and check when each source was last synced.",
+        "Enqueue a background ingestion job that re-pulls documents from a source, parses them, chunks, embeds, and stores. Returns immediately with the pg-boss job id; sync runs asynchronously in the worker process. This is the correct way to refresh content — never block on sync inside a conversation. Use `list_sources` first to discover ids and check when each source was last synced. A scoped session may only sync sources within its allow-list.",
       inputSchema,
     },
     async ({ sourceId, mode }) => {
+      // Scope check: a scoped session cannot force a sync (Graph-quota and
+      // embedding-cost consuming) against a source outside its allow-list —
+      // same enforcement as purge_source, and for the same reason: syncing a
+      // source you can't read would let a walled-off caller confirm its
+      // existence and burn its owner's shared quota/cost.
+      const permitted =
+        scope.enforcedSourceIds === null ||
+        scope.enforcedSourceIds.includes(sourceId);
+      if (!permitted) {
+        return {
+          content: [{ type: "text", text: `Source ${sourceId} not found.` }],
+          isError: true,
+        };
+      }
+
       // Resolve the source up front purely for a friendly name in the success
       // message (display concern). triggerSync re-checks existence and is the
       // sole writer of ingestion_jobs (C2a).
