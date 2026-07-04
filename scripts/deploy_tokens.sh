@@ -4,7 +4,9 @@
 # Source UUIDs (from GET /sources — run gen-principals.sh to refresh):
 #   52bb403e-2e59-472b-935a-c83f2eee7e4c  TWK CPA Firm
 #   d3461cbe-b99f-4253-aded-b3610afe56de  TWK RAGTestSite
-#   b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14  TWK SharePoint — Knowledge Base
+#   770e4016-d157-4968-87c9-cbb350ecd6bc  TWK SharePoint — Knowledge Base (recreated 2026-07-04
+#                                         to force storage_key backfill; old id
+#                                         b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14 deleted)
 #
 # Both users get all sources. service-admin gets unrestricted access.
 # TOKEN MAP is printed to stderr — save it before this terminal closes.
@@ -12,8 +14,8 @@
 set -euo pipefail
 
 PRINCIPALS=$(./scripts/gen-tokens.sh \
-  "marcus:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14" \
-  "chris:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14" \
+  "marcus:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,770e4016-d157-4968-87c9-cbb350ecd6bc" \
+  "chris:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,770e4016-d157-4968-87c9-cbb350ecd6bc" \
   "service-admin::isAdmin")
 
 echo "Setting API_PRINCIPALS on rag-api..." >&2
