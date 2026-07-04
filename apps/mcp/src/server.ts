@@ -41,7 +41,7 @@ export function buildServer(opts: {
   registerSearchDocuments(server, deps, scope);
   registerGetDocument(server, deps, scope);
   registerListSources(server, deps);
-  registerTriggerSync(server, deps);
+  registerTriggerSync(server, deps, scope);
   registerPurgeSource(server, deps, scope);
   registerAsk(server, deps, scope);
 

@@ -87,6 +87,11 @@ export class Retriever {
       query: query.query,
       queryEmbedding: embedding.vector,
       topK: fetchK,
+      // Restrict dense (cosine) matching to chunks embedded by this same
+      // provider/model — vectors from a different provider aren't comparable
+      // even at matching dimensionality (see HybridSearchOptions' comment).
+      embeddingProvider: this.embedder.name,
+      embeddingModel: this.embedder.model,
       // Mandatory ACL boundary (already intersected with the caller filter).
       enforcedSourceIds,
       // The optional caller filter is folded into `enforcedSourceIds` above,

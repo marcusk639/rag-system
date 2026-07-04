@@ -1,5 +1,5 @@
 import type { GenerationResult, Generator } from "@rag/rag";
-import { buildCitations } from "@rag/rag";
+import { buildCitations, filterCitationsToAnswer } from "@rag/rag";
 import type {
   AuthorizationScope,
   RetrievalResult,
@@ -139,7 +139,8 @@ async function ask(
   const result = await deps.generator.answer(input.question, retrieved);
   return {
     answer: result.answer,
-    citations: result.citations,
+    // Faithful to what the answer actually cites, not everything retrieved.
+    citations: filterCitationsToAnswer(result.answer, result.citations),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,
@@ -213,16 +214,21 @@ async function* askStream(
     return;
   }
 
+  let answerText = "";
   for await (const chunk of deps.generator.answerStream(
     input.question,
     retrieved,
   )) {
-    if (chunk) yield { type: "token", text: chunk };
+    if (chunk) {
+      answerText += chunk;
+      yield { type: "token", text: chunk };
+    }
   }
 
   yield {
     type: "done",
-    citations: buildCitations(retrieved),
+    // Faithful to what the answer actually cites, not everything retrieved.
+    citations: filterCitationsToAnswer(answerText, buildCitations(retrieved)),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,

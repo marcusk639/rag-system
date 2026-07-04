@@ -42,6 +42,7 @@ export {
   OpenAIGenerator,
   createGenerator,
   buildCitations,
+  filterCitationsToAnswer,
   type Generator,
   type GenerationResult,
 } from "./generation/generator.js";

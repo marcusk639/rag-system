@@ -35,6 +35,22 @@ describe("Retriever.search", () => {
     );
   });
 
+  it("restricts dense matching to the active embedder's provider/model (mixed-model corpora aren't cross-comparable)", async () => {
+    hybridSearch.mockResolvedValue([]);
+    const embedder = new FakeEmbedder();
+
+    const retriever = new Retriever({} as never, embedder, DEFAULTS);
+    await retriever.search({ query: "q", topK: 4 }, ADMIN_SCOPE);
+
+    expect(hybridSearch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        embeddingProvider: embedder.name,
+        embeddingModel: embedder.model,
+      }),
+    );
+  });
+
   it("with a reranker, over-fetches the pool and returns the reranked top-k", async () => {
     const pool = [rr("1"), rr("2"), rr("3"), rr("4"), rr("5"), rr("6")];
     hybridSearch.mockResolvedValue(pool);

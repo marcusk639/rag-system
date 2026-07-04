@@ -8,6 +8,15 @@ import type { Db } from "./client.js";
  * one piece of the enforced source-id boundary that is unit-testable without
  * a live DB. The SQL `WHERE doc.source_id IN (...)` enforcement itself needs
  * Postgres (no integration infra here) and is verified by reading + typecheck.
+ *
+ * Same limitation applies to the `dense_hits` CTE's `embedding_provider`/
+ * `embedding_model` filter (added to prevent cross-model cosine comparison):
+ * `baseOpts` below satisfies the TS-required fields so these fail-closed
+ * tests still compile, but no test in this file — or anywhere else in the
+ * repo — seeds mixed-provider chunks against a real Postgres+pgvector
+ * instance and asserts the filter actually excludes mismatched rows. Add
+ * that as a DB-backed/e2e test (see `tests/e2e/src/eval/`) before relying on
+ * this during a live embedding-provider migration.
  */
 const explodingDb = {
   transaction: async () => {
@@ -22,6 +31,8 @@ const baseOpts = {
   query: "anything",
   queryEmbedding: [0.1, 0.2, 0.3],
   topK: 8,
+  embeddingProvider: "test-provider",
+  embeddingModel: "test-model",
 };
 
 describe("hybridSearch — mandatory ACL fail-closed short-circuit", () => {

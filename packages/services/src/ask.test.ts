@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
 import { ADMIN_SCOPE } from "@rag/core";
-import { askQuestion, capChunksPerDocument } from "./ask.js";
+import { askQuestion, askQuestionStream, capChunksPerDocument } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
@@ -19,6 +19,7 @@ function retrievalResult(id: string, docId = `doc-${id}`): RetrievalResult {
       url: undefined,
       metadata: {},
     },
+    chunk: { id: `chunk-${id}`, ordinal: 0, headingPath: [] },
   } as unknown as RetrievalResult;
 }
 
@@ -82,7 +83,11 @@ describe("askQuestion", () => {
         score: 1,
       },
     ];
-    const answer = vi.fn().mockResolvedValue({ answer: "grounded", citations });
+    // Answer text must actually reference [1] — citations are now filtered to
+    // only the indices the answer cites (see filterCitationsToAnswer).
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "grounded [1]", citations });
     const deps = makeDeps({
       generator: { answer } as unknown as ServiceDeps["generator"],
       search,
@@ -103,12 +108,50 @@ describe("askQuestion", () => {
     );
     expect(answer).toHaveBeenCalledWith("q", retrieved);
     expect(result).toEqual({
-      answer: "grounded",
+      answer: "grounded [1]",
       citations,
       retrieved,
       reviewStatus: "draft_requires_practitioner_review",
       disclaimer: expect.any(String),
     });
+  });
+
+  it("drops citations the answer text doesn't actually reference via [N]", async () => {
+    const retrieved = [retrievalResult("1"), retrievalResult("2")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+    const citations = [
+      {
+        index: 1,
+        documentId: "doc-1",
+        title: "Doc 1",
+        chunkId: "chunk-1",
+        score: 1,
+      },
+      {
+        index: 2,
+        documentId: "doc-2",
+        title: "Doc 2",
+        chunkId: "chunk-2",
+        score: 0.9,
+      },
+    ];
+    // Only cites [1] — [2] was retrieved but never referenced in the answer.
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "grounded, per [1]", citations });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(result.citations).toEqual([citations[0]]);
   });
 
   it("uses an explicit topK over the default and forwards sourceIds/filter", async () => {
@@ -161,6 +204,39 @@ describe("askQuestion", () => {
     const passedToGenerator = answer.mock.calls[0][1] as RetrievalResult[];
     expect(passedToGenerator).toHaveLength(3);
     expect(result.retrieved).toHaveLength(3);
+  });
+});
+
+describe("askQuestionStream", () => {
+  it("accumulates streamed tokens and filters the terminal citations to what the answer actually references", async () => {
+    const retrieved = [retrievalResult("1"), retrievalResult("2")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+
+    async function* answerStream(): AsyncIterable<string> {
+      yield "grounded, ";
+      yield "per [1]";
+    }
+    const deps = makeDeps({
+      generator: { answerStream } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const events = [];
+    for await (const event of askQuestionStream(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    )) {
+      events.push(event);
+    }
+
+    const tokenEvents = events.filter((e) => e.type === "token");
+    expect(tokenEvents.map((e) => e.text).join("")).toBe("grounded, per [1]");
+
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent?.citations).toHaveLength(1);
+    expect(doneEvent?.citations[0]?.documentId).toBe("doc-1");
   });
 });
 

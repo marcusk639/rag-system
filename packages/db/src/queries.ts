@@ -298,6 +298,19 @@ interface HybridSearchOptions {
   queryEmbedding: number[];
   topK: number;
   /**
+   * MANDATORY discriminator for the currently active embedding provider/model
+   * (e.g. the caller's configured `EmbeddingProvider.name`/`.model`). `chunks`
+   * accumulates rows from whichever provider embedded them at ingest time, and
+   * `chunks.embedding` vectors from different providers/models are NOT
+   * comparable by cosine distance even when dimensions happen to coincide
+   * (e.g. Gemini and a local model both default to 768-dim) — mixing them
+   * silently corrupts ranking with no error. Required (not optional) so a
+   * caller cannot forget it during a provider migration, the exact moment a
+   * mixed-model corpus is most likely to exist.
+   */
+  embeddingProvider: string;
+  embeddingModel: string;
+  /**
    * Each retriever fetches this multiple of topK as candidates. Bumped from
    * the historical default of 4 because the dense CTE no longer joins
    * documents — filters now run as a post-filter, so we need a larger
@@ -450,7 +463,11 @@ export async function hybridSearch(
                plainto_tsquery('english', ${opts.query}) AS q_tsquery
       ),
       dense_hits AS (
-        -- Pure ANN: no JOIN, no extra WHERE beyond non-null. HNSW kicks in.
+        -- Pure ANN over the HNSW index, restricted to the active embedding
+        -- provider/model. Cosine distance between vectors from different
+        -- models is meaningless even at matching dimensionality, so this
+        -- filter is load-bearing correctness, not just a convenience — see
+        -- the comment on HybridSearchOptions.embeddingProvider/embeddingModel.
         SELECT
           c.id AS chunk_id,
           1 - (c.embedding <=> (SELECT q_embedding FROM params)) AS score,
@@ -459,6 +476,8 @@ export async function hybridSearch(
           ) AS rank
         FROM chunks c
         WHERE c.embedding IS NOT NULL
+          AND c.embedding_provider = ${opts.embeddingProvider}
+          AND c.embedding_model = ${opts.embeddingModel}
         ORDER BY c.embedding <=> (SELECT q_embedding FROM params) ASC
         LIMIT ${pool}
       ),
