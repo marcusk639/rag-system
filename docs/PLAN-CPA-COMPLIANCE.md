@@ -144,6 +144,30 @@ real, validated vendor DPA, and where self-hosted embeddings are the enforced de
 client-data source. **Unblocks the currently-live production issue** (see `docs/PLAN-KB-SYNC.md` —
 `/ask` and `/search` are 500ing right now because `EGRESS_ALLOWED_HOSTS` is empty).
 
+> **Status update (2026-07-04):** With explicit user authorization, `EGRESS_ALLOWED_HOSTS=
+generativelanguage.googleapis.com` was enabled in production **before** billing/DPA status was
+> verified, scoped explicitly to an **internal demonstration for primary stakeholders already
+> authorized to view all data** — not general production use. This is a deliberate, documented
+> exception to the anti-pattern guard below, not a reversal of it. See
+> `docs/compliance/vendor-dpa-google-gemini.md` (marked PROVISIONAL) for the exact gap and
+> required follow-ups.
+>
+> `COMPLIANCE_MODE=client-data` was **attempted** but reverted back to `none` after discovering
+> it hard-requires `EMBEDDING_PROVIDER=local` in code (`packages/rag/src/embeddings/factory.ts`) —
+> not just a DPA file. Switching to local embeddings means re-embedding the entire corpus, which is
+> genuinely Phase 1.1's scope, not a config flip. Asked the user explicitly; they chose to leave
+> `COMPLIANCE_MODE=none` for today's demo rather than take on the re-embedding migration now. **This
+> means TRI protection currently rests solely on the `EGRESS_ALLOWED_HOSTS` allow-list — the
+> code-enforced "embeddings must be local" belt-and-suspenders check is NOT active.** 1.1 and 1.2
+> below are still outstanding and must be completed, with `COMPLIANCE_MODE=client-data` re-enabled,
+> before this moves beyond internal demo use.
+>
+> Separately, discovered and fixed a real infra bug while investigating this: `.dockerignore`
+> excluded all of `docs/`, so `COMPLIANCE_MODE=client-data`'s DPA-file boot check could never have
+> passed in any production deploy, regardless of file content. Fixed by carving out
+> `docs/compliance/*.md` in `.dockerignore` and copying it into the runtime image in all three
+> service Dockerfiles — this was broken independent of today's provisional-DPA decision.
+
 ### 1.1 Decide and execute the embedding path [some COUNSEL input useful, not blocking]
 
 - Run a quick retrieval-quality spike: switch a test source to `EMBEDDING_PROVIDER=local` with
@@ -203,7 +227,10 @@ client-data source. **Unblocks the currently-live production issue** (see `docs/
 ### Anti-pattern guards
 
 - Do NOT set `EGRESS_ALLOWED_HOSTS` in production before the DPA is actually confirmed (billing +
-  DPA terms) — a file existing isn't the same as the underlying agreement being real.
+  DPA terms) — a file existing isn't the same as the underlying agreement being real. **Exception
+  on record for 2026-07-04:** enabled ahead of confirmation under explicit user authorization,
+  scoped to internal-stakeholder demo use only — see the status update above. This guard still
+  applies to any further widening of access (new users, external clients, production-for-real use).
 - Do NOT invent a network-level region-pinning check for CR-3 — it doesn't verify anything
   meaningful for standard SaaS API endpoints; rely on DPA data-residency language instead.
 - Do NOT re-embed only new documents — a full re-sync is required so old and new chunks share one

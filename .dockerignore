@@ -29,10 +29,14 @@ apps/web
 postgres-data
 **/*.log
 
-# Docs and scratch (not needed to build/run)
-docs
+# Docs and scratch (not needed to build/run) — except docs/compliance, which
+# the COMPLIANCE_MODE=client-data boot gate reads at runtime (see
+# packages/core/src/config.ts's defaultCheckDpa).
+docs/*
+!docs/compliance
 *.md
 !README.md
+!docs/compliance/*.md
 sesh.sh
 PATHFINDER-*
 journey-into-rag-system.md

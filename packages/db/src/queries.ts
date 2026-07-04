@@ -274,13 +274,14 @@ export async function setDocumentStorage(
     originalSizeBytes: number;
   },
 ): Promise<void> {
-  await db.execute(sql`
-    UPDATE ${documents}
-    SET ${documents.storageKey} = ${storage.storageKey},
-        ${documents.storageBucket} = ${storage.storageBucket},
-        ${documents.originalSizeBytes} = ${storage.originalSizeBytes}
-    WHERE ${documents.id} = ${documentId}
-  `);
+  await db
+    .update(documents)
+    .set({
+      storageKey: storage.storageKey,
+      storageBucket: storage.storageBucket,
+      originalSizeBytes: storage.originalSizeBytes,
+    })
+    .where(eq(documents.id, documentId));
 }
 
 // ============================================================================

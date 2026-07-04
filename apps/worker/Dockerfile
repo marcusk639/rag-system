@@ -16,6 +16,7 @@ COPY packages ./packages
 COPY apps ./apps
 COPY tests ./tests
 COPY examples ./examples
+COPY docs/compliance ./docs/compliance
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile all workspace packages (tsconfig per package)
@@ -33,6 +34,10 @@ FROM node:22-slim AS runtime
 
 WORKDIR /app
 COPY --from=pruner --chown=node:node /deploy .
+# COMPLIANCE_MODE=client-data's boot gate (packages/core/src/config.ts) reads
+# docs/compliance/vendor-dpa-*.md relative to cwd at runtime — pnpm deploy's
+# pruned output doesn't include it, so copy it separately from installer.
+COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compliance
 
 USER node
 ENV NODE_ENV=production
