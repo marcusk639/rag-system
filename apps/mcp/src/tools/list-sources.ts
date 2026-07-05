@@ -1,8 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AuthorizationScope } from "@rag/core";
 import { listPublicSources } from "@rag/services";
 import type { Deps } from "../deps.js";
 
-export function registerListSources(server: McpServer, deps: Deps): void {
+export function registerListSources(
+  server: McpServer,
+  deps: Deps,
+  scope: AuthorizationScope,
+): void {
   server.registerTool(
     "list_sources",
     {
@@ -12,9 +17,10 @@ export function registerListSources(server: McpServer, deps: Deps): void {
       inputSchema: {},
     },
     async () => {
-      // listPublicSources strips the `config` blob; we project to the
-      // agent-facing fields the tool has always returned.
-      const rows = await listPublicSources(deps);
+      // listPublicSources strips the `config` blob and now also enforces the
+      // MANDATORY confidentiality scope — a scoped session must only see
+      // sources within its `allowedSourceIds`, mirroring the HTTP API fix.
+      const rows = await listPublicSources(deps, scope);
       const sources = rows.map((s) => ({
         id: s.id,
         kind: s.kind,

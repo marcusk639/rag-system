@@ -40,7 +40,7 @@ export function buildServer(opts: {
   // Tools — search/ask receive the enforced authorization scope.
   registerSearchDocuments(server, deps, scope);
   registerGetDocument(server, deps, scope);
-  registerListSources(server, deps);
+  registerListSources(server, deps, scope);
   registerTriggerSync(server, deps, scope);
   registerPurgeSource(server, deps, scope);
   registerAsk(server, deps, scope);
