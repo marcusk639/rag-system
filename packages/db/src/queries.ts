@@ -700,11 +700,16 @@ export interface AskEventRow {
   chunkIds: string[];
   docIds: string[];
   retrievedCount: number;
+  /** "ask" | "search" — discriminates which endpoint produced this row. */
+  endpoint: "ask" | "search";
+  /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
+  topScore: number | null;
 }
 
 /**
- * Write one row to `audit_log` for every answered ask()/askStream() call.
- * Called asynchronously — failures are logged but do not block the response.
+ * Write one row to `audit_log` for every answered ask()/askStream()/search()
+ * call. Called asynchronously — failures are logged but do not block the
+ * response.
  */
 export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
   const values: NewAuditLog = {
@@ -717,6 +722,8 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     chunkIds: row.chunkIds,
     docIds: row.docIds,
     retrievedCount: row.retrievedCount,
+    endpoint: row.endpoint,
+    topScore: row.topScore,
   };
   await db.insert(auditLog).values(values);
 }

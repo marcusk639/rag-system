@@ -50,6 +50,13 @@
       "when": 1782626160533,
       "tag": "0007_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787000000000,
+      "tag": "0009_search_audit_parity",
+      "breakpoints": true
     }
   ]
 }
