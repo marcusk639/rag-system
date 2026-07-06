@@ -57,6 +57,13 @@
       "when": 1785542400000,
       "tag": "0008_document_governance",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0010_document_last_reviewed",
+      "breakpoints": true
     }
   ]
 }

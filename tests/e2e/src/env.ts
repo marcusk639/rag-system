@@ -83,5 +83,6 @@ export function makeTestConfig(): Config {
     },
     environment: "test",
     complianceMode: "none",
+    stalenessSweep: { cron: "0 3 * * *", tz: "UTC", maxAgeDays: 180 },
   };
 }

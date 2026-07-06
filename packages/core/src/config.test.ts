@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
-
 const BASE_ENV = {
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   API_TOKENS: "tok1",
@@ -61,7 +60,52 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
 
   it("none mode does not invoke checkDpa at all", () => {
     let called = false;
-    loadConfig({ ...BASE_ENV, COMPLIANCE_MODE: "none" }, { checkDpa: () => { called = true; return false; } });
+    loadConfig(
+      { ...BASE_ENV, COMPLIANCE_MODE: "none" },
+      {
+        checkDpa: () => {
+          called = true;
+          return false;
+        },
+      },
+    );
     expect(called).toBe(false);
+  });
+});
+
+describe("loadConfig — STALENESS_SWEEP_* (Phase 5 staleness sweep)", () => {
+  it("defaults to daily 03:00 UTC with a 180-day staleness threshold when unset", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.stalenessSweep).toEqual({
+      cron: "0 3 * * *",
+      tz: "UTC",
+      maxAgeDays: 180,
+    });
+  });
+
+  it("overrides cron/tz/maxAgeDays from env", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      STALENESS_SWEEP_CRON: "0 0 * * *",
+      STALENESS_SWEEP_TZ: "America/Chicago",
+      STALENESS_SWEEP_MAX_AGE_DAYS: "90",
+    });
+    expect(cfg.stalenessSweep).toEqual({
+      cron: "0 0 * * *",
+      tz: "America/Chicago",
+      maxAgeDays: 90,
+    });
+  });
+
+  it("a non-numeric STALENESS_SWEEP_MAX_AGE_DAYS fails loud rather than silently coercing", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, STALENESS_SWEEP_MAX_AGE_DAYS: "not-a-number" }),
+    ).toThrow();
+  });
+
+  it("a non-positive STALENESS_SWEEP_MAX_AGE_DAYS fails loud", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, STALENESS_SWEEP_MAX_AGE_DAYS: "0" }),
+    ).toThrow();
   });
 });
