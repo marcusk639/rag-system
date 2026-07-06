@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 import { setTimeout as wait } from "node:timers/promises";
 import { request } from "undici";
 import pg from "pg";
+import { applyMigrations } from "@rag/db";
 import { env } from "../env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   await waitForPostgres(env.databaseUrl, 60_000);
   await waitForParser(env.parserUrl, 60_000);
 
-  await runMigrations();
+  // Delegates to the SAME two-phase logic `pnpm db:migrate` uses (bootstrap
+  // `0000_init.sql`, then Drizzle's real migrator for every subsequent
+  // journal-tracked file) — see `packages/db/src/migrate.ts`. A previous
+  // version of this function only ran the bootstrap phase, which silently
+  // left every column/table added since `0000_init.sql` missing in CI's
+  // byte-fresh Postgres service container (masked in local dev, where a
+  // persistent docker volume usually already has everything applied from a
+  // prior manual `pnpm db:migrate`).
+  await applyMigrations(env.databaseUrl);
+  process.stdout.write("[e2e] migrations applied\n");
 
   process.stdout.write("[e2e] global setup complete\n");
 
@@ -117,32 +126,4 @@ async function waitForParser(url: string, timeoutMs: number): Promise<void> {
   throw new Error(
     `[e2e] parser did not become ready within ${timeoutMs}ms: ${String(lastError)}`,
   );
-}
-
-async function runMigrations(): Promise<void> {
-  // Reuse the project's bootstrap SQL directly rather than shelling out to
-  // `pnpm db:migrate`. Same effect, no subprocess, no env coupling.
-  const bootstrapPath = join(
-    REPO_ROOT,
-    "packages",
-    "db",
-    "drizzle",
-    "0000_init.sql",
-  );
-  const sql = await readFile(bootstrapPath, "utf8");
-
-  const pool = new pg.Pool({ connectionString: env.databaseUrl, max: 2 });
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(sql);
-    await client.query("COMMIT");
-    process.stdout.write("[e2e] migrations applied\n");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-    await pool.end();
-  }
 }
