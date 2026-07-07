@@ -38,6 +38,7 @@ const SourceKindSchema = z.enum([
   "gmail",
   "outlook",
   "custom",
+  "git-markdown",
 ]);
 
 const CreateSourceBody = z.object({
