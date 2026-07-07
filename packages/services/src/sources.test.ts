@@ -9,6 +9,8 @@ const updateIngestionJob = vi.fn();
 const enqueueSync = vi.fn();
 
 const purgeSourceQuery = vi.fn();
+const listSources = vi.fn();
+const toPublicSource = vi.fn();
 
 // Real subclass so `triggerSync`'s `instanceof` check behaves like production.
 class SyncAlreadyRunningError extends Error {
@@ -21,9 +23,8 @@ vi.mock("@rag/db", () => ({
   deleteIngestionJob: (...args: unknown[]) => deleteIngestionJob(...args),
   updateIngestionJob: (...args: unknown[]) => updateIngestionJob(...args),
   purgeSource: (...args: unknown[]) => purgeSourceQuery(...args),
-  // Referenced elsewhere in the module but not by triggerSync/purgeSource.
-  listSources: vi.fn(),
-  toPublicSource: vi.fn(),
+  listSources: (...args: unknown[]) => listSources(...args),
+  toPublicSource: (...args: unknown[]) => toPublicSource(...args),
 }));
 
 vi.mock("@rag/ingestion", () => ({
@@ -31,7 +32,9 @@ vi.mock("@rag/ingestion", () => ({
   SyncAlreadyRunningError,
 }));
 
-const { triggerSync, purgeSource } = await import("./sources.js");
+const { triggerSync, purgeSource, listPublicSources } =
+  await import("./sources.js");
+import type { AuthorizationScope } from "@rag/core";
 import type { ServiceDeps } from "./deps.js";
 
 const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
@@ -42,6 +45,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   getSource.mockResolvedValue({ id: "src-1" });
   createIngestionJob.mockResolvedValue({ id: "ing-1" });
+  // toPublicSource is production-pure (strips `config`); the identity mock is
+  // fine here since listPublicSources's OWN scope-filtering logic — not the
+  // config-stripping projection — is what these tests exercise.
+  toPublicSource.mockImplementation((row: unknown) => row);
 });
 
 describe("triggerSync", () => {
@@ -141,6 +148,57 @@ describe("purgeSource", () => {
   it("throws NotFoundError when the db query returns false (source not found)", async () => {
     purgeSourceQuery.mockResolvedValue(false);
 
-    await expect(purgeSource(deps, "src-missing")).rejects.toThrow(/not found/i);
+    await expect(purgeSource(deps, "src-missing")).rejects.toThrow(
+      /not found/i,
+    );
+  });
+});
+
+describe("listPublicSources", () => {
+  const ROW_A = { id: "src-a", name: "Source A" };
+  const ROW_B = { id: "src-b", name: "Source B" };
+
+  it("returns every row for the admin scope (enforcedSourceIds: null)", async () => {
+    listSources.mockResolvedValue([ROW_A, ROW_B]);
+    const scope: AuthorizationScope = { enforcedSourceIds: null };
+
+    const result = await listPublicSources(deps, scope);
+
+    expect(result.map((r) => r.id)).toEqual(["src-a", "src-b"]);
+  });
+
+  it("filters to only the rows within a scoped principal's allowedSourceIds", async () => {
+    listSources.mockResolvedValue([ROW_A, ROW_B]);
+    const scope: AuthorizationScope = { enforcedSourceIds: ["src-a"] };
+
+    const result = await listPublicSources(deps, scope);
+
+    expect(result.map((r) => r.id)).toEqual(["src-a"]);
+  });
+
+  it("returns [] for the deny-all scope (empty enforcedSourceIds), matching DENY_ALL_SCOPE semantics", async () => {
+    listSources.mockResolvedValue([ROW_A, ROW_B]);
+    const scope: AuthorizationScope = { enforcedSourceIds: [] };
+
+    const result = await listPublicSources(deps, scope);
+
+    expect(result).toEqual([]);
+  });
+
+  it("still strips config via toPublicSource before filtering", async () => {
+    listSources.mockResolvedValue([ROW_A]);
+    toPublicSource.mockImplementation((row: { id: string }) => ({
+      id: row.id,
+    }));
+    const scope: AuthorizationScope = { enforcedSourceIds: null };
+
+    const result = await listPublicSources(deps, scope);
+
+    expect(toPublicSource).toHaveBeenCalledWith(
+      ROW_A,
+      expect.any(Number),
+      expect.any(Array),
+    );
+    expect(result).toEqual([{ id: "src-a" }]);
   });
 });

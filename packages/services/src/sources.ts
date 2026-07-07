@@ -1,4 +1,4 @@
-import { NotFoundError } from "@rag/core";
+import { NotFoundError, type AuthorizationScope } from "@rag/core";
 import {
   createIngestionJob,
   deleteIngestionJob,
@@ -102,12 +102,21 @@ export async function triggerSync(
 /**
  * List all registered sources with the `config` blob stripped.
  * Transport-agnostic core of GET /sources and the `list_sources` MCP tool.
+ *
+ * `scope` is the MANDATORY confidentiality boundary (P1 fix): a scoped
+ * principal must only ever see the sources in its `allowedSourceIds` — never
+ * the full corpus, regardless of transport. `enforcedSourceIds === null`
+ * (admin) returns every row; an empty array (`DENY_ALL_SCOPE`) returns `[]`.
  */
 export async function listPublicSources(
   deps: ServiceDeps,
+  scope: AuthorizationScope,
 ): Promise<Omit<Source, "config">[]> {
   const rows = await listSources(deps.db);
-  return rows.map(toPublicSource);
+  const publicRows = rows.map(toPublicSource);
+  if (scope.enforcedSourceIds === null) return publicRows;
+  const allowed = new Set(scope.enforcedSourceIds);
+  return publicRows.filter((row) => allowed.has(row.id));
 }
 
 /**
