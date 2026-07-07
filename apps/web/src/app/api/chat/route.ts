@@ -1,6 +1,10 @@
 import { auth } from "@/lib/auth";
 import { getScopeAssertionToken } from "@/lib/scope-token";
-import { getRagApiConfig, jsonError, resolveBearerToken } from "@/lib/rag-api";
+import {
+  getRagApiConfig,
+  jsonError,
+  resolveRequestBearerToken,
+} from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +16,14 @@ export const dynamic = "force-dynamic";
  * session; it is never visible to the client.
  */
 export async function POST(request: Request): Promise<Response> {
-  const session = await auth();
-  if (!session?.oid) {
-    return jsonError(401, "UNAUTHENTICATED", "Sign-in required.");
-  }
+  // Resolved (and, if it fails, returned) before the fetch try/catch below so
+  // a missing RAG_API_STATIC_FALLBACK_TOKEN config error can never be
+  // mislabeled as an upstream connectivity failure.
+  const resolved = await resolveRequestBearerToken(
+    auth,
+    getScopeAssertionToken,
+  );
+  if (resolved.errorResponse) return resolved.errorResponse;
 
   let config;
   try {
@@ -31,14 +39,12 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(400, "INVALID_BODY", "Request body must be JSON.");
   }
 
-  const token = await getScopeAssertionToken(session.oid);
-
   let upstream: Response;
   try {
     upstream = await fetch(`${config.url}/ask/stream`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${resolveBearerToken({ scopeToken: token })}`,
+        Authorization: `Bearer ${resolved.token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),

@@ -8,11 +8,15 @@ import { NextResponse } from "next/server";
  * shared/admin credential — there is no fallback path here by design.
  *
  * WEB_AUTH_MODE=static-fallback is a deliberately TEMPORARY emergency
- * override (see resolveBearerToken in lib/rag-api.ts): when Entra ID
+ * override (see resolveRequestBearerToken in lib/rag-api.ts): when Entra ID
  * sign-in is broken in production, ops can revert every user to one shared
  * static token. In that mode there is no per-user session to require, so
  * the redirect-to-sign-in check is skipped and requests are let through —
- * the fallback static token is what authorizes them downstream.
+ * the fallback static token is what authorizes them downstream. Each BFF
+ * route handler independently re-checks WEB_AUTH_MODE (via
+ * resolveRequestBearerToken) before its own session gate, so this bypass
+ * still works even when Entra ID cannot produce a session at all — this
+ * middleware redirect is not the only place the mode is honored.
  */
 export default auth((req) => {
   const isAuthRoute =
