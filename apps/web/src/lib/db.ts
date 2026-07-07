@@ -1,6 +1,8 @@
 import { createDb, pgSslOption, type Db } from "@rag/db";
 
-let cached: { db: Db; close: () => Promise<void> } | undefined;
+const globalForWebDb = globalThis as unknown as {
+  __ragWebDb?: { db: Db; close: () => Promise<void> };
+};
 
 /**
  * Lazily-created singleton DB connection for the web app's BFF — used only
@@ -8,9 +10,12 @@ let cached: { db: Db; close: () => Promise<void> } | undefined;
  * UI's grant/revoke/history queries. Mirrors the api/mcp/worker apps'
  * `createDb` usage (`packages/runtime/src/index.ts`) rather than hand-rolling
  * a separate pg client.
+ *
+ * The singleton is cached on `globalThis` (not just a module-level variable)
+ * to survive Next.js dev-mode hot-module reloads, preventing connection pool leaks.
  */
 export function getWebDb(): Db {
-  if (!cached) {
+  if (!globalForWebDb.__ragWebDb) {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
       throw new Error(
@@ -25,7 +30,7 @@ export function getWebDb(): Db {
       max: 5,
       ssl: pgSslOption(sslMode),
     });
-    cached = { db, close };
+    globalForWebDb.__ragWebDb = { db, close };
   }
-  return cached.db;
+  return globalForWebDb.__ragWebDb.db;
 }
