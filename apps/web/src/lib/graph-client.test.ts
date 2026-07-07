@@ -87,3 +87,38 @@ describe("isUserInGroup", () => {
     );
   });
 });
+
+describe("token caching", () => {
+  it("caches the access token and reuses it across multiple calls", async () => {
+    // Mock: 1 token fetch + 2 Graph API responses
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "fake-graph-token",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "user-oid-1" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "user-oid-2" }), { status: 200 }),
+      );
+
+    // Call two functions that each require a token
+    const oid1 = await resolveOidByEmail("user1@firm.com");
+    const oid2 = await resolveOidByEmail("user2@firm.com");
+
+    expect(oid1).toBe("user-oid-1");
+    expect(oid2).toBe("user-oid-2");
+
+    // Assert: only 3 fetch calls (1 token + 2 Graph), NOT 4 (2 tokens + 2 Graph)
+    expect(fetchMock.mock.calls).toHaveLength(3);
+    expect(fetchMock.mock.calls[0][0]).toContain("login.microsoftonline.com");
+    expect(fetchMock.mock.calls[1][0]).toContain("graph.microsoft.com");
+    expect(fetchMock.mock.calls[2][0]).toContain("graph.microsoft.com");
+  });
+});

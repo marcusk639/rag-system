@@ -28,9 +28,22 @@
 
 interface GraphTokenResponse {
   access_token: string;
+  expires_in: number;
 }
 
+/** In-memory cache for Graph access token: { token, expiresAt } */
+let tokenCache: { token: string; expiresAt: number } | null = null;
+
+/** Safety margin (seconds) to treat token as expired before actual expiry.
+ * Prevents a race where a cached token expires mid-request. */
+const TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS = 60;
+
 async function getGraphAccessToken(): Promise<string> {
+  // Return cached token if valid
+  if (tokenCache && tokenCache.expiresAt > Date.now() / 1000) {
+    return tokenCache.token;
+  }
+
   const tenantId = process.env.MS_TENANT_ID;
   const clientId = process.env.MS_CLIENT_ID;
   const clientSecret = process.env.MS_CLIENT_SECRET;
@@ -56,6 +69,12 @@ async function getGraphAccessToken(): Promise<string> {
     throw new Error(`Failed to acquire Graph access token: ${res.status}`);
   }
   const body = (await res.json()) as GraphTokenResponse;
+
+  // Cache the token with expiry time, applying safety margin
+  const expiresAt =
+    Date.now() / 1000 + body.expires_in - TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS;
+  tokenCache = { token: body.access_token, expiresAt };
+
   return body.access_token;
 }
 
