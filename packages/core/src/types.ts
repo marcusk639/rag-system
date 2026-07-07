@@ -12,6 +12,7 @@ export const SourceKind = z.enum([
   "gmail",
   "outlook",
   "custom",
+  "git-markdown",
 ]);
 export type SourceKind = z.infer<typeof SourceKind>;
 

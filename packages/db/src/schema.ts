@@ -35,6 +35,7 @@ export const sourceKindEnum = pgEnum("source_kind", [
   "gmail",
   "outlook",
   "custom",
+  "git-markdown",
 ]);
 
 export const ingestionStatusEnum = pgEnum("ingestion_status", [

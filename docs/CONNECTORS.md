@@ -164,6 +164,37 @@ Same app registration as SharePoint. Add this Application permission:
 
 ---
 
+## Git Markdown
+
+Reads markdown files from a local git clone, using the current commit SHA as the delta
+cursor. Built specifically for ingesting `veteran-disability-ai-resources` — its
+frontmatter (`topic`, `last_verified`, `volatility`) is passed through into
+`metadata.extra` unchanged.
+
+### Requirements
+
+The `repoPath` must be a local clone the ingestion worker's filesystem can read (this
+connector shells out to the system `git` binary — no network credentials needed).
+
+### Source config
+
+```json
+{
+"repoPath": "/Users/marcusklein/dev/veteran-disability-ai-resources",
+"extensions": [".md"]
+}
+```
+
+### Notes
+
+- No auth — this is a local filesystem/git operation, not a remote API, so there is no
+  `ConnectorAuthError`/`ConnectorTransientError` path; any failure (bad path, corrupt
+  repo) propagates as a plain error.
+- The clone must be kept up to date (e.g. a periodic `git pull`) for `trigger_sync` to
+  see new commits — this connector does not fetch from a remote itself.
+
+---
+
 ## Adding a new connector
 
 1. **Implement the interface.** Create `packages/connectors/src/<name>/index.ts` exporting a class implementing `Connector` from `@rag/core`.
