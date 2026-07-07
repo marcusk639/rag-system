@@ -232,6 +232,32 @@ export async function documentHasChunks(
 }
 
 /**
+ * Whether a document currently has its original bytes recorded in object
+ * storage.
+ *
+ * Used by the ingestion pipeline to detect documents whose `content_hash` is
+ * up to date but whose `storage_key` never got set — e.g. a prior run's
+ * object-store upload failed, or the process was killed between writing the
+ * content hash and writing the storage columns (two separate statements, not
+ * one transaction). Without this check, an unchanged-hash document would
+ * short-circuit forever and never get a working download link, even after
+ * the underlying issue is fixed — the only way out would be forcing every
+ * document's hash to look "changed" (e.g. deleting and recreating the source).
+ */
+export async function documentHasStorage(
+  db: Db,
+  documentId: string,
+): Promise<boolean> {
+  const result = await db.execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM ${documents}
+      WHERE ${documents.id} = ${documentId} AND ${documents.storageKey} IS NOT NULL
+    ) AS exists
+  `);
+  return result.rows[0]?.exists ?? false;
+}
+
+/**
  * Delete a document by its source-scoped external ID. The `chunks` FK is
  * `ON DELETE CASCADE`, so removing the document also removes its chunks — this
  * is how delta tombstones (a file deleted in the source) are reconciled so the

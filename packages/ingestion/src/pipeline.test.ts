@@ -12,6 +12,7 @@ const {
   upsertDocumentMock,
   replaceChunksMock,
   documentHasChunksMock,
+  documentHasStorageMock,
   deleteDocumentByExternalIdMock,
   setDocumentStorageMock,
   logIngestEventMock,
@@ -20,6 +21,7 @@ const {
   upsertDocumentMock: vi.fn(),
   replaceChunksMock: vi.fn(),
   documentHasChunksMock: vi.fn(),
+  documentHasStorageMock: vi.fn(),
   deleteDocumentByExternalIdMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
   logIngestEventMock: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("@rag/db", () => ({
   upsertDocument: upsertDocumentMock,
   replaceChunks: replaceChunksMock,
   documentHasChunks: documentHasChunksMock,
+  documentHasStorage: documentHasStorageMock,
   deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
   logIngestEvent: logIngestEventMock,
@@ -120,6 +123,7 @@ beforeEach(() => {
   replaceChunksMock.mockResolvedValue(undefined);
   updateSourceCursorMock.mockResolvedValue(undefined);
   documentHasChunksMock.mockResolvedValue(true);
+  documentHasStorageMock.mockResolvedValue(true);
   deleteDocumentByExternalIdMock.mockResolvedValue({
     deleted: true,
     storageKey: null,
@@ -402,12 +406,13 @@ describe("runIngestion original-bytes storage", () => {
     });
   });
 
-  it("does NOT re-upload when content is unchanged", async () => {
+  it("does NOT re-upload when content is unchanged and storage is already recorded", async () => {
     upsertDocumentMock.mockResolvedValue({
       id: "doc-1",
       contentChanged: false,
     });
     documentHasChunksMock.mockResolvedValue(true);
+    documentHasStorageMock.mockResolvedValue(true);
     const objectStore = makeObjectStore();
     const deps = { ...makeDeps(), objectStore } as PipelineDeps;
 
@@ -419,6 +424,26 @@ describe("runIngestion original-bytes storage", () => {
 
     expect(objectStore.put).not.toHaveBeenCalled();
     expect(setDocumentStorageMock).not.toHaveBeenCalled();
+  });
+
+  it("re-uploads when content is unchanged but storage was never recorded (self-heals a prior interrupted/failed upload)", async () => {
+    upsertDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      contentChanged: false,
+    });
+    documentHasChunksMock.mockResolvedValue(true);
+    documentHasStorageMock.mockResolvedValue(false);
+    const objectStore = makeObjectStore();
+    const deps = { ...makeDeps(), objectStore } as PipelineDeps;
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(objectStore.put).toHaveBeenCalledTimes(1);
+    expect(setDocumentStorageMock).toHaveBeenCalledTimes(1);
   });
 
   it("a storage upload failure does not fail text ingestion", async () => {
