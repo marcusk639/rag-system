@@ -1,8 +1,16 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin-check";
-import { grantAccessAction, revokeAccessAction } from "./actions";
-import { GrantAccessForm, RevokeAccessForm } from "./access-forms";
+import {
+  grantAccessAction,
+  revokeAccessAction,
+  getHistoryAction,
+} from "./actions";
+import {
+  GrantAccessForm,
+  RevokeAccessForm,
+  AccessHistoryForm,
+} from "./access-forms";
 
 export default async function AdminAccessPage() {
   const session = await auth();
@@ -16,6 +24,7 @@ export default async function AdminAccessPage() {
 
       <GrantAccessForm action={grantAccessAction} />
       <RevokeAccessForm action={revokeAccessAction} />
+      <AccessHistoryForm action={getHistoryAction} />
     </main>
   );
 }

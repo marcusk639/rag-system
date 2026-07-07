@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ActionResult } from "./actions";
+import type { ActionResult, HistoryActionResult } from "./actions";
 
 type Feedback = { kind: "success" | "error"; message: string };
 
@@ -146,6 +146,93 @@ export function RevokeAccessForm({
         {isSubmitting ? "Revoking..." : "Revoke"}
       </button>
       <FeedbackBanner feedback={feedback} />
+    </form>
+  );
+}
+
+type HistoryRows = Extract<HistoryActionResult, { ok: true }>["history"];
+
+export function AccessHistoryForm({
+  action,
+}: {
+  action: (email: string) => Promise<HistoryActionResult>;
+}) {
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [history, setHistory] = useState<HistoryRows | null>(null);
+  // See GrantAccessForm above for why this is a manual boolean rather than
+  // useTransition's `isPending` on React 18.3.1.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "");
+    setIsSubmitting(true);
+    setHistory(null);
+    try {
+      const result = await action(email);
+      if (result.ok) {
+        setFeedback(null);
+        setHistory(result.history);
+      } else {
+        setFeedback({ kind: "error", message: result.error });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+      <h2 className="text-lg font-medium">View access history</h2>
+      <input
+        name="email"
+        type="email"
+        placeholder="staff@firm.com"
+        required
+        className="w-full rounded border px-3 py-2"
+      />
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="rounded border px-4 py-2 disabled:opacity-50"
+      >
+        {isSubmitting ? "Loading..." : "View history"}
+      </button>
+      <FeedbackBanner feedback={feedback} />
+      {history &&
+        (history.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No access history found for this user.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left">
+                <th className="py-1 pr-2">Client ID</th>
+                <th className="py-1 pr-2">Granted at</th>
+                <th className="py-1 pr-2">Granted by</th>
+                <th className="py-1 pr-2">Revoked at</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((row, index) => (
+                <tr key={index} className="border-b">
+                  <td className="py-1 pr-2">{row.clientId}</td>
+                  <td className="py-1 pr-2">
+                    {new Date(row.grantedAt).toLocaleString()}
+                  </td>
+                  <td className="py-1 pr-2">{row.grantedBy}</td>
+                  <td className="py-1 pr-2">
+                    {row.revokedAt
+                      ? new Date(row.revokedAt).toLocaleString()
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
     </form>
   );
 }

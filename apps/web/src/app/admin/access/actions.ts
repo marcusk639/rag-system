@@ -8,9 +8,14 @@ import {
   grantClientAccess,
   revokeClientAccess,
   listAssignmentHistoryForStaff,
+  type StaffAssignmentHistoryRow,
 } from "@rag/db";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
+
+export type HistoryActionResult =
+  | { ok: true; history: StaffAssignmentHistoryRow[] }
+  | { ok: false; error: string };
 
 /**
  * Every action re-checks admin membership server-side, in addition to
@@ -73,17 +78,23 @@ export async function revokeAccessAction(
   return { ok: true };
 }
 
-export async function getHistoryAction(email: string) {
+export async function getHistoryAction(
+  email: string,
+): Promise<HistoryActionResult> {
   const gate = await requireAdmin();
-  if (!gate.ok) return { ok: false as const, error: gate.error };
+  if (!gate.ok) return { ok: false, error: gate.error };
+
+  if (!email) {
+    return { ok: false, error: "Email is required." };
+  }
 
   const targetOid = await resolveOidByEmail(email);
   if (!targetOid) {
     return {
-      ok: false as const,
+      ok: false,
       error: `No Entra ID user found for ${email}`,
     };
   }
   const history = await listAssignmentHistoryForStaff(getWebDb(), targetOid);
-  return { ok: true as const, history };
+  return { ok: true, history };
 }
