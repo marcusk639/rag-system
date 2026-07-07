@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { getScopeAssertionToken } from "@/lib/scope-token";
-import { getRagApiConfig, jsonError } from "@/lib/rag-api";
+import { getRagApiConfig, jsonError, resolveBearerToken } from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,7 +90,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     upstream = await fetch(`${config.url}/sources/${sourceId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${resolveBearerToken({ scopeToken: token })}`,
+      },
       body: upstreamForm,
     });
   } catch {

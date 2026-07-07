@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { getScopeAssertionToken } from "@/lib/scope-token";
-import { jsonError, proxyDownload } from "@/lib/rag-api";
+import { jsonError, proxyDownload, resolveBearerToken } from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,5 +24,8 @@ export async function GET(
   }
 
   const token = await getScopeAssertionToken(session.oid);
-  return proxyDownload(`/documents/${id}/download`, token);
+  return proxyDownload(
+    `/documents/${id}/download`,
+    resolveBearerToken({ scopeToken: token }),
+  );
 }

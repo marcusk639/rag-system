@@ -19,6 +19,30 @@ export function getRagApiConfig(): RagApiConfig {
   return { url: url.replace(/\/+$/, "") };
 }
 
+/**
+ * Resolves which bearer token the BFF forwards to Fastify. Defaults to the
+ * per-user scope-assertion token. `WEB_AUTH_MODE=static-fallback` is a
+ * deliberately TEMPORARY emergency override for when Entra ID sign-in is
+ * broken in production (misconfigured redirect URI, expired client secret,
+ * tenant issue) — it reverts every user to one shared static token so the
+ * app stays usable while the Entra ID issue is fixed. Remove this flag (and
+ * RAG_API_STATIC_FALLBACK_TOKEN) once a rollout has been stable for a
+ * defined period; it is not a permanent dual-mode feature.
+ */
+export function resolveBearerToken(opts: { scopeToken: string }): string {
+  const mode = process.env.WEB_AUTH_MODE ?? "entra";
+  if (mode === "static-fallback") {
+    const fallback = process.env.RAG_API_STATIC_FALLBACK_TOKEN;
+    if (!fallback) {
+      throw new Error(
+        "WEB_AUTH_MODE=static-fallback requires RAG_API_STATIC_FALLBACK_TOKEN to be set.",
+      );
+    }
+    return fallback;
+  }
+  return opts.scopeToken;
+}
+
 /** Proxy a JSON GET to the RAG API, returning a same-origin JSON Response. */
 export async function proxyJsonGet(
   path: string,
