@@ -1,5 +1,5 @@
 import type { Session } from "next-auth";
-import { isUserInGroup } from "./graph-client.js";
+import { isUserInGroup } from "./graph-client";
 
 /**
  * Determines whether the signed-in user is a member of the `RAG-Admins`

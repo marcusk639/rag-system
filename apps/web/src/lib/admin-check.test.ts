@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "next-auth";
 
-vi.mock("./graph-client.js", () => ({
+vi.mock("./graph-client", () => ({
   isUserInGroup: vi.fn(),
 }));
 
-import { isUserInGroup } from "./graph-client.js";
-import { isAdmin } from "./admin-check.js";
+import { isUserInGroup } from "./graph-client";
+import { isAdmin } from "./admin-check";
 
 const baseSession = (overrides: Partial<Session>): Session =>
   ({

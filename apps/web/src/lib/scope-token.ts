@@ -1,6 +1,6 @@
 import { resolveSourceIdsForUser } from "@rag/db";
 import { signInternalScopeToken } from "@rag/core";
-import { getWebDb } from "./db.js";
+import { getWebDb } from "./db";
 
 /**
  * Resolve `oid`'s current per-client access (fresh from Postgres every call —

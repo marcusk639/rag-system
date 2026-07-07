@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./db.js", () => ({
+vi.mock("./db", () => ({
   getWebDb: vi.fn(() => "fake-db-handle"),
 }));
 
@@ -14,8 +14,7 @@ vi.mock("@rag/db", async () => {
   };
 });
 
-import { resolveSourceIdsForUser } from "@rag/db";
-import { getScopeAssertionToken } from "./scope-token.js";
+import { getScopeAssertionToken } from "./scope-token";
 
 const SECRET = "test-secret-at-least-32-bytes-long-here";
 

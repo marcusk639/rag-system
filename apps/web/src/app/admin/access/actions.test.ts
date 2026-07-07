@@ -17,7 +17,7 @@ import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin-check";
 import { resolveOidByEmail } from "@/lib/graph-client";
 import { grantClientAccess, revokeClientAccess } from "@rag/db";
-import { grantAccessAction, revokeAccessAction } from "./actions.js";
+import { grantAccessAction, revokeAccessAction } from "./actions";
 
 beforeEach(() => {
   // Reset mock call history between tests — without this, `grantClientAccess`

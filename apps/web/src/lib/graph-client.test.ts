@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { resolveOidByEmail, isUserInGroup } from "./graph-client.js";
+import { resolveOidByEmail, isUserInGroup } from "./graph-client";
 
 beforeEach(() => {
   fetchMock.mockReset();

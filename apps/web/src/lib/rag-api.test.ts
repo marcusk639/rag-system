@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { resolveRequestBearerToken } from "./rag-api.js";
+import { resolveRequestBearerToken } from "./rag-api";
 
 describe("resolveRequestBearerToken — WEB_AUTH_MODE gating", () => {
   afterEach(() => {
