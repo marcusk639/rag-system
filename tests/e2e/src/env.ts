@@ -83,5 +83,8 @@ export function makeTestConfig(): Config {
     },
     environment: "test",
     complianceMode: "none",
+    // Digest itself is never triggered by the e2e harness (no worker cron
+    // ticks during tests) — values only need to satisfy the Config shape.
+    docsGapDigest: { cron: "0 6 * * 1", tz: "UTC", minScore: 0.3 },
   };
 }

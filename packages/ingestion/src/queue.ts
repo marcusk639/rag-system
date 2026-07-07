@@ -8,6 +8,12 @@ import { SyncAlreadyRunningError } from "./errors.js";
 
 export const JOB_NAMES = {
   syncSource: "rag.sync_source",
+  /**
+   * First recurring (pg-boss `schedule()`) job in this codebase — see
+   * `createQueue` below. No payload: it's a scheduled tick, not a producer-
+   * enqueued job, so it has no `*Payload` interface like `SyncSourcePayload`.
+   */
+  docsGapDigest: "rag.docs_gap_digest",
 } as const;
 
 export interface SyncSourcePayload {
@@ -44,6 +50,15 @@ export const MAX_SYNC_CONTINUATIONS = 100_000;
 export interface QueueOptions {
   databaseUrl: string;
   schema?: string;
+  /**
+   * Cron schedule (5-field crontab syntax) for the recurring docs-gap-digest
+   * job. Required (not optional/defaulted here) so a schedule can never be
+   * hardcoded in this module — callers must thread it through from
+   * `Config.docsGapDigest.cron` (`packages/core/src/config.ts`).
+   */
+  docsGapDigestCron: string;
+  /** IANA timezone the cron expression above is evaluated in. */
+  docsGapDigestTz: string;
 }
 
 export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
@@ -84,6 +99,24 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
     name: JOB_NAMES.syncSource,
     policy: "singleton",
   });
+
+  // Register the docs-gap-digest as a recurring job. pg-boss v10's
+  // `schedule(name, cron, data?, options?)` upserts by `name` (see
+  // `ON CONFLICT (name) DO UPDATE` in pg-boss's schedule plan) into its own
+  // `<schema>.schedule` table, so calling this on every boot — from every
+  // process (api/mcp/worker) that builds this queue — is safe and idempotent,
+  // the same way createQueue/updateQueue above are. `schedule.name` has a
+  // FOREIGN KEY to `<schema>.queue`, so this MUST run after the createQueue
+  // loop above (which already creates a queue for every JOB_NAMES entry,
+  // including this one) or the insert fails with an FK violation.
+  await boss.schedule(
+    JOB_NAMES.docsGapDigest,
+    opts.docsGapDigestCron,
+    // No payload — `data?: object` doesn't accept `null` in pg-boss's types
+    // (types.d.ts's `schedule` signature), unlike the plan's draft snippet.
+    undefined,
+    { tz: opts.docsGapDigestTz },
+  );
 
   return boss;
 }

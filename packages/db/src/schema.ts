@@ -7,6 +7,7 @@ import {
   timestamp,
   integer,
   bigint,
+  real,
   vector,
   index,
   uniqueIndex,
@@ -333,8 +334,9 @@ export type NewIngestionJob = typeof ingestionJobs.$inferInsert;
 export type PendingUpload = typeof pendingUploads.$inferSelect;
 
 // ----------------------------------------------------------------------------
-// audit_log — one row per ask()/askStream() call for §7216 / Circular 230
-// accountability. Written async (fire-and-forget); does NOT block the response.
+// audit_log — one row per ask()/askStream()/search() call for §7216 /
+// Circular 230 accountability. `endpoint` discriminates which one. Written
+// async (fire-and-forget); does NOT block the response.
 // ----------------------------------------------------------------------------
 export const auditLog = pgTable(
   "audit_log",
@@ -356,6 +358,10 @@ export const auditLog = pgTable(
     chunkIds: text("chunk_ids").array().notNull(),
     docIds: text("doc_ids").array().notNull(),
     retrievedCount: integer("retrieved_count").notNull(),
+    /** "ask" | "search" — discriminates which endpoint produced this row. */
+    endpoint: text("endpoint").notNull().default("ask"),
+    /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
+    topScore: real("top_score"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -367,6 +373,7 @@ export const auditLog = pgTable(
     ),
   }),
 );
+export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
 
 // ----------------------------------------------------------------------------

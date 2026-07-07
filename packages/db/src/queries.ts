@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
@@ -9,6 +9,7 @@ import {
   ingestionJobs,
   pendingUploads,
   sources,
+  type AuditLog,
   type NewAuditLog,
   type NewChunk,
   type NewDocument,
@@ -726,11 +727,16 @@ export interface AskEventRow {
   chunkIds: string[];
   docIds: string[];
   retrievedCount: number;
+  /** "ask" | "search" — discriminates which endpoint produced this row. */
+  endpoint: "ask" | "search";
+  /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
+  topScore: number | null;
 }
 
 /**
- * Write one row to `audit_log` for every answered ask()/askStream() call.
- * Called asynchronously — failures are logged but do not block the response.
+ * Write one row to `audit_log` for every answered ask()/askStream()/search()
+ * call. Called asynchronously — failures are logged but do not block the
+ * response.
  */
 export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
   const values: NewAuditLog = {
@@ -743,8 +749,67 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     chunkIds: row.chunkIds,
     docIds: row.docIds,
     retrievedCount: row.retrievedCount,
+    endpoint: row.endpoint,
+    topScore: row.topScore,
   };
   await db.insert(auditLog).values(values);
+}
+
+export interface WeakResultAuditQuery {
+  /** Only rows created at or after this timestamp. */
+  since: Date;
+  /** `topScore < minScore` counts as weak (null topScore never matches this arm). */
+  minScore: number;
+}
+
+/**
+ * The exact, narrow shape the documentation-gap digest needs — nothing more.
+ * Deliberately excludes `questionHash` (and every other `audit_log` column):
+ * per Phase 3's privacy design decision, raw question/query content is never
+ * stored, so the digest path shouldn't even pull the hash into memory when it
+ * has no use for it.
+ */
+export type WeakResultAuditEvent = Pick<
+  AuditLog,
+  "sourceIds" | "endpoint" | "retrievedCount" | "chunkIds" | "topScore"
+>;
+
+/**
+ * Selects `audit_log` rows from the digest window that look like a
+ * documentation gap: nothing was retrieved, the chunk list is empty, or the
+ * top result's confidence was below `minScore`. Projects only
+ * `sourceIds`/`endpoint`/`retrievedCount`/`chunkIds`/`topScore` — never
+ * `questionHash` — per Phase 3's privacy design decision (raw question text
+ * is never stored/derived, and this path has no reason to fetch its hash
+ * either).
+ *
+ * Aggregation by `sourceIds`/`endpoint` happens in the caller (JS), not here:
+ * `sourceIds` is a `text[]` column, so SQL `GROUP BY` can't group by array
+ * equality the way a caller wants (see `docs-gap-digest.ts`).
+ */
+export async function getWeakResultAuditEvents(
+  db: Db,
+  { since, minScore }: WeakResultAuditQuery,
+): Promise<WeakResultAuditEvent[]> {
+  return db
+    .select({
+      sourceIds: auditLog.sourceIds,
+      endpoint: auditLog.endpoint,
+      retrievedCount: auditLog.retrievedCount,
+      chunkIds: auditLog.chunkIds,
+      topScore: auditLog.topScore,
+    })
+    .from(auditLog)
+    .where(
+      and(
+        gte(auditLog.createdAt, since),
+        or(
+          eq(auditLog.retrievedCount, 0),
+          sql`array_length(${auditLog.chunkIds}, 1) IS NULL`,
+          lt(auditLog.topScore, minScore),
+        ),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------

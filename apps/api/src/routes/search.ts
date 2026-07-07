@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
+import type { SanitizedRetrievalResult } from "@rag/core";
 import { filterSchema } from "@rag/core";
+import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -15,6 +18,35 @@ const SearchBody = z.object({
   // /search, /ask, and the MCP tools.
   filter: filterSchema.optional(),
 });
+
+/**
+ * Fire-and-forget audit record for every successful /search call. Mirrors
+ * `auditAsk` (`apps/api/src/routes/ask.ts`) field-for-field, differing only
+ * in `endpoint` and hashing the search query instead of a question. Reuses
+ * `logAskEvent`/`audit_log` — no parallel table.
+ * Failures are logged but must not block the response.
+ */
+function auditSearch(
+  deps: Deps,
+  request: FastifyRequest,
+  query: string,
+  results: SanitizedRetrievalResult[],
+): void {
+  const p = request.principal;
+  void logAskEvent(deps.db, {
+    principalKind: p?.kind ?? "scoped",
+    principalSources: p?.kind === "scoped" ? p.allowedSourceIds : null,
+    questionHash: createHash("sha256").update(query).digest("hex"),
+    channel: "api",
+    model: null,
+    sourceIds: [...new Set(results.map((r) => r.document.sourceId))],
+    chunkIds: results.map((r) => r.chunk.id),
+    docIds: [...new Set(results.map((r) => r.document.id))],
+    retrievedCount: results.length,
+    endpoint: "search",
+    topScore: results[0]?.score ?? null,
+  }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
+}
 
 export async function registerSearchRoute(
   app: FastifyInstance,
@@ -34,6 +66,7 @@ export async function registerSearchRoute(
       config.retrieval.defaultTopK,
       scopeFromRequest(request),
     );
+    auditSearch(deps, request, request.body.query, results);
     return { results };
   });
 }
