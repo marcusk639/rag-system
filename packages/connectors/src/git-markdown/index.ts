@@ -21,6 +21,14 @@ async function git(repoPath: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+async function gitBuffer(repoPath: string, args: string[]): Promise<Buffer> {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: repoPath,
+    encoding: "buffer",
+  } as Parameters<typeof execFileAsync>[2]);
+  return stdout as unknown as Buffer;
+}
+
 // gray-matter's YAML engine (js-yaml) auto-converts bare date-like scalars
 // (e.g. `2026-01-01`) into JS Date objects. Frontmatter is passed through
 // verbatim as document metadata, so dates are normalized back to the plain
@@ -73,17 +81,17 @@ export class GitMarkdownConnector implements Connector {
     filePath: string,
     headSha: string,
   ): Promise<SourceDocument> {
-    const raw = await git(this.config.repoPath, [
+    const rawBytes = await gitBuffer(this.config.repoPath, [
       "show",
       `${headSha}:${filePath}`,
     ]);
-    const parsed = matter(raw);
+    const parsed = matter(rawBytes.toString("utf-8"));
     return {
       externalId: filePath,
       title: filePath,
       modifiedAt: new Date().toISOString(),
       mimeType: "text/markdown",
-      content: Buffer.from(raw, "utf-8"),
+      content: rawBytes,
       metadata: {
         title: filePath,
         mimeType: "text/markdown",

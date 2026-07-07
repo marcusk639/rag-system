@@ -98,4 +98,35 @@ describe("GitMarkdownConnector", () => {
     expect(doc.title).toBe("b.md");
     expect(doc.content.toString()).toContain("# Beta");
   });
+
+  it("preserves non-UTF-8 bytes in the document body unchanged", async () => {
+    const frontmatterAndHeading = Buffer.from(
+      "---\ntopic: gamma\n---\n\n# Gamma\n\nbody: ",
+      "utf-8",
+    );
+    // 0xff 0xfe is not valid UTF-8 (an isolated invalid byte sequence) and
+    // would be replaced with U+FFFD if the connector round-tripped content
+    // through a UTF-8 string instead of preserving raw bytes.
+    const invalidUtf8Bytes = Buffer.from([0xff, 0xfe]);
+    const trailer = Buffer.from("\nend\n", "utf-8");
+    const expectedBytes = Buffer.concat([
+      frontmatterAndHeading,
+      invalidUtf8Bytes,
+      trailer,
+    ]);
+
+    writeFileSync(path.join(repoPath, "c.md"), expectedBytes);
+    git(repoPath, "add", "c.md");
+    git(repoPath, "commit", "-q", "-m", "commit 3");
+
+    const connector = new GitMarkdownConnector(
+      { repoPath, extensions: [".md"] },
+      LOGGER,
+    );
+    const doc = await connector.fetch("c.md");
+
+    expect(doc.metadata.extra).toMatchObject({ topic: "gamma" });
+    expect(Buffer.isBuffer(doc.content)).toBe(true);
+    expect(Buffer.compare(doc.content, expectedBytes)).toBe(0);
+  });
 });
