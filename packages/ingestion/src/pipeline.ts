@@ -18,6 +18,7 @@ import {
   type Db,
   deleteDocumentByExternalId,
   documentHasChunks,
+  documentHasStorage,
   logIngestEvent,
   replaceChunks,
   setDocumentStorage,
@@ -322,10 +323,17 @@ async function ingestOne(
   }
 
   // Persist the ORIGINAL bytes so the cited document can be downloaded as-is.
-  // Only on content change (new/updated) — unchanged re-ingest skips the upload
-  // (idempotent). A storage failure must NOT fail text ingestion: the document
-  // stays searchable; it just isn't downloadable until the next successful sync.
-  if (contentChanged && objectStore) {
+  // Runs on content change, OR when the hash is unchanged but storage was
+  // never recorded (a prior run's upload failed, or was interrupted between
+  // writing the hash and writing the storage columns) — otherwise such a
+  // document would never get a working download link again without forcing
+  // its hash to look "changed". A storage failure must NOT fail text
+  // ingestion: the document stays searchable; it just isn't downloadable
+  // until the next successful sync.
+  if (
+    objectStore &&
+    (contentChanged || !(await documentHasStorage(db, documentId)))
+  ) {
     const storageKey = documentStorageKey(sourceId, source.externalId);
     try {
       await objectStore.put(storageKey, source.content, source.mimeType);

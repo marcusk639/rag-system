@@ -68,6 +68,26 @@ export async function registerSourceRoutes(
       },
     },
     async (request, reply) => {
+      // Authz: creating a new connected source (SharePoint site, Drive,
+      // mailbox) is an admin-only operation. `Principal` today has no
+      // "may create sources" capability distinct from "scoped to existing
+      // sourceIds" — a brand-new source doesn't fit that model, so admin-only
+      // is the minimal viable gate (see PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md
+      // Phase 1). Mirrors the direct `reply.code(...)` pattern `auth.ts` uses
+      // for 401s rather than throwing a new error class.
+      if (request.principal?.kind !== "admin") {
+        request.log.warn(
+          { principalKind: request.principal?.kind ?? "unknown" },
+          "source creation forbidden: non-admin principal",
+        );
+        return reply.code(403).send({
+          error: {
+            code: "FORBIDDEN",
+            message: "creating a source requires an admin principal",
+          },
+        });
+      }
+
       const body = request.body;
       const row = await createSource(deps.db, {
         kind: body.kind,
@@ -80,9 +100,10 @@ export async function registerSourceRoutes(
     },
   );
 
-  // GET /sources — list (config-stripped by the service).
-  typed.get("/sources", async () => {
-    const sources = await listPublicSources(deps);
+  // GET /sources — list (config-stripped by the service, and now scoped: a
+  // scoped principal only sees sources within its `allowedSourceIds`).
+  typed.get("/sources", async (request) => {
+    const sources = await listPublicSources(deps, scopeFromRequest(request));
     return { sources };
   });
 
@@ -91,9 +112,19 @@ export async function registerSourceRoutes(
     "/sources/:id",
     { schema: { params: IdParams } },
     async (request) => {
-      const row = await getSource(deps.db, request.params.id);
-      if (!row)
-        throw new NotFoundError(`Source ${request.params.id} not found`);
+      const { id } = request.params;
+
+      // Authz: admin (null enforcedSourceIds) or a scoped principal whose
+      // allow-list includes this source. NotFoundError — no existence leak,
+      // same convention as DELETE /sources/:id below.
+      const scope = scopeFromRequest(request);
+      const permitted =
+        scope.enforcedSourceIds === null ||
+        scope.enforcedSourceIds.includes(id);
+      if (!permitted) throw new NotFoundError(`Source ${id} not found`);
+
+      const row = await getSource(deps.db, id);
+      if (!row) throw new NotFoundError(`Source ${id} not found`);
       return toPublicSource(row);
     },
   );

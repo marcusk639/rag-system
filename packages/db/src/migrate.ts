@@ -13,6 +13,14 @@
  *      migrations in `__drizzle_migrations__`, so re-running this command
  *      is safe and only applies what's pending.
  *
+ * `applyMigrations` is exported so callers other than the CLI (namely
+ * `tests/e2e`'s Vitest globalSetup) can run the SAME two-phase logic instead
+ * of hand-rolling a subset of it. A prior version of the e2e harness
+ * duplicated only phase 1, which silently left every column/table added
+ * after `0000_init.sql` missing in CI's byte-fresh Postgres service
+ * container (masked in local dev, where a persistent docker volume usually
+ * already has everything applied from a previous manual `pnpm db:migrate`).
+ *
  * Run with: pnpm db:migrate
  */
 import { readFile } from "node:fs/promises";
@@ -26,14 +34,8 @@ import pg from "pg";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "drizzle");
 
-async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    process.stderr.write("DATABASE_URL is not set\n");
-    process.exit(1);
-  }
-
-  const pool = new pg.Pool({ connectionString: url, max: 2 });
+export async function applyMigrations(databaseUrl: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: databaseUrl, max: 2 });
 
   try {
     // Phase 1: idempotent bootstrap — runs against any database, every time.
@@ -78,9 +80,23 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  process.stderr.write(
-    `Migration failed: ${(err as Error).stack ?? String(err)}\n`,
-  );
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    process.stderr.write("DATABASE_URL is not set\n");
+    process.exit(1);
+  }
+  await applyMigrations(url);
+}
+
+// Only auto-run when executed directly (`tsx src/migrate.ts`) — importing
+// this module as a library (e.g. from `tests/e2e`) must not also trigger a
+// CLI run against `process.env.DATABASE_URL`.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err: unknown) => {
+    process.stderr.write(
+      `Migration failed: ${(err as Error).stack ?? String(err)}\n`,
+    );
+    process.exit(1);
+  });
+}

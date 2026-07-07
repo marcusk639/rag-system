@@ -54,6 +54,20 @@ export const dataClassEnum = pgEnum("data_class", [
 ]);
 export type DataClass = (typeof dataClassEnum.enumValues)[number];
 
+/** Librarian-facing content-type taxonomy for a document (Phase 2 of
+ *  docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): "is this an SOP, a
+ *  template, a research note, or an example file." Distinct from
+ *  `dataClassEnum`/`DocumentClass`, which gate legal/regulatory access — do
+ *  NOT conflate the two. */
+export const contentTypeEnum = pgEnum("content_type", [
+  "sop",
+  "template",
+  "research_note",
+  "example",
+  "general",
+]);
+export type ContentType = (typeof contentTypeEnum.enumValues)[number];
+
 // ----------------------------------------------------------------------------
 // sources — one row per configured external system (a SharePoint site, a
 // Gmail mailbox, a Drive folder, etc.)
@@ -127,6 +141,24 @@ export const documents = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /**
+     * Librarian-facing content-type taxonomy (Phase 2 governance work).
+     * Null = unclassified — no default guess is forced on backfill. Distinct
+     * from `dataClass`/`DocumentClass`, which gate legal/regulatory access.
+     *
+     * NOT wired into `upsertDocument`'s INSERT/ON CONFLICT DO UPDATE SET
+     * column list (queries.ts) — that omission is intentional so a re-sync of
+     * an unchanged source file never clobbers a human-set value here.
+     */
+    contentType: contentTypeEnum("content_type"),
+    /** Maintainer's IdP/user id (opaque string — not a DB FK), matching the
+     *  `staffClientAssignments.userId` precedent. Same re-sync-safety rule as
+     *  `contentType` applies: never add to `upsertDocument`'s SET clause. */
+    ownerId: text("owner_id"),
+    /** Free-text lifecycle status: "draft" | "active" | "archived" — matches
+     *  the free-text-status precedent (`ingestLog.action`, `pendingUploads.status`)
+     *  rather than a third pgEnum. Same re-sync-safety rule as `contentType`. */
+    lifecycleStatus: text("lifecycle_status").notNull().default("active"),
   },
   (table) => ({
     sourceExternalIdx: uniqueIndex("documents_source_external_idx").on(
