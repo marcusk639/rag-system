@@ -98,6 +98,7 @@ export function buildAuthProvider(
         provider: "composite",
         ...base,
         oidc: config.auth.oidc,
+        internalScopeSecrets: config.auth.internalScopeSecrets,
         onError: (err) =>
           logger.warn({ err }, "auth provider error (isolated)"),
       });
