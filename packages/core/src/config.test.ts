@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
-
 const BASE_ENV = {
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   API_TOKENS: "tok1",
@@ -61,7 +60,50 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
 
   it("none mode does not invoke checkDpa at all", () => {
     let called = false;
-    loadConfig({ ...BASE_ENV, COMPLIANCE_MODE: "none" }, { checkDpa: () => { called = true; return false; } });
+    loadConfig(
+      { ...BASE_ENV, COMPLIANCE_MODE: "none" },
+      {
+        checkDpa: () => {
+          called = true;
+          return false;
+        },
+      },
+    );
     expect(called).toBe(false);
+  });
+});
+
+describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
+  it("defaults to an empty array when unset", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.auth.internalScopeSecrets).toEqual([]);
+  });
+
+  it("parses a single secret", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+  });
+
+  it("parses multiple comma-separated secrets (rotation) and trims whitespace", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one, secret-two , secret-three",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual([
+      "secret-one",
+      "secret-two",
+      "secret-three",
+    ]);
+  });
+
+  it("filters out empty entries from trailing/double commas", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,,",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
   });
 });

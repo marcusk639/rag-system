@@ -99,6 +99,13 @@ export const Config = z
         .enum(["static-token", "oidc", "composite"])
         .default("composite"),
       oidc: OidcConfig.optional(),
+      /**
+       * Secrets for verifying BFF-asserted scope-assertion tokens (see
+       * `InternalScopeAuthProvider`). Comma-separated to support rotation
+       * without downtime. Empty by default — the provider is simply excluded
+       * from `composite` until at least one secret is configured.
+       */
+      internalScopeSecrets: z.array(z.string().min(1)).default([]),
     }),
 
     worker: z.object({
@@ -304,9 +311,7 @@ function buildAuthConfig(env: NodeJS.ProcessEnv): {
   oidc?: z.input<typeof OidcConfig>;
 } {
   const provider = (env.AUTH_PROVIDER ?? "composite") as
-    | "static-token"
-    | "oidc"
-    | "composite";
+    "static-token" | "oidc" | "composite";
 
   // OIDC is "present" when at least an issuer is configured. We require issuer
   // AND audience together — having one without the other is a misconfig.
@@ -373,9 +378,7 @@ export function loadConfig(
   },
 ): Config {
   const provider = (env.EMBEDDING_PROVIDER ?? "gemini") as
-    | "gemini"
-    | "openai"
-    | "local";
+    "gemini" | "openai" | "local";
   const apiKey =
     provider === "gemini"
       ? env.GEMINI_API_KEY
@@ -444,7 +447,13 @@ export function loadConfig(
       transport: env.MCP_TRANSPORT,
       httpPort: Number(env.MCP_HTTP_PORT ?? 3001),
     },
-    auth: buildAuthConfig(env),
+    auth: {
+      ...buildAuthConfig(env),
+      internalScopeSecrets: (env.INTERNAL_SCOPE_JWT_SECRETS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
     worker: {
       concurrency: Number(env.WORKER_CONCURRENCY ?? 4),
       pollIntervalMs: Number(env.WORKER_POLL_INTERVAL_MS ?? 2000),
@@ -462,10 +471,7 @@ export function loadConfig(
     },
     rerank: {
       provider: (env.RERANK_PROVIDER ?? "none") as
-        | "none"
-        | "cohere"
-        | "jina"
-        | "llm",
+        "none" | "cohere" | "jina" | "llm",
       model: env.RERANK_MODEL || undefined,
       apiKey: env.RERANK_API_KEY || undefined,
       poolMultiplier: env.RERANK_POOL_MULTIPLIER
