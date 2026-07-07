@@ -35,6 +35,9 @@ export async function grantAccessAction(
 
   const email = String(formData.get("email") ?? "");
   const clientId = String(formData.get("clientId") ?? "");
+  if (!email || !clientId) {
+    return { ok: false, error: "Email and client id are required." };
+  }
 
   const targetOid = await resolveOidByEmail(email);
   if (!targetOid) {
@@ -57,6 +60,9 @@ export async function revokeAccessAction(
 
   const email = String(formData.get("email") ?? "");
   const clientId = String(formData.get("clientId") ?? "");
+  if (!email || !clientId) {
+    return { ok: false, error: "Email and client id are required." };
+  }
 
   const targetOid = await resolveOidByEmail(email);
   if (!targetOid) {

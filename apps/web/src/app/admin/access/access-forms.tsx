@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import type { ActionResult } from "./actions";
 
 type Feedback = { kind: "success" | "error"; message: string };
@@ -22,7 +22,10 @@ function FeedbackBanner({ feedback }: { feedback: Feedback | null }) {
       ? "rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
       : "rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800";
   return (
-    <p role="status" className={className}>
+    <p
+      role={feedback.kind === "success" ? "status" : "alert"}
+      className={className}
+    >
       {feedback.message}
     </p>
   );
@@ -34,13 +37,21 @@ export function GrantAccessForm({
   action: (formData: FormData) => Promise<ActionResult>;
 }) {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [isPending, startTransition] = useTransition();
+  // Manually managed rather than useTransition's `isPending`: on React
+  // 18.3.1 (installed here — see the note above), `isPending` only tracks
+  // the synchronous portion of a transition. Once the callback hits its
+  // first `await`, `isPending` flips back to `false` well before the actual
+  // server round-trip completes, so a button disabled by `isPending` alone
+  // re-enables early and no longer guards against double submission. This
+  // pattern only becomes reliable under React 19's Actions model.
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const form = event.currentTarget;
-    startTransition(async () => {
+    setIsSubmitting(true);
+    try {
       const result = await action(formData);
       if (result.ok) {
         setFeedback({ kind: "success", message: "Access granted." });
@@ -48,7 +59,9 @@ export function GrantAccessForm({
       } else {
         setFeedback({ kind: "error", message: result.error });
       }
-    });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -70,10 +83,10 @@ export function GrantAccessForm({
       />
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isSubmitting}
         className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
       >
-        {isPending ? "Granting..." : "Grant"}
+        {isSubmitting ? "Granting..." : "Grant"}
       </button>
       <FeedbackBanner feedback={feedback} />
     </form>
@@ -86,13 +99,16 @@ export function RevokeAccessForm({
   action: (formData: FormData) => Promise<ActionResult>;
 }) {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [isPending, startTransition] = useTransition();
+  // See GrantAccessForm above for why this is a manual boolean rather than
+  // useTransition's `isPending` on React 18.3.1.
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const form = event.currentTarget;
-    startTransition(async () => {
+    setIsSubmitting(true);
+    try {
       const result = await action(formData);
       if (result.ok) {
         setFeedback({ kind: "success", message: "Access revoked." });
@@ -100,7 +116,9 @@ export function RevokeAccessForm({
       } else {
         setFeedback({ kind: "error", message: result.error });
       }
-    });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -122,10 +140,10 @@ export function RevokeAccessForm({
       />
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isSubmitting}
         className="rounded border px-4 py-2 disabled:opacity-50"
       >
-        {isPending ? "Revoking..." : "Revoke"}
+        {isSubmitting ? "Revoking..." : "Revoke"}
       </button>
       <FeedbackBanner feedback={feedback} />
     </form>
