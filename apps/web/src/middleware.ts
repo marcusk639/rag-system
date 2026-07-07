@@ -8,7 +8,9 @@ import { NextResponse } from "next/server";
  * shared/admin credential — there is no fallback path here by design.
  */
 export default auth((req) => {
-  const isAuthRoute = req.nextUrl.pathname.startsWith("/api/auth");
+  const isAuthRoute =
+    req.nextUrl.pathname === "/api/auth" ||
+    req.nextUrl.pathname.startsWith("/api/auth/");
   if (isAuthRoute) return NextResponse.next();
 
   if (!req.auth) {
