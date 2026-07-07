@@ -195,6 +195,46 @@ connector shells out to the system `git` binary — no network credentials neede
 
 ---
 
+## eCFR Part 4 (38 CFR Part 4 — Schedule for Rating Disabilities)
+
+Fetches the govinfo.gov **bulk XML** mirror of eCFR Title 38
+(`https://www.govinfo.gov/bulkdata/ECFR/title-38/ECFR-title38.xml`) and locally filters
+to one part, emitting one document per section. See
+`docs/ECFR-CONNECTOR-SPIKE.md` for why this connector uses the bulk-xml mirror instead
+of the `ecfr.gov` REST versioner API: the spike observed the REST API returning 503s
+with response times up to 40+ seconds, while the static bulk-xml file returns `200`
+reliably.
+
+### Source config
+
+```json
+{ "title": 38, "part": "4" }
+```
+
+### Document structure
+
+The bulk XML nests part-level `DIV5` elements under `DIV1` (title) → `DIV3` (chapter),
+and section-level `DIV8` elements under an intermediate `DIV6` (subpart) — neither is a
+direct child of its logical parent. The connector recursively searches the parsed tree
+for a `DIV5` with `TYPE="PART"` matching the configured part number, then recursively
+collects every `DIV8` with `TYPE="SECTION"` anywhere beneath it. A section's `N`
+attribute carries a `"§ "` prefix (e.g. `N="§ 4.130"`) which is stripped to produce the
+document's `externalId` (e.g. `"4.130"`).
+
+### Notes
+
+- No auth required — this is a public, unauthenticated static file.
+- The fetch sends a realistic browser `User-Agent` header, matching the spike's
+  guidance for unauthenticated `.gov` endpoints.
+- 429/5xx responses surface as a transient error; the worker's pg-boss retry/backoff
+  handles them.
+- The delta cursor is the response's `last-modified` HTTP header, not a real cursor
+  token — when it hasn't changed since the last sync, `list()` returns zero documents.
+- This connector has no REST fallback path — the bulk-xml mirror is the only data
+  source, per the Task 1 spike decision.
+
+---
+
 ## Adding a new connector
 
 1. **Implement the interface.** Create `packages/connectors/src/<name>/index.ts` exporting a class implementing `Connector` from `@rag/core`.

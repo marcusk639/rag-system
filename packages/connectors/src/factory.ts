@@ -5,6 +5,7 @@ import { GDriveConnector } from "./gdrive/index.js";
 import { GmailConnector } from "./gmail/index.js";
 import { OutlookConnector } from "./outlook/index.js";
 import { GitMarkdownConnector } from "./git-markdown/index.js";
+import { EcfrPart4Connector } from "./ecfr-part4/index.js";
 
 /**
  * Subset of `Config` this factory needs. Decouples the factory from the full
@@ -82,6 +83,9 @@ export function createConnector(
     }
     case "git-markdown": {
       return new GitMarkdownConnector(source.config, scoped);
+    }
+    case "ecfr-part4": {
+      return new EcfrPart4Connector(source.config, scoped);
     }
     case "custom":
       throw new ValidationError(
