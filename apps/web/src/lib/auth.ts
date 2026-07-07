@@ -21,6 +21,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           groups?: string[];
           _claim_names?: { groups?: string };
         };
+        if (!p.oid) {
+          // Fail closed: without `oid` we have no stable identity to bind a
+          // scope token to. Throwing here (rather than letting token.oid become
+          // undefined) causes @auth/core to abort the callback and redirect to
+          // the error page instead of establishing a session — see
+          // @auth/core's `Auth()` catch handler and callback route handler,
+          // which both treat any thrown error from this callback as a failed
+          // sign-in, never a silently degraded one.
+          throw new Error(
+            "Entra ID profile is missing the required 'oid' claim; refusing to establish a session.",
+          );
+        }
         token.oid = p.oid;
         token.groups = p.groups;
         // Entra ID's "groups overage": when present, the token omits inline
