@@ -158,6 +158,19 @@ export const documents = pgTable(
      *  the free-text-status precedent (`ingestLog.action`, `pendingUploads.status`)
      *  rather than a third pgEnum. Same re-sync-safety rule as `contentType`. */
     lifecycleStatus: text("lifecycle_status").notNull().default("active"),
+    /**
+     * Human-confirmed "still current" timestamp (Phase 5 governance work).
+     * Null = never reviewed. Distinct from `updatedAt` (bumped by ANY write,
+     * human or automated re-sync) and `sourceModifiedAt` (source-reported,
+     * not a human review) — this is set only when a person confirms the
+     * document is still accurate. Feeds the staleness-sweep recurring job.
+     *
+     * NOT wired into `upsertDocument`'s INSERT/ON CONFLICT DO UPDATE SET
+     * column list (queries.ts) — same re-sync-safety rule as `contentType`/
+     * `ownerId`/`lifecycleStatus`: a re-sync of an unchanged source file must
+     * never clobber a human-set review timestamp.
+     */
+    lastReviewedAt: timestamp("last_reviewed_at", { withTimezone: true }),
   },
   (table) => ({
     sourceExternalIdx: uniqueIndex("documents_source_external_idx").on(

@@ -8,6 +8,14 @@ import { SyncAlreadyRunningError } from "./errors.js";
 
 export const JOB_NAMES = {
   syncSource: "rag.sync_source",
+  /**
+   * Recurring (pg-boss `schedule()`) staleness-sweep job — Phase 5 of
+   * docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md. Flags active documents
+   * nobody has confirmed as still-current within a configurable window. No
+   * payload — a scheduled tick, not a producer-enqueued job, so it has no
+   * `*Payload` interface like `SyncSourcePayload`.
+   */
+  stalenessSweep: "rag.staleness_sweep",
 } as const;
 
 export interface SyncSourcePayload {
@@ -44,6 +52,15 @@ export const MAX_SYNC_CONTINUATIONS = 100_000;
 export interface QueueOptions {
   databaseUrl: string;
   schema?: string;
+  /**
+   * Cron schedule (5-field crontab syntax) for the recurring staleness-sweep
+   * job. Required (not optional/defaulted here) so a schedule can never be
+   * hardcoded in this module — callers must thread it through from
+   * `Config.stalenessSweep.cron` (`packages/core/src/config.ts`).
+   */
+  stalenessSweepCron: string;
+  /** IANA timezone the cron expression above is evaluated in. */
+  stalenessSweepTz: string;
 }
 
 export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
@@ -84,6 +101,23 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
     name: JOB_NAMES.syncSource,
     policy: "singleton",
   });
+
+  // Register the staleness-sweep as a recurring job. pg-boss v10's
+  // `schedule(name, cron, data?, options?)` upserts by `name` (see
+  // `ON CONFLICT (name) DO UPDATE` in pg-boss's schedule plan) into its own
+  // `<schema>.schedule` table, so calling this on every boot — from every
+  // process (api/mcp/worker) that builds this queue — is safe and idempotent,
+  // the same way createQueue/updateQueue above are. `schedule.name` has a
+  // FOREIGN KEY to `<schema>.queue`, so this MUST run after the createQueue
+  // loop above (which already creates a queue for every JOB_NAMES entry,
+  // including this one) or the insert fails with an FK violation.
+  await boss.schedule(
+    JOB_NAMES.stalenessSweep,
+    opts.stalenessSweepCron,
+    // No payload — `data?: object` doesn't accept `null` in pg-boss's types.
+    undefined,
+    { tz: opts.stalenessSweepTz },
+  );
 
   return boss;
 }

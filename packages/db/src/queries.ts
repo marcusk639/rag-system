@@ -416,6 +416,16 @@ export async function hybridSearch(
         )})`
       : sql``;
 
+  // Phase 5 governance (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md):
+  // archived documents must never surface in retrieval — this is the
+  // retrieval-side effect that makes "archive" an actual feature rather than
+  // an inert flag. Always applied (not opt-in/configurable) — there is no
+  // legitimate caller that wants archived material back without first
+  // un-archiving it. `IS DISTINCT FROM` (not `!=`) defensively treats a NULL
+  // as non-archived too, though `lifecycle_status` is `NOT NULL DEFAULT
+  // 'active'` so NULL should never occur in practice.
+  const archivedFilter = sql`AND doc.lifecycle_status IS DISTINCT FROM 'archived'`;
+
   const metadataConditions = Object.entries(opts.metadataFilter ?? {}).map(
     ([key, value]) => {
       const values = Array.isArray(value) ? value : [value];
@@ -528,6 +538,7 @@ export async function hybridSearch(
       WHERE TRUE
       ${enforcedSourceFilter}
       ${sourceFilter}
+      ${archivedFilter}
       ${sql.join(metadataConditions, sql` `)}
       ORDER BY f.rrf_score DESC
       LIMIT ${topK}
@@ -566,6 +577,54 @@ export async function hybridSearch(
       },
     };
   });
+}
+
+// ============================================================================
+// Staleness sweep (Phase 5 of docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md)
+// ============================================================================
+
+export interface StaleDocument {
+  id: string;
+  sourceId: string;
+  title: string;
+  /** Null = never human-reviewed. */
+  lastReviewedAt: Date | null;
+}
+
+/**
+ * Active documents nobody has confirmed as still-current in `maxAgeDays`
+ * days — either `lastReviewedAt` is null (never reviewed) or older than the
+ * threshold. Archived documents are excluded: once a document is archived its
+ * staleness is moot (it's already out of retrieval — see `hybridSearch`'s
+ * `archivedFilter`). Feeds the staleness-sweep recurring job
+ * (`apps/worker/src/handlers/staleness-sweep.ts`); never deletes or mutates
+ * anything itself.
+ */
+export async function getStaleDocuments(
+  db: Db,
+  opts: { maxAgeDays: number },
+): Promise<StaleDocument[]> {
+  const result = await db.execute<{
+    id: string;
+    source_id: string;
+    title: string;
+    last_reviewed_at: Date | null;
+  }>(sql`
+    SELECT id, source_id, title, last_reviewed_at
+    FROM documents
+    WHERE lifecycle_status = 'active'
+      AND (
+        last_reviewed_at IS NULL
+        OR last_reviewed_at < now() - make_interval(days => ${opts.maxAgeDays})
+      )
+    ORDER BY source_id, last_reviewed_at ASC NULLS FIRST
+  `);
+  return result.rows.map((r) => ({
+    id: r.id,
+    sourceId: r.source_id,
+    title: r.title,
+    lastReviewedAt: r.last_reviewed_at,
+  }));
 }
 
 // ============================================================================
