@@ -778,6 +778,90 @@ export async function resolveSourceIdsForUser(
   return rows.rows.map((r) => r.source_id);
 }
 
+export interface GrantClientAccessInput {
+  userId: string;
+  clientId: string;
+  grantedBy: string;
+}
+
+/**
+ * Grant a staff member access to a client's sources. Un-revokes an existing
+ * (possibly revoked) row for this exact (userId, clientId) pair if one
+ * exists, rather than inserting a duplicate — `staff_client_assignments` has
+ * no unique constraint on that pair today, so without this check a repeated
+ * grant/revoke/grant cycle would silently accumulate rows.
+ */
+export async function grantClientAccess(
+  db: Db,
+  { userId, clientId, grantedBy }: GrantClientAccessInput,
+): Promise<void> {
+  const existing = await db.execute<{ id: string }>(sql`
+    SELECT id FROM staff_client_assignments
+    WHERE user_id = ${userId} AND client_id = ${clientId}
+    LIMIT 1
+  `);
+  const row = existing.rows[0];
+  if (row) {
+    await db.execute(sql`
+      UPDATE staff_client_assignments
+      SET revoked_at = NULL, granted_by = ${grantedBy}, granted_at = now()
+      WHERE id = ${row.id}
+    `);
+    return;
+  }
+  await db.execute(sql`
+    INSERT INTO staff_client_assignments (user_id, client_id, granted_by)
+    VALUES (${userId}, ${clientId}, ${grantedBy})
+  `);
+}
+
+/**
+ * Revoke a staff member's access to a client. Soft-delete only (sets
+ * `revoked_at`) — never a hard `DELETE`, preserving the audit trail per the
+ * schema's existing design intent. A no-op if no active grant exists.
+ */
+export async function revokeClientAccess(
+  db: Db,
+  { userId, clientId }: { userId: string; clientId: string },
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE staff_client_assignments
+    SET revoked_at = now()
+    WHERE user_id = ${userId} AND client_id = ${clientId} AND revoked_at IS NULL
+  `);
+}
+
+export interface StaffAssignmentHistoryRow {
+  clientId: string;
+  grantedAt: Date;
+  grantedBy: string;
+  revokedAt: Date | null;
+}
+
+/** Full grant/revoke history for one staff member, newest first — powers the admin UI's history view. */
+export async function listAssignmentHistoryForStaff(
+  db: Db,
+  userId: string,
+): Promise<StaffAssignmentHistoryRow[]> {
+  const rows = await db.execute<{
+    client_id: string;
+    granted_at: Date;
+    granted_by: string;
+    revoked_at: Date | null;
+  }>(sql`
+    SELECT client_id, granted_at, granted_by, revoked_at
+    FROM staff_client_assignments
+    WHERE user_id = ${userId}
+    ORDER BY granted_at DESC
+  `);
+  return rows.rows.map((r) => ({
+    clientId: r.client_id,
+    grantedAt: r.granted_at,
+    grantedBy: r.granted_by,
+    revokedAt: r.revoked_at,
+  }));
+}
+
 // ============================================================================
 // Pending uploads — staging rows for browser-uploaded files (custom sources).
 // ============================================================================
