@@ -26,16 +26,37 @@ per-request rate limit to manage). Otherwise use **rest**
 
 Summary: any 429: false, any retry-after header: false, slowest request: 40164ms
 
+**Follow-up verification** (after discovering script's hardcoded date was stale):
+- Date: 2026-06-15 (actual eCFR latest_issue_date)
+- Single request to full-title-38 endpoint: status 503, 3381ms
+- No retry-after header observed
+
 **Decision:** bulk-xml
 
-**Rationale:** The slowest single request (40164ms) exceeded the 10-second threshold.
-The API returned 503 Service Unavailable errors for most title-fetch requests (likely
-transient issues), but the decisive factor is response latency: some requests took 40+ 
-seconds, which violates the performance baseline needed for a reliable sync strategy. 
-The bulk-xml fallback avoids per-request overhead and provides a stable, static source.
+**Rationale:** The slowest single request (40164ms) exceeded the 10-second threshold,
+meeting the decision rule regardless of root cause.
+
+The observed 503 pattern (all requests returning 503, no `retry-after` header, uniform
+pattern on both the original hardcoded date and the corrected date 2026-06-15) is
+consistent with **either** transient server capacity issues **or** bot-protection/WAF
+blocking triggered by the rapid, sequential, header-less request pattern used in this
+spike (no `User-Agent`, no delay between requests). This spike did not distinguish
+between these two explanations; the performance threshold was exceeded in either case.
+
+The decisive factor is response latency: some requests took 40+ seconds, violating the
+performance baseline needed for a reliable sync strategy. The bulk-xml fallback avoids
+per-request overhead and provides a stable, static source.
 
 **Known API quirk (true regardless of decision):** the `full` endpoint's `part` query
 parameter does not actually filter server-side — it always returns the complete title
 XML. Both paths therefore fetch the whole title once per sync and filter to Part 4
 locally in the connector (Task 3), rather than relying on the API to scope the
 response.
+
+**Guidance for Task 3 (ecfr-part4 connector implementation):** Before concluding that
+the REST API's 503 pattern indicates the endpoint is unreliable and requires retry/backoff
+logic, first test a single request with realistic browser-like headers (e.g., a real
+`User-Agent` string) to rule out bot-protection/WAF blocking as the root cause. Also
+apply the same defensive headers to the bulk-xml govinfo.gov fetch, since it too is an
+unauthenticated .gov endpoint that could see similar WAF treatment if requested without
+proper client fingerprinting.
