@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import pino from "pino";
+import { ConnectorTransientError } from "@rag/core";
 import { EcfrPart4Connector } from "./index.js";
 
 const LOGGER = pino({ level: "silent" });
@@ -68,10 +69,20 @@ describe("EcfrPart4Connector", () => {
     vi.unstubAllGlobals();
   });
 
-  it("validate() throws when the bulk XML source returns a transient error", async () => {
+  it("validate() throws ConnectorTransientError when the bulk XML source returns a 503", async () => {
     mockFetchOnce({ body: "", status: 503 });
     const connector = new EcfrPart4Connector({ title: 38, part: "4" }, LOGGER);
-    await expect(connector.validate()).rejects.toThrow();
+    await expect(connector.validate()).rejects.toBeInstanceOf(
+      ConnectorTransientError,
+    );
+  });
+
+  it("validate() throws ConnectorTransientError when the bulk XML source returns a 429", async () => {
+    mockFetchOnce({ body: "", status: 429 });
+    const connector = new EcfrPart4Connector({ title: 38, part: "4" }, LOGGER);
+    await expect(connector.validate()).rejects.toBeInstanceOf(
+      ConnectorTransientError,
+    );
   });
 
   it("sends a realistic browser User-Agent header on its fetch", async () => {
@@ -108,9 +119,11 @@ describe("EcfrPart4Connector", () => {
     expect(section130?.content.toString()).toContain(
       "mental disorders rating schedule text",
     );
+    expect(section130?.modifiedAt).toBe(LAST_MODIFIED);
 
     const section1 = result.documents.find((d) => d.externalId === "4.1");
     expect(section1).toBeDefined();
+    expect(section1?.modifiedAt).toBe(LAST_MODIFIED);
   });
 
   it("returns no documents when the cursor matches the current last-modified value", async () => {
@@ -133,5 +146,6 @@ describe("EcfrPart4Connector", () => {
     const connector = new EcfrPart4Connector({ title: 38, part: "4" }, LOGGER);
     const doc = await connector.fetch("4.1");
     expect(doc.title).toContain("Essentials of evaluative rating");
+    expect(doc.modifiedAt).toBe(LAST_MODIFIED);
   });
 });

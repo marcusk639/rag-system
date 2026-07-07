@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from "@rag/core";
 import { EcfrPart4Config, type EcfrPart4Config as Config } from "./config.js";
+import { mapApiError } from "../util/errors.js";
 
 // See docs/ECFR-CONNECTOR-SPIKE.md: the REST versioner API is unreliable
 // (503s up to 40s+ observed) regardless of headers, so this connector reads
@@ -117,9 +118,7 @@ export class EcfrPart4Connector implements Connector {
       headers: { "User-Agent": USER_AGENT },
     });
     if (res.status === 429 || res.status >= 500) {
-      throw new Error(
-        `ecfr-part4: transient error fetching bulk XML (${res.status})`,
-      );
+      mapApiError({ status: res.status }, "ecfr-part4: fetching bulk XML");
     }
     if (!res.ok) {
       throw new ValidationError(
@@ -135,7 +134,7 @@ export class EcfrPart4Connector implements Connector {
     await this.fetchXml();
   }
 
-  private parseSections(xml: string): SourceDocument[] {
+  private parseSections(xml: string, lastModified: string): SourceDocument[] {
     const doc = this.parser.parse(xml);
     const targetPart = findPart(doc, this.config.part);
     if (!targetPart) {
@@ -155,7 +154,7 @@ export class EcfrPart4Connector implements Connector {
       return {
         externalId: sectionId,
         title: heading,
-        modifiedAt: new Date().toISOString(),
+        modifiedAt: lastModified,
         mimeType: "text/plain",
         content: Buffer.from(stripXmlToText(section), "utf-8"),
         metadata: {
@@ -176,13 +175,13 @@ export class EcfrPart4Connector implements Connector {
     if (options?.cursor && options.cursor === lastModified) {
       return { documents: [], nextCursor: lastModified, done: true };
     }
-    const documents = this.parseSections(xml);
+    const documents = this.parseSections(xml, lastModified);
     return { documents, nextCursor: lastModified, done: true };
   }
 
   async fetch(externalId: string): Promise<SourceDocument> {
-    const { xml } = await this.fetchXml();
-    const documents = this.parseSections(xml);
+    const { xml, lastModified } = await this.fetchXml();
+    const documents = this.parseSections(xml, lastModified);
     const match = documents.find((d) => d.externalId === externalId);
     if (!match) {
       throw new Error(`ecfr-part4: section ${externalId} not found`);
