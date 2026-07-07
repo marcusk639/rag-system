@@ -8,6 +8,7 @@ import { JOB_NAMES, type SyncSourcePayload } from "@rag/ingestion";
 import { initMonitoring } from "@rag/runtime";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
+import { handleDocsGapDigest } from "./handlers/docs-gap-digest.js";
 import { handleSyncSource } from "./handlers/sync-source.js";
 
 /**
@@ -65,6 +66,29 @@ async function main(): Promise<void> {
     async (jobs) => {
       for (const job of jobs) {
         await handleSyncSource(job, builtDeps);
+      }
+    },
+  );
+
+  // First recurring job in this codebase (registered via `boss.schedule()` in
+  // `createQueue`, packages/ingestion/src/queue.ts). pg-boss's `schedule()`
+  // enqueues at most one job instance per cron tick, so — unlike sync, which
+  // can have many sources' jobs in flight at once — this never needs a large
+  // batchSize; 1 is enough headroom for the (currently impossible) case of
+  // two ticks landing in the same poll window.
+  await builtDeps.queue.work<object>(
+    JOB_NAMES.docsGapDigest,
+    {
+      batchSize: 1,
+      pollingIntervalSeconds: Math.max(
+        1,
+        Math.round(config.worker.pollIntervalMs / 1000),
+      ),
+      includeMetadata: true,
+    },
+    async (jobs) => {
+      for (const job of jobs) {
+        await handleDocsGapDigest(job, builtDeps);
       }
     },
   );
