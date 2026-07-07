@@ -1,3 +1,5 @@
+import { auth } from "@/lib/auth";
+import { getScopeAssertionToken } from "@/lib/scope-token";
 import { getRagApiConfig, jsonError } from "@/lib/rag-api";
 
 export const runtime = "nodejs";
@@ -27,11 +29,17 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * BFF proxy for a document upload: forwards a multipart file to the RAG API's
- * `POST /sources/:id/documents` with the server-side bearer token injected here
- * (never exposed to the browser). The target source id is a same-origin query
- * param, validated as a UUID before use.
+ * `POST /sources/:id/documents` with a per-request scope-assertion token
+ * minted here from the signed-in user's session (never exposed to the
+ * browser). The target source id is a same-origin query param, validated as
+ * a UUID before use.
  */
 export async function POST(request: Request): Promise<Response> {
+  const session = await auth();
+  if (!session?.oid) {
+    return jsonError(401, "UNAUTHENTICATED", "Sign-in required.");
+  }
+
   let config;
   try {
     config = getRagApiConfig();
@@ -76,11 +84,13 @@ export async function POST(request: Request): Promise<Response> {
   const upstreamForm = new FormData();
   upstreamForm.append("file", file, file.name);
 
+  const token = await getScopeAssertionToken(session.oid);
+
   let upstream: Response;
   try {
     upstream = await fetch(`${config.url}/sources/${sourceId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${config.token}` },
+      headers: { Authorization: `Bearer ${token}` },
       body: upstreamForm,
     });
   } catch {

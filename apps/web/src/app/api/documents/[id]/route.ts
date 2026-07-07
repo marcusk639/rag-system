@@ -1,3 +1,5 @@
+import { auth } from "@/lib/auth";
+import { getScopeAssertionToken } from "@/lib/scope-token";
 import { jsonError, proxyJsonGet } from "@/lib/rag-api";
 
 export const runtime = "nodejs";
@@ -11,9 +13,16 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const session = await auth();
+  if (!session?.oid) {
+    return jsonError(401, "UNAUTHENTICATED", "Sign-in required.");
+  }
+
   const { id } = await params;
   if (!UUID_RE.test(id)) {
     return jsonError(400, "INVALID_ID", "Document id must be a UUID.");
   }
-  return proxyJsonGet(`/documents/${id}`);
+
+  const token = await getScopeAssertionToken(session.oid);
+  return proxyJsonGet(`/documents/${id}`, token);
 }
