@@ -125,12 +125,28 @@ Browser          Next.js BFF Route Handler        Postgres              Fastify 
   `StaticTokenAuthProvider`'s and `OidcAuthProvider`'s shape exactly. It verifies the JWT's HMAC
   signature and `exp`, then returns `{ kind: "scoped", allowedSourceIds }` directly from the
   token's claims — no DB round-trip on the Fastify side, since the BFF already did that lookup.
-- **Signing secret**: HS256 with a shared secret (`INTERNAL_SCOPE_JWT_SECRET`), consistent with
-  this codebase's existing shared-secret pattern (`PARSER_SECRET`) rather than introducing
-  asymmetric key management for an internal, single-hop credential.
-- **Short expiry (60 seconds)**: minted fresh per BFF request, never cached as a session-length
-  credential. Limits blast radius if a token ever leaked, and avoids revocation/blacklist
-  complexity — an expired grant simply stops being issued on the next request.
+  **The `jwtVerify` call MUST explicitly pass `{ algorithms: ["HS256"] }`** — without an explicit
+  allow-list, a crafted token could attempt `alg: none` or an algorithm-swap attack (a well-known
+  JWT vulnerability class). This is non-negotiable given the token's claims directly control
+  corpus-wide confidentiality scope.
+- **Signing secret**: HS256 with a shared secret (`INTERNAL_SCOPE_JWT_SECRET`). Note this secret
+  carries a materially LARGER blast radius than the codebase's existing shared secrets (e.g.
+  `PARSER_SECRET`, which if leaked only grants access to the parsing sidecar): a leaked
+  `INTERNAL_SCOPE_JWT_SECRET` lets an attacker forge a token asserting `allowedSourceIds` for
+  every source in the system, bypassing the entire confidentiality boundary this feature exists to
+  enforce. Requirements, not optional hardening: store it in a real secret manager (not a plain
+  Railway/dotenv value), have a rotation procedure (the API can accept multiple comma-separated
+  verification secrets during rotation, mirroring the existing multi-token `API_TOKENS` rotation
+  pattern), and alert on a sustained rise in `InternalScopeAuthProvider` verification failures
+  (a signal of either a bug or an active forgery attempt).
+- **Short expiry (60 seconds, with a small clock-skew allowance)**: minted fresh per BFF request,
+  never cached as a session-length credential. `InternalScopeAuthProvider` should accept a few
+  seconds of clock-skew tolerance on `exp` (mirroring `jose`'s `clockTolerance` option) — with a
+  window this short, unsynced clocks between the BFF and Fastify hosts could otherwise cause
+  spurious rejections. Short expiry limits blast radius if a token ever leaked, and avoids
+  revocation/blacklist complexity — an expired grant simply stops being issued on the next request.
+- **If `resolveSourceIdsForUser` fails (e.g. Postgres briefly unavailable)**, the BFF must fail
+  closed — return an error to the browser, never mint a token with a fallback/default scope.
 - **Wired via the existing factory**: `AuthProviderConfig`
   (`packages/core/src/auth-provider-factory.ts`) gets a new `"internal-scope"` variant. `composite` can include it
   alongside `static-token`/`oidc`, so the API accepts the BFF's scope-assertion tokens, real
@@ -164,7 +180,17 @@ inventing a parallel roles table:
   grants."
 - Auth.js is configured to request/read the `groups` claim on sign-in (same claim name the
   existing `OidcConfig.claim` default already uses server-side).
-- The BFF checks membership in that group directly from the session's claims to gate
+- **Entra ID does not populate the `groups` claim by default.** This requires explicitly setting
+  `groupMembershipClaims` in the app registration's manifest (Section: sign-in requires this to be
+  configured, not assumed). Additionally, tenants where a signed-in user belongs to many groups
+  trigger Entra ID's documented **"groups overage"** behavior: the claim is omitted entirely and a
+  `hasgroups` indicator is returned instead, requiring a separate Microsoft Graph
+  `/me/memberOf` (or `/users/{oid}/memberOf`) call to resolve membership. The BFF's admin-check
+  logic must handle both cases — read the `groups` claim when present, and fall back to a Graph
+  membership check when the overage indicator is present instead of silently treating "claim
+  absent" as "not an admin" without checking why it's absent.
+- The BFF checks membership in that group directly from the session's claims (or the Graph
+  fallback above) to gate
   `/admin/access` and its server actions — the same claim-check logic `resolveOidcPrincipal`
   already implements, just invoked BFF-side against the Auth.js session instead of Fastify-side
   against a raw bearer JWT.
@@ -190,6 +216,24 @@ Server actions behind this page:
 2. Insert (or un-revoke) one `staff_client_assignments` row, recording `granted_by` from the
    acting admin's own resolved identity.
 3. Revoke sets `revoked_at`; never deletes the row.
+
+### Migration scope and rollback
+
+**All five existing BFF route groups migrate** to the new per-user scope mechanism — there is no
+partial migration: `chat`, `sources`, `upload`, `documents/[id]`, and `documents/[id]/download`
+(`apps/web/src/app/api/*`) all switch from the single static `RAG_API_TOKEN` to the per-request
+scope-assertion JWT. Leaving any one of them on the old static token would silently preserve the
+exact confidentiality gap this feature exists to close for that route. `RAG_API_TOKEN` is removed
+from the web app's environment once migration is verified in production — it is not kept as a
+silent fallback (a fallback that's easy to forget about is itself a latent confidentiality risk).
+
+**Rollback plan:** because sign-in misconfiguration (wrong redirect URI, expired client secret,
+tenant issue) would otherwise make the web app fully unusable for every user, ship behind a
+`WEB_AUTH_MODE` flag (`"entra"` default once live, `"static-fallback"` as an emergency override)
+that lets ops temporarily revert the BFF to the old single-static-token behavior without a code
+rollback, while the Entra ID configuration issue is fixed. Remove this flag once the rollout has
+been stable in production for a defined period — it is a deliberately temporary safety net, not a
+permanent dual-mode feature.
 
 ### Teams extension path (documented, not built)
 
