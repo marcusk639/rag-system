@@ -227,6 +227,22 @@ export const Config = z
      * Set via `COMPLIANCE_MODE` env. Leave unset (or `none`) for dev/CI.
      */
     complianceMode: z.enum(["none", "client-data"]).default("none"),
+
+    /**
+     * The documentation-gap digest (Phase 4 of
+     * docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md) — the first recurring
+     * (pg-boss `schedule()`) job in this codebase. It scans `audit_log` for
+     * zero-result/weak-confidence queries and logs a structured summary.
+     * All three knobs are config-driven (never hardcoded in `queue.ts`).
+     */
+    docsGapDigest: z.object({
+      /** 5-field crontab expression. Default: weekly, Monday 06:00. */
+      cron: z.string().min(1).default("0 6 * * 1"),
+      /** IANA timezone the cron expression is evaluated in. */
+      tz: z.string().min(1).default("UTC"),
+      /** Retrieval `score` below this (0-1) counts as "weak". */
+      minScore: z.number().min(0).max(1).default(0.3),
+    }),
   })
   .superRefine((cfg, ctx) => {
     // Production gate: the parser shared secret is mandatory in production so the
@@ -505,6 +521,14 @@ export function loadConfig(
       keyPrefix: env.OBJECT_STORE_KEY_PREFIX || undefined,
     },
     complianceMode: (env.COMPLIANCE_MODE ?? "none") as "none" | "client-data",
+    docsGapDigest: {
+      cron: env.DOCS_GAP_DIGEST_CRON || undefined,
+      tz: env.DOCS_GAP_DIGEST_TZ || undefined,
+      minScore:
+        env.DOCS_GAP_DIGEST_MIN_SCORE !== undefined
+          ? Number(env.DOCS_GAP_DIGEST_MIN_SCORE)
+          : undefined,
+    },
   });
 
   // Compliance gate: in client-data mode a signed DPA must be on file before

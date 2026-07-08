@@ -107,3 +107,45 @@ describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
     expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
   });
 });
+
+describe("loadConfig — DOCS_GAP_DIGEST_* (Phase 4 documentation-gap digest)", () => {
+  it("defaults to weekly Monday 6am UTC with a 0.3 score threshold when unset", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.docsGapDigest).toEqual({
+      cron: "0 6 * * 1",
+      tz: "UTC",
+      minScore: 0.3,
+    });
+  });
+
+  it("overrides cron/tz/minScore from env", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      DOCS_GAP_DIGEST_CRON: "0 0 * * *",
+      DOCS_GAP_DIGEST_TZ: "America/Chicago",
+      DOCS_GAP_DIGEST_MIN_SCORE: "0.5",
+    });
+    expect(cfg.docsGapDigest).toEqual({
+      cron: "0 0 * * *",
+      tz: "America/Chicago",
+      minScore: 0.5,
+    });
+  });
+
+  it("DOCS_GAP_DIGEST_MIN_SCORE=0 is a legitimate boundary value, not 'unset'", () => {
+    const cfg = loadConfig({ ...BASE_ENV, DOCS_GAP_DIGEST_MIN_SCORE: "0" });
+    expect(cfg.docsGapDigest.minScore).toBe(0);
+  });
+
+  it("a non-numeric DOCS_GAP_DIGEST_MIN_SCORE fails loud rather than silently coercing", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, DOCS_GAP_DIGEST_MIN_SCORE: "not-a-number" }),
+    ).toThrow();
+  });
+
+  it("an out-of-range DOCS_GAP_DIGEST_MIN_SCORE (outside 0-1) fails loud", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, DOCS_GAP_DIGEST_MIN_SCORE: "1.5" }),
+    ).toThrow();
+  });
+});

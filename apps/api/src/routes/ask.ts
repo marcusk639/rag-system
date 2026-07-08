@@ -44,6 +44,8 @@ function auditAsk(
     chunkIds: retrieved.map((r) => r.chunk.id),
     docIds: [...new Set(retrieved.map((r) => r.document.id))],
     retrievedCount: retrieved.length,
+    endpoint: "ask",
+    topScore: retrieved[0]?.score ?? null,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 
@@ -77,7 +79,13 @@ export async function registerAskRoute(
         scopeFromRequest(request),
         config.retrieval.maxChunksPerDocument,
       );
-      auditAsk(deps, request, request.body.question, result.retrieved, config.generation?.model);
+      auditAsk(
+        deps,
+        request,
+        request.body.question,
+        result.retrieved,
+        config.generation?.model,
+      );
       return result;
     },
   );
@@ -123,7 +131,13 @@ export async function registerAskRoute(
           if (event.type === "token") {
             raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
           } else {
-            auditAsk(deps, request, request.body.question, event.retrieved, config.generation?.model);
+            auditAsk(
+              deps,
+              request,
+              request.body.question,
+              event.retrieved,
+              config.generation?.model,
+            );
             raw.write(
               `event: done\ndata: ${JSON.stringify({
                 citations: event.citations,

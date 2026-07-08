@@ -155,6 +155,8 @@ export async function buildCoreDeps(
   const queue = await createQueue({
     databaseUrl: config.databaseUrl,
     schema: config.pgBossSchema,
+    docsGapDigestCron: config.docsGapDigest.cron,
+    docsGapDigestTz: config.docsGapDigest.tz,
   });
 
   // Generation reuses the embedding provider's API key — same vendor in
