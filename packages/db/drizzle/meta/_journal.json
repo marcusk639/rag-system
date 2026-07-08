@@ -71,6 +71,13 @@
       "when": 1788000000000,
       "tag": "0010_client_assignments_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0011_audit_log_principal_subject",
+      "breakpoints": true
     }
   ]
 }

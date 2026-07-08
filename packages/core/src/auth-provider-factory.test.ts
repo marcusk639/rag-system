@@ -76,6 +76,7 @@ describe("createAuthProvider — internal-scope", () => {
     await expect(provider.authenticate(token)).resolves.toEqual({
       kind: "scoped",
       allowedSourceIds: ["s1"],
+      subject: "u1",
     });
     // Static token path still works alongside it.
     await expect(provider.authenticate("admin-tok")).resolves.toEqual({

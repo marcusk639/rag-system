@@ -36,6 +36,7 @@ function auditSearch(
   void logAskEvent(deps.db, {
     principalKind: p?.kind ?? "scoped",
     principalSources: p?.kind === "scoped" ? p.allowedSourceIds : null,
+    principalSubject: p?.kind === "scoped" ? (p.subject ?? null) : null,
     questionHash: createHash("sha256").update(query).digest("hex"),
     channel: "api",
     model: null,

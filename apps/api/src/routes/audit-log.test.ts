@@ -6,6 +6,7 @@ import type {
   RetrievalQuery,
   RetrievalResult,
 } from "@rag/core";
+import { signInternalScopeToken } from "@rag/core";
 import type { NewAuditLog } from "@rag/db";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../server.js";
@@ -232,6 +233,114 @@ describe("audit_log parity — POST /ask", () => {
         retrievedCount: 0,
       });
       expect(generator.answer).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+/**
+ * SDD Task 4 (per-user-auth follow-ups): the scope-assertion JWT's verified
+ * `sub` (AAD oid) is threaded through Principal -> `auditAsk`/`auditSearch`
+ * -> `principal_subject`. Uses the composite auth provider (static-token +
+ * InternalScopeAuthProvider) so a real signed JWT exercises the full
+ * `request.principal.subject` -> row plumbing without needing Postgres (the
+ * `db` fake here mirrors the rest of this file).
+ */
+const INTERNAL_SCOPE_SECRET = "audit-log-test-internal-scope-secret-32bytes+";
+
+const compositeConfig = {
+  api: { tokens: [ADMIN_TOKEN], principals: [] },
+  auth: {
+    provider: "composite",
+    internalScopeSecrets: [INTERNAL_SCOPE_SECRET],
+  },
+  retrieval: { defaultTopK: 8 },
+} as unknown as Config;
+
+async function buildCompositeApp(deps: Deps): Promise<FastifyInstance> {
+  const app = await buildServer({
+    config: compositeConfig,
+    logger: pino({ level: "silent" }),
+    deps,
+  });
+  await app.ready();
+  return app;
+}
+
+describe("audit_log principal_subject — scope-assertion JWT plumbing", () => {
+  it("POST /ask populates principal_subject from the JWT's verified sub", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildCompositeApp(
+      makeDeps(db, makeRetriever(), makeGenerator()),
+    );
+    try {
+      const token = await signInternalScopeToken(
+        { sub: "aad-oid-plumbing-1", allowedSourceIds: [SRC_A] },
+        INTERNAL_SCOPE_SECRET,
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/ask",
+        headers: { authorization: `Bearer ${token}` },
+        payload: { question: "what is our refund policy" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        principalKind: "scoped",
+        principalSubject: "aad-oid-plumbing-1",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("POST /search populates principal_subject from the JWT's verified sub", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildCompositeApp(
+      makeDeps(db, makeRetriever(), makeGenerator()),
+    );
+    try {
+      const token = await signInternalScopeToken(
+        { sub: "aad-oid-plumbing-2", allowedSourceIds: [SRC_A] },
+        INTERNAL_SCOPE_SECRET,
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/search",
+        headers: { authorization: `Bearer ${token}` },
+        payload: { query: "what is our refund policy" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        principalKind: "scoped",
+        principalSubject: "aad-oid-plumbing-2",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("an admin (static-token) principal still writes a null principal_subject", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildCompositeApp(
+      makeDeps(db, makeRetriever(), makeGenerator()),
+    );
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/ask",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { question: "what is our refund policy" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        principalKind: "admin",
+        principalSubject: null,
+      });
     } finally {
       await app.close();
     }

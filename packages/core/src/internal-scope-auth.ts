@@ -77,7 +77,11 @@ export class InternalScopeAuthProvider implements AuthProvider {
         });
         const allowedSourceIds = payload["allowedSourceIds"];
         if (!isStringArray(allowedSourceIds)) return null;
-        return { kind: "scoped", allowedSourceIds };
+        return {
+          kind: "scoped",
+          allowedSourceIds,
+          ...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
+        };
       } catch {
         // This key didn't verify it — try the next one (rotation). Only
         // after every key has failed is the credential truly rejected.

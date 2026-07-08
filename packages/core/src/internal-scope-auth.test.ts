@@ -8,7 +8,7 @@ const SECRET = "test-secret-at-least-32-bytes-long-for-hs256";
 const OTHER_SECRET = "a-different-rotation-secret-also-long-enough";
 
 describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
-  it("round-trips a valid token to a scoped principal", async () => {
+  it("round-trips a valid token to a scoped principal carrying the verified subject", async () => {
     const token = await signInternalScopeToken(
       { sub: "aad-oid-1", allowedSourceIds: ["src-a", "src-b"] },
       SECRET,
@@ -17,10 +17,11 @@ describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
     await expect(provider.authenticate(token)).resolves.toEqual({
       kind: "scoped",
       allowedSourceIds: ["src-a", "src-b"],
+      subject: "aad-oid-1",
     });
   });
 
-  it("round-trips an empty allowedSourceIds to deny-all scoped principal", async () => {
+  it("round-trips an empty allowedSourceIds to deny-all scoped principal, subject still populated", async () => {
     const token = await signInternalScopeToken(
       { sub: "aad-oid-2", allowedSourceIds: [] },
       SECRET,
@@ -29,6 +30,7 @@ describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
     await expect(provider.authenticate(token)).resolves.toEqual({
       kind: "scoped",
       allowedSourceIds: [],
+      subject: "aad-oid-2",
     });
   });
 
@@ -84,6 +86,7 @@ describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
     await expect(provider.authenticate(token)).resolves.toEqual({
       kind: "scoped",
       allowedSourceIds: ["src-c"],
+      subject: "aad-oid-5",
     });
   });
 
@@ -98,6 +101,20 @@ describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
       .sign(key);
     const provider = new InternalScopeAuthProvider([SECRET]);
     await expect(provider.authenticate(bad)).resolves.toBeNull();
+  });
+
+  it("omits `subject` entirely (not undefined-valued) when the token has no `sub` claim", async () => {
+    const { SignJWT } = await import("jose");
+    const key = new TextEncoder().encode(SECRET);
+    const noSub = await new SignJWT({ allowedSourceIds: ["src-a"] })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("60s")
+      .sign(key);
+    const provider = new InternalScopeAuthProvider([SECRET]);
+    const principal = await provider.authenticate(noSub);
+    expect(principal).toEqual({ kind: "scoped", allowedSourceIds: ["src-a"] });
+    expect(principal && "subject" in principal).toBe(false);
   });
 
   it("throws at construction with no secrets (fail loud on misconfig)", () => {

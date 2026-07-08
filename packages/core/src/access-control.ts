@@ -36,10 +36,17 @@
  *   - `admin`  — unrestricted; sees the whole corpus.
  *   - `scoped` — enforced to exactly `allowedSourceIds`. An empty list means
  *     "may read NOTHING" (fail closed), never "everything".
+ *
+ * `subject` (scoped only) is the verified per-user identity (the AAD oid from
+ * a BFF-asserted scope-assertion JWT's `sub` claim) — populated ONLY by
+ * `InternalScopeAuthProvider`. Static-token/OIDC-derived scoped principals
+ * omit it; it exists purely to carry per-user attribution into `audit_log`
+ * (CR-10), not to affect authorization — the enforced source-id set is
+ * unchanged by its presence or absence.
  */
 export type Principal =
   | { kind: "admin" }
-  | { kind: "scoped"; allowedSourceIds: string[] };
+  | { kind: "scoped"; allowedSourceIds: string[]; subject?: string };
 
 /**
  * The MANDATORY enforcement input for retrieval.

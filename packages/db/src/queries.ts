@@ -720,6 +720,13 @@ export async function logIngestEvent(
 export interface AskEventRow {
   principalKind: "admin" | "scoped";
   principalSources: string[] | null;
+  /**
+   * The AAD oid from a BFF-asserted scope-assertion JWT's `sub` claim, when
+   * present — null for admin/static-token/OIDC-non-subject principals. Raw
+   * (not hashed), per CR-10's expectation of per-user identity in structured
+   * retrieval logs.
+   */
+  principalSubject: string | null;
   questionHash: string;
   channel: "api" | "mcp";
   model: string | null;
@@ -742,6 +749,7 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
   const values: NewAuditLog = {
     principalKind: row.principalKind,
     principalSources: row.principalSources,
+    principalSubject: row.principalSubject,
     questionHash: row.questionHash,
     channel: row.channel,
     model: row.model ?? null,
