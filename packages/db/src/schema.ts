@@ -450,6 +450,10 @@ export const staffClientAssignments = pgTable(
   (table) => ({
     userIdx: index("sca_user_idx").on(table.userId),
     clientIdx: index("sca_client_idx").on(table.clientId),
+    scaUserClientUnique: uniqueIndex("sca_user_client_unique").on(
+      table.userId,
+      table.clientId,
+    ),
   }),
 );
 

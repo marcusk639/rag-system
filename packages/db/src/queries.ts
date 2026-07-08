@@ -852,31 +852,25 @@ export interface GrantClientAccessInput {
 /**
  * Grant a staff member access to a client's sources. Un-revokes an existing
  * (possibly revoked) row for this exact (userId, clientId) pair if one
- * exists, rather than inserting a duplicate — `staff_client_assignments` has
- * no unique constraint on that pair today, so without this check a repeated
- * grant/revoke/grant cycle would silently accumulate rows.
+ * exists, rather than inserting a duplicate. Implemented as a single atomic
+ * `INSERT ... ON CONFLICT (user_id, client_id) DO UPDATE`, relying on the
+ * `sca_user_client_unique` unique index (migration 0010) — a prior
+ * SELECT-then-INSERT/UPDATE version had a TOCTOU race where two concurrent
+ * grants for the same pair could both pass the existence check and both
+ * insert, producing duplicate rows.
  */
 export async function grantClientAccess(
   db: Db,
   { userId, clientId, grantedBy }: GrantClientAccessInput,
 ): Promise<void> {
-  const existing = await db.execute<{ id: string }>(sql`
-    SELECT id FROM staff_client_assignments
-    WHERE user_id = ${userId} AND client_id = ${clientId}
-    LIMIT 1
-  `);
-  const row = existing.rows[0];
-  if (row) {
-    await db.execute(sql`
-      UPDATE staff_client_assignments
-      SET revoked_at = NULL, granted_by = ${grantedBy}, granted_at = now()
-      WHERE id = ${row.id}
-    `);
-    return;
-  }
   await db.execute(sql`
     INSERT INTO staff_client_assignments (user_id, client_id, granted_by)
     VALUES (${userId}, ${clientId}, ${grantedBy})
+    ON CONFLICT (user_id, client_id)
+    DO UPDATE SET
+      revoked_at = NULL,
+      granted_by = ${grantedBy},
+      granted_at = now()
   `);
 }
 

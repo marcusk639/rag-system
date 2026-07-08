@@ -129,4 +129,26 @@ describe("E2E: grantClientAccess / revokeClientAccess / listAssignmentHistoryFor
     expect(history[0]!.revokedAt).toBeNull();
     expect(history[0]!.grantedBy).toBe("e2e-admin-oid-2");
   });
+
+  it("concurrent grants for the same (userId, clientId) pair never create duplicate rows", async () => {
+    const userId = `concurrent-user-${Date.now()}`;
+    const clientId = `concurrent-client-${Date.now()}`;
+
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        grantClientAccess(db, { userId, clientId, grantedBy: "test-admin" }),
+      ),
+    );
+
+    const rows = await db.execute<{ count: string }>(sql`
+      SELECT count(*)::text as count FROM staff_client_assignments
+      WHERE user_id = ${userId} AND client_id = ${clientId}
+    `);
+    expect(rows.rows[0]?.count).toBe("1");
+
+    await db.execute(sql`
+      DELETE FROM staff_client_assignments
+      WHERE user_id = ${userId} AND client_id = ${clientId}
+    `);
+  });
 });
