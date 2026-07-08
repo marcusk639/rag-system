@@ -39,6 +39,7 @@ const SourceKindSchema = z.enum([
   "outlook",
   "custom",
   "git-markdown",
+  "ecfr-part4",
 ]);
 
 const CreateSourceBody = z.object({
