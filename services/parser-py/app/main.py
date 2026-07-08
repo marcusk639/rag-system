@@ -125,6 +125,27 @@ class ParsedDocument(_CamelModel):
 # Opt-in shared-secret auth. The env var is read per-request (not cached at
 # import) so the value is easy to rotate and trivial to exercise in tests.
 # ----------------------------------------------------------------------------
+def _warn_if_parser_secret_missing_in_prod() -> None:
+    """
+    PARSER_SECRET is documented (env.example) as required in production, and
+    packages/core/src/config.ts fails loud on the Node side when
+    NODE_ENV=production and it's unset. The sidecar itself has no equivalent
+    check — an unset secret here just silently disables auth. Log (don't
+    fail) so a misconfigured prod deploy is visible without changing this
+    service's own permissive default.
+    """
+    environment = os.environ.get("NODE_ENV", "development").strip().lower()
+    if environment != "development" and not os.environ.get("PARSER_SECRET", "").strip():
+        logger.warning(
+            "PARSER_SECRET is unset with NODE_ENV=%s — the /parse endpoint is "
+            "unauthenticated. Required in production; see env.example.",
+            environment,
+        )
+
+
+_warn_if_parser_secret_missing_in_prod()
+
+
 def require_parser_token(x_parser_token: str | None = Header(default=None)) -> None:
     """
     Guard /parse with a shared secret when PARSER_SECRET is configured.

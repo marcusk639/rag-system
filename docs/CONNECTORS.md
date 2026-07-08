@@ -99,6 +99,7 @@ GOOGLE_REFRESH_TOKEN=...
 - Google Workspace docs (Docs, Sheets, Slides) are exported to `.docx` / `.xlsx` / `.pptx` for parsing.
 - The cursor is a Drive `startPageToken`. First sync walks `files.list`; subsequent syncs use `changes.list`.
 - Trashed files are skipped automatically; deletions are surfaced as separate "removed" entries the pipeline can act on.
+- `folderId` matches only that folder's **direct** children, not nested subfolders — Drive's query language has no recursive-descendant operator. If a source's content lives across nested subfolders, either point `folderId` at each subfolder as its own source or omit `folderId` and scope with `query`/`mimeTypes` instead.
 
 ---
 
@@ -129,7 +130,7 @@ Same Google credentials as Drive (different scope):
 - Each message becomes a `SourceDocument` with `metadata.subject`, `.from`, `.to`, `.date`, `.threadId`, `.labelIds`.
 - Attachments are yielded as separate documents with `externalId = ${messageId}/${attachmentId}` and `metadata.parentMessageId` set.
 - The cursor is Gmail's `historyId`. Initial sync uses `messages.list`; subsequent syncs use `history.list`.
-- HTML bodies are stripped to plaintext before parsing (the parser sidecar handles formatting).
+- **Gmail is the only connector that bypasses the Python parser sidecar for its primary content.** The connector converts an HTML body to plaintext itself (preferring a native `text/plain` MIME part when the message has one) before handing it to the pipeline — the sidecar never sees the raw HTML. This is a reasonable scope cut (email bodies are already mostly plaintext/HTML, not a format the sidecar's heavier MarkItDown/Unstructured tooling is needed for), but don't assume all connectors share identical parsing behavior — attachments still go through the sidecar like any other connector's files.
 
 ---
 
@@ -180,8 +181,8 @@ connector shells out to the system `git` binary — no network credentials neede
 
 ```json
 {
-"repoPath": "/Users/marcusklein/dev/veteran-disability-ai-resources",
-"extensions": [".md"]
+  "repoPath": "/Users/marcusklein/dev/veteran-disability-ai-resources",
+  "extensions": [".md"]
 }
 ```
 
