@@ -25,15 +25,26 @@ vi.mock("@rag/db", () => ({
   markSourceSynced: markSyncedMock,
 }));
 
-const { runIngestionMock, enqueueContinuationMock } = vi.hoisted(() => ({
-  runIngestionMock: vi.fn(),
-  enqueueContinuationMock: vi.fn(),
-}));
+const { runIngestionMock, enqueueContinuationMock, mapDataClassMock } =
+  vi.hoisted(() => ({
+    runIngestionMock: vi.fn(),
+    enqueueContinuationMock: vi.fn(),
+    mapDataClassMock: vi.fn(
+      (dataClass: string) =>
+        ({
+          general: "A",
+          sop: "A",
+          research: "B",
+          client_confidential: "D",
+        })[dataClass],
+    ),
+  }));
 
 vi.mock("@rag/ingestion", () => ({
   runIngestion: runIngestionMock,
   enqueueContinuation: enqueueContinuationMock,
   MAX_SYNC_CONTINUATIONS: 100_000,
+  mapDataClassToDocumentClass: mapDataClassMock,
 }));
 
 function fakeLogger() {
@@ -85,7 +96,13 @@ function runResult(
   };
 }
 
-const SOURCE = { id: "s1", kind: "sharepoint", config: {}, cursor: "cur0" };
+const SOURCE = {
+  id: "s1",
+  kind: "sharepoint",
+  config: {},
+  cursor: "cur0",
+  dataClass: "general",
+};
 
 function job(
   data: Record<string, unknown>,
@@ -270,5 +287,44 @@ describe("handleSyncSource per-page continuation", () => {
       ),
     ).rejects.toThrow(/continuations/i);
     expect(runIngestionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleSyncSource classification wiring", () => {
+  it("maps the source's data_class to sourceDocClass and passes it into runIngestion's deps", async () => {
+    const { deps } = makeDeps();
+    getSourceMock.mockResolvedValue({ ...SOURCE, dataClass: "research" });
+
+    await handleSyncSource(job({}), deps);
+
+    expect(mapDataClassMock).toHaveBeenCalledWith("research");
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ sourceDocClass: "B" }),
+    );
+  });
+
+  it("passes 'A' through for a general-classified source (the DB default)", async () => {
+    const { deps } = makeDeps();
+    getSourceMock.mockResolvedValue({ ...SOURCE, dataClass: "general" });
+
+    await handleSyncSource(job({}), deps);
+
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ sourceDocClass: "A" }),
+    );
+  });
+
+  it("passes 'D' through for a client_confidential source, so the pipeline blocks it", async () => {
+    const { deps } = makeDeps();
+    getSourceMock.mockResolvedValue({
+      ...SOURCE,
+      dataClass: "client_confidential",
+    });
+
+    await handleSyncSource(job({}), deps);
+
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ sourceDocClass: "D" }),
+    );
   });
 });
