@@ -106,6 +106,37 @@ describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
     });
     expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
   });
+
+  it("accepts a JSON array form for secrets that might contain a comma", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: JSON.stringify([
+        "secret,with,commas",
+        "plain-secret",
+      ]),
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual([
+      "secret,with,commas",
+      "plain-secret",
+    ]);
+  });
+
+  it("still supports the legacy comma-separated form for backward compatibility", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,secret-two",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one", "secret-two"]);
+  });
+
+  it("fails loud on malformed JSON-looking input", () => {
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        INTERNAL_SCOPE_JWT_SECRETS: "[not valid json",
+      }),
+    ).toThrow(/Expected a JSON array/);
+  });
 });
 
 describe("loadConfig — DOCS_GAP_DIGEST_* (Phase 4 documentation-gap digest)", () => {

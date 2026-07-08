@@ -316,6 +316,35 @@ function parseOidcAdminClaims(raw: string | undefined): string[] | undefined {
 }
 
 /**
+ * Parses a multi-value secret/token env var. Accepts either a JSON array of
+ * strings (`["secret-one","secret-two"]`) — required when a value might
+ * legitimately contain a comma — or falls back to comma-split for backward
+ * compatibility with already-deployed plain comma-separated values.
+ * Mirrors parseOidcAdminClaims's JSON-or-CSV pattern above.
+ */
+function parseMultiValueSecret(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new Error(
+        "Expected a JSON array of strings (value starts with '[') but failed to parse as JSON",
+      );
+    }
+    if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
+      throw new Error("Expected a JSON array of strings");
+    }
+    return parsed.map((s) => s.trim()).filter(Boolean);
+  }
+  return trimmed
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * Assemble the `auth` config block from env. The provider defaults to
  * "composite". OIDC is built only when `OIDC_ISSUER` is present; if the
  * selected provider REQUIRES OIDC (provider === "oidc") but the env is
@@ -450,10 +479,7 @@ export function loadConfig(
     api: {
       host: env.API_HOST,
       port: Number(env.API_PORT ?? 3000),
-      tokens: (env.API_TOKENS ?? "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
+      tokens: parseMultiValueSecret(env.API_TOKENS ?? ""),
       // Throws loudly on malformed API_PRINCIPALS so a misconfig is caught at
       // startup rather than silently re-opening the corpus-wide read.
       principals: parsePrincipalsConfig(env.API_PRINCIPALS),
@@ -465,10 +491,9 @@ export function loadConfig(
     },
     auth: {
       ...buildAuthConfig(env),
-      internalScopeSecrets: (env.INTERNAL_SCOPE_JWT_SECRETS ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      internalScopeSecrets: parseMultiValueSecret(
+        env.INTERNAL_SCOPE_JWT_SECRETS ?? "",
+      ),
     },
     worker: {
       concurrency: Number(env.WORKER_CONCURRENCY ?? 4),
