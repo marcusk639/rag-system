@@ -1,7 +1,12 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+// Defined as a standalone const (rather than inlined into the NextAuth()
+// call) so middleware.test.ts can import `authConfig.callbacks.jwt` directly
+// and exercise the fail-closed missing-`oid` path without needing to drive a
+// full Entra ID OAuth handshake (authorization code exchange, PKCE/state
+// cookies, and a mocked token endpoint) through a hand-built NextRequest.
+export const authConfig: NextAuthConfig = {
   providers: [
     MicrosoftEntraID({
       clientId: process.env.AUTH_ENTRA_CLIENT_ID!,
@@ -49,4 +54,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
   },
-});
+};
+
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
