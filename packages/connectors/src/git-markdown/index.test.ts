@@ -129,4 +129,25 @@ describe("GitMarkdownConnector", () => {
     expect(Buffer.isBuffer(doc.content)).toBe(true);
     expect(Buffer.compare(doc.content, expectedBytes)).toBe(0);
   });
+
+  it("delta sync handles a renamed file as a deletion + new document, without throwing", async () => {
+    const shaBeforeRename = git(repoPath, "rev-parse", "HEAD");
+
+    git(repoPath, "mv", "b.md", "b-renamed.md");
+    git(repoPath, "commit", "-q", "-m", "rename b.md to b-renamed.md");
+    const shaAfterRename = git(repoPath, "rev-parse", "HEAD");
+
+    const connector = new GitMarkdownConnector(
+      { repoPath, extensions: [".md"] },
+      LOGGER,
+    );
+
+    const result = await connector.list({ cursor: shaBeforeRename });
+
+    expect(result.nextCursor).toBe(shaAfterRename);
+    expect(result.deletions).toEqual(["b.md"]);
+    expect(result.documents).toHaveLength(1);
+    expect(result.documents[0]?.externalId).toBe("b-renamed.md");
+    expect(result.documents[0]?.content.toString()).toContain("# Beta");
+  });
 });

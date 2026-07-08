@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { NotFoundError, RagError, ValidationError } from "@rag/core";
+import {
+  NotFoundError,
+  RagError,
+  SourceKind,
+  ValidationError,
+} from "@rag/core";
 import {
   createPendingUpload,
   createSource,
@@ -32,18 +37,8 @@ const ALLOWED_UPLOAD_MIME = new Set<string>([
   "text/html",
 ]);
 
-const SourceKindSchema = z.enum([
-  "sharepoint",
-  "gdrive",
-  "gmail",
-  "outlook",
-  "custom",
-  "git-markdown",
-  "ecfr-part4",
-]);
-
 const CreateSourceBody = z.object({
-  kind: SourceKindSchema,
+  kind: SourceKind,
   name: z.string().min(1).max(120),
   // Connector-specific config — kept opaque here; connectors validate at use time.
   config: z.record(z.unknown()),

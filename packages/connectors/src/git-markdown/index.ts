@@ -132,6 +132,7 @@ export class GitMarkdownConnector implements Connector {
     const diffOutput = await git(this.config.repoPath, [
       "diff",
       "--name-status",
+      "--no-renames",
       options.cursor,
       "HEAD",
     ]);
