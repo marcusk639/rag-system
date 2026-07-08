@@ -28,8 +28,13 @@ export class FakeGenerator implements Generator {
 
     const head = context[0];
     const headPreview = head ? head.text.slice(0, 80) : "<no context>";
+    // `[N]` markers for every chunk so `filterCitationsToAnswer` (applied by
+    // callers after generation) doesn't strip them all — real generators are
+    // instructed to cite this way; this fixture must too or "one citation per
+    // retrieved chunk" above would be a lie.
+    const markers = context.map((_, i) => `[${i + 1}]`).join(" ");
     return {
-      answer: `Q: ${question} | ctx#0: ${headPreview}`,
+      answer: `Q: ${question} | ctx#0: ${headPreview} ${markers}`,
       citations: context.map((r, i) => ({
         index: i + 1,
         documentId: r.document.id,

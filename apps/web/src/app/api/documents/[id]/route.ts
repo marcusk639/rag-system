@@ -1,4 +1,10 @@
-import { jsonError, proxyJsonGet } from "@/lib/rag-api";
+import { auth } from "@/lib/auth";
+import { getScopeAssertionToken } from "@/lib/scope-token";
+import {
+  jsonError,
+  proxyJsonGet,
+  resolveRequestBearerToken,
+} from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,5 +21,12 @@ export async function GET(
   if (!UUID_RE.test(id)) {
     return jsonError(400, "INVALID_ID", "Document id must be a UUID.");
   }
-  return proxyJsonGet(`/documents/${id}`);
+
+  const resolved = await resolveRequestBearerToken(
+    auth,
+    getScopeAssertionToken,
+  );
+  if (resolved.errorResponse) return resolved.errorResponse;
+
+  return proxyJsonGet(`/documents/${id}`, resolved.token);
 }

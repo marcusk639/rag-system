@@ -47,6 +47,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
     await logAskEvent(db, {
       principalKind: "admin",
       principalSources: null,
+      principalSubject: null,
       questionHash: `${marker}-zero-retrieved`,
       channel: "api",
       model: null,
@@ -61,6 +62,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
     await logAskEvent(db, {
       principalKind: "admin",
       principalSources: null,
+      principalSubject: null,
       questionHash: `${marker}-weak-score`,
       channel: "api",
       model: null,
@@ -75,6 +77,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
     await logAskEvent(db, {
       principalKind: "admin",
       principalSources: null,
+      principalSubject: null,
       questionHash: `${marker}-fine`,
       channel: "api",
       model: null,
@@ -121,6 +124,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
     await logAskEvent(db, {
       principalKind: "admin",
       principalSources: null,
+      principalSubject: null,
       questionHash: marker,
       channel: "api",
       model: null,

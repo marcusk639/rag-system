@@ -1,14 +1,30 @@
-import { getRagApiConfig, jsonError } from "@/lib/rag-api";
+import { auth } from "@/lib/auth";
+import { getScopeAssertionToken } from "@/lib/scope-token";
+import {
+  getRagApiConfig,
+  jsonError,
+  resolveRequestBearerToken,
+} from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * BFF streaming proxy: pipes POST /ask/stream from the RAG API straight back to
- * the same-origin browser client as SSE. The bearer token is injected here,
- * server-side; it is never visible to the client.
+ * the same-origin browser client as SSE. The bearer token is a per-request
+ * scope-assertion token minted here, server-side, from the signed-in user's
+ * session; it is never visible to the client.
  */
 export async function POST(request: Request): Promise<Response> {
+  // Resolved (and, if it fails, returned) before the fetch try/catch below so
+  // a missing RAG_API_STATIC_FALLBACK_TOKEN config error can never be
+  // mislabeled as an upstream connectivity failure.
+  const resolved = await resolveRequestBearerToken(
+    auth,
+    getScopeAssertionToken,
+  );
+  if (resolved.errorResponse) return resolved.errorResponse;
+
   let config;
   try {
     config = getRagApiConfig();
@@ -28,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
     upstream = await fetch(`${config.url}/ask/stream`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.token}`,
+        Authorization: `Bearer ${resolved.token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),

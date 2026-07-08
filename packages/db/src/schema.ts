@@ -350,6 +350,15 @@ export const auditLog = pgTable(
     principalKind: text("principal_kind").notNull(),
     /** Null for admin principals; source-ID list for scoped ones. */
     principalSources: text("principal_sources").array(),
+    /**
+     * Nullable — the AAD oid when the request was authenticated via a
+     * per-user scope-assertion JWT (`InternalScopeAuthProvider`); null for
+     * admin/static-token/OIDC-non-subject principals. Stores the raw oid
+     * (not hashed) per CR-10's expectation of per-user identity in
+     * structured retrieval logs — distinct from `questionHash`, which
+     * protects question CONTENT, not identity.
+     */
+    principalSubject: text("principal_subject"),
     /** SHA-256 of the question text (no raw PII stored here). */
     questionHash: text("question_hash").notNull(),
     /** "api" | "mcp" */
@@ -452,6 +461,10 @@ export const staffClientAssignments = pgTable(
   (table) => ({
     userIdx: index("sca_user_idx").on(table.userId),
     clientIdx: index("sca_client_idx").on(table.clientId),
+    scaUserClientUnique: uniqueIndex("sca_user_client_unique").on(
+      table.userId,
+      table.clientId,
+    ),
   }),
 );
 

@@ -720,6 +720,13 @@ export async function logIngestEvent(
 export interface AskEventRow {
   principalKind: "admin" | "scoped";
   principalSources: string[] | null;
+  /**
+   * The AAD oid from a BFF-asserted scope-assertion JWT's `sub` claim, when
+   * present — null for admin/static-token/OIDC-non-subject principals. Raw
+   * (not hashed), per CR-10's expectation of per-user identity in structured
+   * retrieval logs.
+   */
+  principalSubject: string | null;
   questionHash: string;
   channel: "api" | "mcp";
   model: string | null;
@@ -742,6 +749,7 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
   const values: NewAuditLog = {
     principalKind: row.principalKind,
     principalSources: row.principalSources,
+    principalSubject: row.principalSubject,
     questionHash: row.questionHash,
     channel: row.channel,
     model: row.model ?? null,
@@ -841,6 +849,84 @@ export async function resolveSourceIdsForUser(
       AND sta.revoked_at IS NULL
   `);
   return rows.rows.map((r) => r.source_id);
+}
+
+export interface GrantClientAccessInput {
+  userId: string;
+  clientId: string;
+  grantedBy: string;
+}
+
+/**
+ * Grant a staff member access to a client's sources. Un-revokes an existing
+ * (possibly revoked) row for this exact (userId, clientId) pair if one
+ * exists, rather than inserting a duplicate. Implemented as a single atomic
+ * `INSERT ... ON CONFLICT (user_id, client_id) DO UPDATE`, relying on the
+ * `sca_user_client_unique` unique index (migration 0010) — a prior
+ * SELECT-then-INSERT/UPDATE version had a TOCTOU race where two concurrent
+ * grants for the same pair could both pass the existence check and both
+ * insert, producing duplicate rows.
+ */
+export async function grantClientAccess(
+  db: Db,
+  { userId, clientId, grantedBy }: GrantClientAccessInput,
+): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO staff_client_assignments (user_id, client_id, granted_by)
+    VALUES (${userId}, ${clientId}, ${grantedBy})
+    ON CONFLICT (user_id, client_id)
+    DO UPDATE SET
+      revoked_at = NULL,
+      granted_by = ${grantedBy},
+      granted_at = now()
+  `);
+}
+
+/**
+ * Revoke a staff member's access to a client. Soft-delete only (sets
+ * `revoked_at`) — never a hard `DELETE`, preserving the audit trail per the
+ * schema's existing design intent. A no-op if no active grant exists.
+ */
+export async function revokeClientAccess(
+  db: Db,
+  { userId, clientId }: { userId: string; clientId: string },
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE staff_client_assignments
+    SET revoked_at = now()
+    WHERE user_id = ${userId} AND client_id = ${clientId} AND revoked_at IS NULL
+  `);
+}
+
+export interface StaffAssignmentHistoryRow {
+  clientId: string;
+  grantedAt: Date;
+  grantedBy: string;
+  revokedAt: Date | null;
+}
+
+/** Full grant/revoke history for one staff member, newest first — powers the admin UI's history view. */
+export async function listAssignmentHistoryForStaff(
+  db: Db,
+  userId: string,
+): Promise<StaffAssignmentHistoryRow[]> {
+  const rows = await db.execute<{
+    client_id: string;
+    granted_at: Date;
+    granted_by: string;
+    revoked_at: Date | null;
+  }>(sql`
+    SELECT client_id, granted_at, granted_by, revoked_at
+    FROM staff_client_assignments
+    WHERE user_id = ${userId}
+    ORDER BY granted_at DESC
+  `);
+  return rows.rows.map((r) => ({
+    clientId: r.client_id,
+    grantedAt: r.granted_at,
+    grantedBy: r.granted_by,
+    revokedAt: r.revoked_at,
+  }));
 }
 
 // ============================================================================

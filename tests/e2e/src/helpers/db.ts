@@ -42,6 +42,23 @@ export async function createCustomSource(
   return row.id;
 }
 
+/**
+ * Wire a source to a client so `resolveSourceIdsForUser` (joined through
+ * `staff_client_assignments`) resolves it. No existing helper covers
+ * `source_client_assignments` inserts, so this is a minimal addition
+ * alongside `createCustomSource`.
+ */
+export async function assignSourceToClient(
+  db: Db,
+  sourceId: string,
+  clientId: string,
+): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO source_client_assignments (source_id, client_id)
+    VALUES (${sourceId}, ${clientId})
+  `);
+}
+
 export async function countChunks(db: Db): Promise<number> {
   const res = await db.execute<{ n: string }>(
     sql`SELECT COUNT(*)::text AS n FROM chunks`,

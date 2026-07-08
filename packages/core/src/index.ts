@@ -6,6 +6,7 @@ export * from "./errors.js";
 export * from "./config.js";
 export * from "./validation.js";
 export * from "./auth.js";
+export * from "./internal-scope-auth.js";
 export * from "./oidc-auth.js";
 export * from "./auth-provider-factory.js";
 export * from "./egress-policy.js";

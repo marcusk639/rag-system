@@ -12,49 +12,49 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1782000000000,
+      "when": 1780500000000,
       "tag": "0002_documents_original_storage",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1784000000000,
+      "when": 1781333333000,
       "tag": "0003_pending_uploads",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
-      "when": 1782548147382,
+      "when": 1782166666000,
       "tag": "0004_data_class",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
-      "when": 1782634547382,
+      "when": 1783000000000,
       "tag": "0005_ingest_log",
       "breakpoints": true
     },
     {
       "idx": 5,
       "version": "7",
-      "when": 1782625446047,
+      "when": 1783833333000,
       "tag": "0006_client_assignments",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1782626160533,
+      "when": 1784666666000,
       "tag": "0007_audit_log",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "7",
-      "when": 1785542400000,
+      "when": 1785500000000,
       "tag": "0008_document_governance",
       "breakpoints": true
     },
@@ -77,6 +77,20 @@
       "version": "7",
       "when": 1787100000001,
       "tag": "0011_add_ecfr_part4_source_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0012_client_assignments_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0013_audit_log_principal_subject",
       "breakpoints": true
     }
   ]

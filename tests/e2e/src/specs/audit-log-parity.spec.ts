@@ -1,12 +1,20 @@
+import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { logAskEvent } from "@rag/db";
 import type { Db } from "@rag/db";
-import { openTestDb } from "../helpers/db.js";
+import { signInternalScopeToken } from "@rag/core";
+import { FakeConnector, FakeGenerator, plainTextDoc } from "@rag/test-fixtures";
+import { createCustomSource, openTestDb } from "../helpers/db.js";
+import { buildTestApi } from "../helpers/api.js";
+import { runOneIngestion } from "../helpers/ingestion.js";
+import { TEST_INTERNAL_SCOPE_SECRET } from "../env.js";
 
 /**
  * Phase 3 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
- * logging parity + `topScore`.
+ * logging parity + `topScore`. Extended for SDD Task 4 (per-user-auth
+ * follow-ups): threading the scope-assertion JWT's verified `sub` (AAD oid)
+ * through to `audit_log.principal_subject`.
  *
  * Verified against a real, migrated Postgres (globalSetup runs
  * `packages/db/src/migrate.ts` before this file executes), for the same
@@ -35,7 +43,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     await close();
   });
 
-  it("audit_log has endpoint/top_score with the expected types/defaults", async () => {
+  it("audit_log has endpoint/top_score/principal_subject with the expected types/defaults", async () => {
     const res = await db.execute<{
       column_name: string;
       data_type: string;
@@ -45,7 +53,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns
       WHERE table_name = 'audit_log'
-        AND column_name IN ('endpoint', 'top_score')
+        AND column_name IN ('endpoint', 'top_score', 'principal_subject')
     `);
 
     const byName = new Map(res.rows.map((r) => [r.column_name, r]));
@@ -59,6 +67,11 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     expect(topScore?.data_type).toBe("real");
     expect(topScore?.is_nullable).toBe("YES");
     expect(topScore?.column_default).toBeNull();
+
+    const principalSubject = byName.get("principal_subject");
+    expect(principalSubject?.data_type).toBe("text");
+    expect(principalSubject?.is_nullable).toBe("YES");
+    expect(principalSubject?.column_default).toBeNull();
   });
 
   it("a row inserted WITHOUT specifying endpoint/top_score backfills to the column defaults — the exact mechanism a pre-existing row relies on", async () => {
@@ -93,6 +106,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     await logAskEvent(db, {
       principalKind: "admin",
       principalSources: null,
+      principalSubject: null,
       questionHash: marker,
       channel: "api",
       model: null,
@@ -119,6 +133,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     await logAskEvent(db, {
       principalKind: "scoped",
       principalSources: ["44444444-4444-4444-4444-444444444444"],
+      principalSubject: null,
       questionHash: marker,
       channel: "api",
       model: "gemini-1.5-flash",
@@ -138,5 +153,111 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
 
     expect(row?.endpoint).toBe("ask");
     expect(row?.top_score).toBeNull();
+  });
+
+  it("logAskEvent writes a populated principal_subject when the row carries one", async () => {
+    const marker = `subject-marker-${Date.now()}-${Math.random()}`;
+    await logAskEvent(db, {
+      principalKind: "scoped",
+      principalSources: ["55555555-5555-5555-5555-555555555555"],
+      principalSubject: "aad-oid-direct-1",
+      questionHash: marker,
+      channel: "api",
+      model: null,
+      sourceIds: [],
+      chunkIds: [],
+      docIds: [],
+      retrievedCount: 0,
+      endpoint: "ask",
+      topScore: null,
+    });
+
+    const [row] = await db
+      .execute<{ principal_subject: string | null }>(
+        sql`SELECT principal_subject FROM audit_log WHERE question_hash = ${marker}`,
+      )
+      .then((r) => r.rows);
+
+    expect(row?.principal_subject).toBe("aad-oid-direct-1");
+  });
+
+  it("logAskEvent writes a null principal_subject for an admin principal (no per-user JWT involved)", async () => {
+    const marker = `subject-null-marker-${Date.now()}-${Math.random()}`;
+    await logAskEvent(db, {
+      principalKind: "admin",
+      principalSources: null,
+      principalSubject: null,
+      questionHash: marker,
+      channel: "api",
+      model: null,
+      sourceIds: [],
+      chunkIds: [],
+      docIds: [],
+      retrievedCount: 0,
+      endpoint: "ask",
+      topScore: null,
+    });
+
+    const [row] = await db
+      .execute<{ principal_subject: string | null }>(
+        sql`SELECT principal_subject FROM audit_log WHERE question_hash = ${marker}`,
+      )
+      .then((r) => r.rows);
+
+    expect(row?.principal_subject).toBeNull();
+  });
+
+  it("a real /ask request authenticated via a scope-assertion JWT records the JWT's sub as principal_subject", async () => {
+    // End-to-end through the actual HTTP layer: sign a BFF-style
+    // scope-assertion JWT with a known `sub`, hit a real Fastify /ask route
+    // (InternalScopeAuthProvider verifies it and resolves a scoped Principal
+    // carrying that subject — see packages/core/src/internal-scope-auth.ts),
+    // and confirm the resulting audit_log row's principal_subject matches.
+    const sourceId = await createCustomSource(db, "audit-subject-e2e-source");
+    await runOneIngestion(
+      db,
+      sourceId,
+      new FakeConnector([
+        plainTextDoc({
+          externalId: "audit-subject-doc",
+          title: "Audit Subject Doc",
+          text: "Per-user audit attribution threads the verified JWT subject through to audit_log.",
+        }),
+      ]),
+    );
+
+    const generator = new FakeGenerator();
+    const { inject, close: closeApi } = await buildTestApi({ db, generator });
+    try {
+      const subject = `aad-oid-e2e-${Date.now()}`;
+      const token = await signInternalScopeToken(
+        { sub: subject, allowedSourceIds: [sourceId] },
+        TEST_INTERNAL_SCOPE_SECRET,
+      );
+      const question = `what does per-user audit attribution do? ${Date.now()}-${Math.random()}`;
+
+      const res = await inject({
+        method: "POST",
+        url: "/ask",
+        headers: { authorization: `Bearer ${token}` },
+        payload: { question },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const expectedHash = createHash("sha256").update(question).digest("hex");
+      const [row] = await db
+        .execute<{
+          principal_subject: string | null;
+          principal_kind: string;
+        }>(
+          sql`SELECT principal_subject, principal_kind FROM audit_log WHERE question_hash = ${expectedHash}`,
+        )
+        .then((r) => r.rows);
+
+      expect(row?.principal_kind).toBe("scoped");
+      expect(row?.principal_subject).toBe(subject);
+    } finally {
+      await closeApi();
+    }
   });
 });
