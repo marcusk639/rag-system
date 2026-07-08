@@ -1,4 +1,10 @@
-import { getRagApiConfig, jsonError } from "@/lib/rag-api";
+import { auth } from "@/lib/auth";
+import { getScopeAssertionToken } from "@/lib/scope-token";
+import {
+  getRagApiConfig,
+  jsonError,
+  resolveRequestBearerToken,
+} from "@/lib/rag-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,11 +33,21 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * BFF proxy for a document upload: forwards a multipart file to the RAG API's
- * `POST /sources/:id/documents` with the server-side bearer token injected here
- * (never exposed to the browser). The target source id is a same-origin query
- * param, validated as a UUID before use.
+ * `POST /sources/:id/documents` with a per-request scope-assertion token
+ * minted here from the signed-in user's session (never exposed to the
+ * browser). The target source id is a same-origin query param, validated as
+ * a UUID before use.
  */
 export async function POST(request: Request): Promise<Response> {
+  // Resolved (and, if it fails, returned) before the fetch try/catch below so
+  // a missing RAG_API_STATIC_FALLBACK_TOKEN config error can never be
+  // mislabeled as an upstream connectivity failure.
+  const resolved = await resolveRequestBearerToken(
+    auth,
+    getScopeAssertionToken,
+  );
+  if (resolved.errorResponse) return resolved.errorResponse;
+
   let config;
   try {
     config = getRagApiConfig();
@@ -80,7 +96,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     upstream = await fetch(`${config.url}/sources/${sourceId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${config.token}` },
+      headers: {
+        Authorization: `Bearer ${resolved.token}`,
+      },
       body: upstreamForm,
     });
   } catch {

@@ -9,9 +9,14 @@ The production chat UI for the RAG system (Next.js 15 App Router + Tailwind). It
 directly to the RAG backend from the browser — it talks to its own **server-side BFF** (route
 handlers under `src/app/api/`), which forwards to the backend HTTP API.
 
-## The load-bearing rule: the backend token is server-only
+## The load-bearing rule: the backend credential is server-only
 
-- `src/lib/rag-api.ts` reads `RAG_API_URL` and `RAG_API_TOKEN` from **server** env. These must
+- `src/lib/rag-api.ts` reads `RAG_API_URL` from **server** env and, per request, a signed
+  scope-assertion token minted by `src/lib/scope-token.ts` (`getScopeAssertionToken`, signed with
+  `INTERNAL_SCOPE_JWT_SECRET`) bound to the signed-in user's `oid` — there is no shared static
+  `RAG_API_TOKEN` anymore. The only static-token path left is the deliberately temporary
+  `WEB_AUTH_MODE=static-fallback` emergency rollback (`RAG_API_STATIC_FALLBACK_TOKEN`, see
+  `env.example`), used only if Entra ID sign-in breaks in production. These credentials must
   **never** be exposed to the client — do not prefix them `NEXT_PUBLIC_`, and never call the
   backend directly from a client component. All backend calls go through the BFF route handlers.
 - Streaming answers flow through `src/lib/stream-chat.ts` → the `/api/chat` route → the backend's

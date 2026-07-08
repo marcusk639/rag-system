@@ -73,6 +73,41 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
   });
 });
 
+describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
+  it("defaults to an empty array when unset", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.auth.internalScopeSecrets).toEqual([]);
+  });
+
+  it("parses a single secret", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+  });
+
+  it("parses multiple comma-separated secrets (rotation) and trims whitespace", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one, secret-two , secret-three",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual([
+      "secret-one",
+      "secret-two",
+      "secret-three",
+    ]);
+  });
+
+  it("filters out empty entries from trailing/double commas", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,,",
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+  });
+});
+
 describe("loadConfig — DOCS_GAP_DIGEST_* (Phase 4 documentation-gap digest)", () => {
   it("defaults to weekly Monday 6am UTC with a 0.3 score threshold when unset", () => {
     const cfg = loadConfig({ ...BASE_ENV });

@@ -99,6 +99,13 @@ export const Config = z
         .enum(["static-token", "oidc", "composite"])
         .default("composite"),
       oidc: OidcConfig.optional(),
+      /**
+       * Secrets for verifying BFF-asserted scope-assertion tokens (see
+       * `InternalScopeAuthProvider`). Comma-separated to support rotation
+       * without downtime. Empty by default — the provider is simply excluded
+       * from `composite` until at least one secret is configured.
+       */
+      internalScopeSecrets: z.array(z.string().min(1)).default([]),
     }),
 
     worker: z.object({
@@ -456,7 +463,13 @@ export function loadConfig(
       transport: env.MCP_TRANSPORT,
       httpPort: Number(env.MCP_HTTP_PORT ?? 3001),
     },
-    auth: buildAuthConfig(env),
+    auth: {
+      ...buildAuthConfig(env),
+      internalScopeSecrets: (env.INTERNAL_SCOPE_JWT_SECRETS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
     worker: {
       concurrency: Number(env.WORKER_CONCURRENCY ?? 4),
       pollIntervalMs: Number(env.WORKER_POLL_INTERVAL_MS ?? 2000),

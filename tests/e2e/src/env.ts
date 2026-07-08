@@ -9,6 +9,14 @@ import type { Config } from "@rag/core";
  */
 export const TEST_API_TOKEN = "e2e-test-token";
 
+/**
+ * Secret used to sign/verify BFF-asserted scope-assertion JWTs
+ * (`InternalScopeAuthProvider`) in the e2e harness. Must be at least 32 bytes
+ * per HS256 (see `signInternalScopeToken`'s doc comment).
+ */
+export const TEST_INTERNAL_SCOPE_SECRET =
+  "e2e-test-internal-scope-secret-32-bytes-min";
+
 export const env = {
   databaseUrl:
     process.env.E2E_DATABASE_URL ??
@@ -60,9 +68,15 @@ export function makeTestConfig(): Config {
       enforceScoping: false,
     },
     mcp: { transport: "stdio", httpPort: 3001 },
-    // Static-token auth only — the test token resolves to an admin principal,
-    // matching the `tokens`/`principals` above. No OIDC in the e2e harness.
-    auth: { provider: "static-token" },
+    // Composite: static-token (the plain test token still resolves to an
+    // admin principal, matching `tokens`/`principals` above; no OIDC in the
+    // e2e harness) PLUS the internal-scope BFF-asserted provider, so specs
+    // can also sign scope-assertion JWTs against a known secret and verify
+    // `InternalScopeAuthProvider` end-to-end through a real Fastify request.
+    auth: {
+      provider: "composite",
+      internalScopeSecrets: [TEST_INTERNAL_SCOPE_SECRET],
+    },
     worker: { concurrency: 1, pollIntervalMs: 2_000 },
     retrieval: {
       chunkSize: 800,
