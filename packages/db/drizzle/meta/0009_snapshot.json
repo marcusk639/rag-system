@@ -1,6 +1,6 @@
 {
-  "id": "e6b9654d-669f-4386-8a36-5e4dd5f7103b",
-  "prevId": "e538044c-ef9e-4348-8f43-96fd91a47bae",
+  "id": "43530300-93a0-4ab7-bb5e-cb0092077b7d",
+  "prevId": "6fce473e-0752-4f74-beb2-8a7d0a201d49",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -24,12 +24,6 @@
         "principal_sources": {
           "name": "principal_sources",
           "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "principal_subject": {
-          "name": "principal_subject",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1100,27 +1094,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "sca_user_client_unique": {
-          "name": "sca_user_client_unique",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

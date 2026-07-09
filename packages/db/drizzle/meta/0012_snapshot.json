@@ -1,6 +1,6 @@
 {
-  "id": "e6b9654d-669f-4386-8a36-5e4dd5f7103b",
-  "prevId": "e538044c-ef9e-4348-8f43-96fd91a47bae",
+  "id": "ef49ecd8-dae9-4e20-a372-13e045215070",
+  "prevId": "e6b9654d-669f-4386-8a36-5e4dd5f7103b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -24,12 +24,6 @@
         "principal_sources": {
           "name": "principal_sources",
           "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "principal_subject": {
-          "name": "principal_subject",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -279,12 +273,8 @@
           "name": "chunks_document_id_documents_id_fk",
           "tableFrom": "chunks",
           "tableTo": "documents",
-          "columnsFrom": [
-            "document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["document_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -471,12 +461,8 @@
           "name": "documents_source_id_sources_id_fk",
           "tableFrom": "documents",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -579,12 +565,8 @@
           "name": "ingest_log_source_id_sources_id_fk",
           "tableFrom": "ingest_log",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -592,12 +574,8 @@
           "name": "ingest_log_doc_id_documents_id_fk",
           "tableFrom": "ingest_log",
           "tableTo": "documents",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -729,12 +707,8 @@
           "name": "ingestion_jobs_source_id_sources_id_fk",
           "tableFrom": "ingestion_jobs",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -841,12 +815,8 @@
           "name": "pending_uploads_source_id_sources_id_fk",
           "tableFrom": "pending_uploads",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -925,12 +895,8 @@
           "name": "source_client_assignments_source_id_sources_id_fk",
           "tableFrom": "source_client_assignments",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1103,27 +1069,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "sca_user_client_unique": {
-          "name": "sca_user_client_unique",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1138,33 +1083,17 @@
     "public.content_type": {
       "name": "content_type",
       "schema": "public",
-      "values": [
-        "sop",
-        "template",
-        "research_note",
-        "example",
-        "general"
-      ]
+      "values": ["sop", "template", "research_note", "example", "general"]
     },
     "public.data_class": {
       "name": "data_class",
       "schema": "public",
-      "values": [
-        "general",
-        "research",
-        "sop",
-        "client_confidential"
-      ]
+      "values": ["general", "research", "sop", "client_confidential"]
     },
     "public.ingestion_status": {
       "name": "ingestion_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "running",
-        "completed",
-        "failed"
-      ]
+      "values": ["pending", "running", "completed", "failed"]
     },
     "public.source_kind": {
       "name": "source_kind",
@@ -1174,7 +1103,8 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom"
+        "custom",
+        "git-markdown"
       ]
     }
   },

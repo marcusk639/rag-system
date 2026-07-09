@@ -1,6 +1,6 @@
 {
-  "id": "ef49ecd8-dae9-4e20-a372-13e045215070",
-  "prevId": "6fce473e-0752-4f74-beb2-8a7d0a201d49",
+  "id": "e538044c-ef9e-4348-8f43-96fd91a47bae",
+  "prevId": "43530300-93a0-4ab7-bb5e-cb0092077b7d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1097,6 +1097,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "sca_user_client_unique": {
+          "name": "sca_user_client_unique",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1147,8 +1168,7 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom",
-        "git-markdown"
+        "custom"
       ]
     }
   },

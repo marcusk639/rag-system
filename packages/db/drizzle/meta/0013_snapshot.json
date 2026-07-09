@@ -1,6 +1,6 @@
 {
-  "id": "e6b9654d-669f-4386-8a36-5e4dd5f7103b",
-  "prevId": "e538044c-ef9e-4348-8f43-96fd91a47bae",
+  "id": "fb2661a7-75fc-4fce-9740-61a2aa319e0d",
+  "prevId": "ef49ecd8-dae9-4e20-a372-13e045215070",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1174,7 +1174,9 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom"
+        "custom",
+        "git-markdown",
+        "ecfr-part4"
       ]
     }
   },
