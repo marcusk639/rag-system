@@ -70,13 +70,11 @@ The metadata post-filter builds `doc.metadata->>'key' IN (...)` (`packages/db/sr
 `chunks.embedding` is hardcoded `vector(768)` for Gemini (`schema.ts:151`). Switching `EMBEDDING_PROVIDER=openai` (1536-dim) without altering the column fails **only at first insert — after embedding credits are already spent** and a sync is half-done. The system is explicitly "provider-pluggable," which makes this trap easy to hit.
 **Fix:** at startup assert `config.embedding.dimensions === <column dimensions>` (read from a constant or `information_schema`). Promoting from the audit's Medium because the pluggability is a headline feature and the failure mode wastes money + leaves partial state.
 
-### 🟠 H4 — Unvalidated external-boundary casts `[review:H5/H6/H7]`
+### ✅ H4 — Unvalidated external-boundary casts (RESOLVED)
 
-Three casts turn runtime data into lies the type system believes:
+**Original concern:** three casts turned runtime data into lies the type system believed — a malformed parser response, a `source.kind as never` defeating exhaustiveness, and a `mcp-session-id` header cast dropping the `string[]` case.
 
-- `parser-client.ts:48` — `(await res.body.json()) as ParsedDocument`; a malformed sidecar response silently corrupts every downstream chunk. Define `ParsedDocumentSchema` in `@rag/core` and `.parse()` it. (This also hardens the TS↔Python contract — see [§5 OPT-C].)
-- `apps/worker/src/deps.ts:88` — `source.kind as never` defeats the factory's exhaustiveness check; a new `SourceKind` compiles and crashes at runtime. Use `SourceKind.parse(source.kind)`.
-- `apps/mcp/src/transports/http.ts:110,182` — `mcp-session-id as string | undefined` drops the `string[]` case, so a repeated header makes every request look like a new session. `Array.isArray(raw) ? raw[0] : raw`.
+**Current state:** all three now validate instead of cast. `packages/rag/src/parser/parser-client.ts:60` uses `ParsedDocumentSchema.safeParse(raw)`, throwing a `ParserError` on a malformed sidecar response instead of trusting it. `apps/worker/src/deps.ts:123` uses `SourceKind.parse(source.kind)`. `apps/mcp/src/transports/http.ts`'s `normalizeSessionId` does `Array.isArray(raw) ? raw[0] : raw`, with a code comment explaining exactly why the cast was wrong.
 
 ### ✅ H5 — No rate limiting on API or MCP (RESOLVED) `[review:H9]`
 
@@ -84,9 +82,11 @@ Three casts turn runtime data into lies the type system believes:
 
 **Current state:** `@fastify/rate-limit` is registered globally in `apps/api/src/server.ts`, with tighter per-route limits on `/ask` (10/min) and `/sources/:id/sync`/`DELETE` (6/min). See §9 for the full CPA-blocker write-up.
 
-### 🟠 H6 — `express@4` runtime with `@types/express@5` types (MCP) `[review:H4]`
+### ✅ H6 — `express@4`/`@types/express@5` mismatch (RESOLVED) `[review:H4]`
 
-`apps/mcp` runs Express 4 but type-checks against Express 5 signatures — runtime mismatches in `http.ts` won't be caught by `tsc`. Align both to one major.
+**Original concern:** `apps/mcp` ran Express 4 at runtime but type-checked against Express 5 signatures — runtime mismatches in `http.ts` wouldn't be caught by `tsc`.
+
+**Current state:** `apps/mcp/package.json` now pins `express@^5.2.1` and `@types/express@^5.0.0` — both major version 5, confirmed against the resolved lockfile version, not just the package.json range.
 
 ---
 
@@ -363,8 +363,9 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 | Item                                      | Sev | Effort | Status                                                     |
 | ----------------------------------------- | --- | ------ | ---------------------------------------------------------- |
+| H4 — unvalidated external-boundary casts  | 🟠  | S      | ✅ done (schema validation replaces all 3 casts)           |
 | H5 — rate limiting (`/ask`, `/sync`, MCP) | 🟠  | S      | ✅ done (`@fastify/rate-limit`, global + per-route limits) |
-| H6 — express major alignment              | 🟠  | S      | OPEN                                                       |
+| H6 — express major alignment              | 🟠  | S      | ✅ done (`express@5.2.1` + `@types/express@5.0.0`)         |
 | M3, M6, M17, M19 (from audit)             | 🟡  | S each | OPEN                                                       |
 
 ### CPA-deployment blockers — close before ingesting real client data (§9)

@@ -1,7 +1,7 @@
 import pino from "pino";
 import { CompositeChunker, HttpParserClient } from "@rag/rag";
 import { runIngestion, type PipelineRunResult } from "@rag/ingestion";
-import type { Connector } from "@rag/core";
+import type { Connector, EmbeddingProvider } from "@rag/core";
 import type { Db } from "@rag/db";
 import { env } from "../env.js";
 import { FakeEmbedder } from "@rag/test-fixtures";
@@ -17,7 +17,19 @@ export async function runOneIngestion(
   db: Db,
   sourceId: string,
   connector: Connector,
-  overrides?: { chunkSize?: number; chunkOverlap?: number },
+  overrides?: {
+    chunkSize?: number;
+    chunkOverlap?: number;
+    /**
+     * Defaults to `FakeEmbedder` (deterministic, no network) so every
+     * existing spec is unaffected. Pass a real provider (see
+     * `eval/run-real-eval.ts`) to seed a corpus with real vectors — the
+     * embedder used here MUST match the one passed to the retriever that
+     * later queries this corpus, or dense scores are meaningless (comparing
+     * vectors from two different embedding spaces).
+     */
+    embedder?: EmbeddingProvider;
+  },
 ): Promise<PipelineRunResult> {
   const logger = pino({ level: "silent" });
   const parser = new HttpParserClient(env.parserUrl, 60_000, env.parserSecret);
@@ -31,7 +43,7 @@ export async function runOneIngestion(
       rowOverlap: 2,
     },
   });
-  const embedder = new FakeEmbedder();
+  const embedder = overrides?.embedder ?? new FakeEmbedder();
 
   return runIngestion(
     sourceId,
