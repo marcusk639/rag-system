@@ -211,4 +211,41 @@ describe("E2E: hybridSearch metadataFilter", () => {
       expect(r.document.title).toBe("Sized Doc");
     }
   });
+
+  it("matches a boolean metadata value against a string filter value", async () => {
+    // Same type-sensitivity gap as the numeric case above, for booleans:
+    // `@>` containment doesn't match `{"k":"true"}` against a stored
+    // `{"k":true}`. DocumentMetadata has no typed boolean field today, but
+    // it's `.passthrough()`, so a connector's `extra`-adjacent top-level
+    // metadata could still hold one — exercises the fix's boolean fallback.
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "flagged",
+        title: "Flagged Doc",
+        text: "Engagement letter requires partner sign-off before delivery.",
+        metadata: { requiresReview: true },
+      }),
+      plainTextDoc({
+        externalId: "unflagged",
+        title: "Unflagged Doc",
+        text: "Engagement letter requires partner sign-off before delivery.",
+        metadata: { requiresReview: false },
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    const results = await retriever.search(
+      {
+        query: "engagement letter sign-off",
+        topK: 10,
+        filter: { requiresReview: "true" },
+      },
+      ADMIN_SCOPE,
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.document.title).toBe("Flagged Doc");
+    }
+  });
 });

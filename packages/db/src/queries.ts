@@ -455,14 +455,16 @@ export async function hybridSearch(
       // `jsonb_build_object` so both key and value stay parameterised
       // (injection-safe) rather than string-concatenated into a JSON literal.
       //
-      // `@>` is type-sensitive: `{"k":"5"}` does not contain `{"k":5}`. The
-      // filter API only ever sends string values (packages/core/src/
-      // validation.ts's filterSchema), but DocumentMetadata has at least one
-      // numeric field (`sizeBytes`) a caller could filter on, and `->>`'s old
-      // text coercion matched a number against a string filter value. Also
-      // try the value as a JSON number when it parses as one, so numeric
-      // metadata fields keep matching post-fix — confirmed via EXPLAIN this
-      // still produces a BitmapOr over the same GIN index, not a fallback scan.
+      // `@>` is type-sensitive: `{"k":"5"}` does not contain `{"k":5}`, and
+      // `{"k":"true"}` does not contain `{"k":true}`. The filter API only
+      // ever sends string values (packages/core/src/validation.ts's
+      // filterSchema), but DocumentMetadata is `.passthrough()` and could
+      // hold non-string top-level values (e.g. the numeric `sizeBytes`) that
+      // `->>`'s old text coercion matched against a string filter value.
+      // Also try the value as a JSON number/boolean when it parses as one,
+      // so those metadata fields keep matching post-fix — confirmed via
+      // EXPLAIN this still produces a BitmapOr over the same GIN index, not
+      // a fallback scan, for both the numeric and boolean cases.
       return sql`AND (${sql.join(
         values.flatMap((v) => {
           const conditions = [
@@ -471,6 +473,11 @@ export async function hybridSearch(
           if (v.trim() !== "" && Number.isFinite(Number(v))) {
             conditions.push(
               sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::numeric)`,
+            );
+          }
+          if (v === "true" || v === "false") {
+            conditions.push(
+              sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::boolean)`,
             );
           }
           return conditions;
