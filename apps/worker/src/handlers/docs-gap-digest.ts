@@ -1,4 +1,8 @@
-import { getWeakResultAuditEvents, type WeakResultAuditEvent } from "@rag/db";
+import {
+  getWeakResultAuditEvents,
+  insertDocsGapDigestRun,
+  type WeakResultAuditEvent,
+} from "@rag/db";
 import type PgBoss from "pg-boss";
 import type { WorkerDeps } from "../deps.js";
 
@@ -98,12 +102,16 @@ export function aggregateWeakResultEvents(
  * enqueues `data: null`, see `packages/ingestion/src/queue.ts`). We:
  *   1. Query the past week's zero-result/weak-score `audit_log` rows.
  *   2. Aggregate them in JS (see `aggregateWeakResultEvents`).
- *   3. Log ONE summary line — no new table, no UI, per this phase's scope.
+ *   3. Log ONE summary line.
+ *   4. Persist that same aggregate as one `docs_gap_digest_runs` row, so it's
+ *      queryable/admin-visible rather than existing only as a log line.
  *
  * Reads only `retrievedCount`/`chunkIds`/`topScore` (via
  * `getWeakResultAuditEvents`) — never `questionHash` — per Phase 3's privacy
  * design decision: raw question text is never stored and must never be
- * reconstructed or referenced here.
+ * reconstructed or referenced here. The persisted row carries the exact same
+ * Tier-1 aggregate (counts by endpoint/source-group) — no new privacy
+ * surface.
  */
 export async function handleDocsGapDigest(
   job: PgBoss.JobWithMetadata<object>,
@@ -130,4 +138,12 @@ export async function handleDocsGapDigest(
     { ...summary, marker: "docs.gap_digest.summary" },
     "weekly documentation gap digest",
   );
+
+  await insertDocsGapDigestRun(db, {
+    windowSince: since,
+    windowUntil: until,
+    totalWeakEvents: summary.totalWeakEvents,
+    byEndpoint: summary.byEndpoint,
+    bySourceGroup: summary.bySourceGroup,
+  });
 }

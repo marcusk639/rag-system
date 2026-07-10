@@ -7,12 +7,16 @@ import {
 } from "./docs-gap-digest.js";
 import type { WorkerDeps } from "../deps.js";
 
-const { getWeakResultAuditEventsMock } = vi.hoisted(() => ({
-  getWeakResultAuditEventsMock: vi.fn(),
-}));
+const { getWeakResultAuditEventsMock, insertDocsGapDigestRunMock } = vi.hoisted(
+  () => ({
+    getWeakResultAuditEventsMock: vi.fn(),
+    insertDocsGapDigestRunMock: vi.fn(),
+  }),
+);
 
 vi.mock("@rag/db", () => ({
   getWeakResultAuditEvents: getWeakResultAuditEventsMock,
+  insertDocsGapDigestRun: insertDocsGapDigestRunMock,
 }));
 
 const MIN_SCORE = 0.3;
@@ -210,6 +214,62 @@ describe("handleDocsGapDigest", () => {
 
     const [payload] = infoMock.mock.calls[0]!;
     expect(payload).toMatchObject({
+      totalWeakEvents: 0,
+      byEndpoint: {},
+      bySourceGroup: [],
+    });
+  });
+
+  it("inserts a docs_gap_digest_runs row matching the computed aggregate, in addition to the log line", async () => {
+    getWeakResultAuditEventsMock.mockResolvedValue([
+      makeRow({
+        endpoint: "search",
+        retrievedCount: 0,
+        chunkIds: [],
+        topScore: null,
+      }),
+      makeRow({
+        sourceIds: ["source-b"],
+        endpoint: "ask",
+        topScore: 0.1,
+      }),
+    ]);
+    const { deps, infoMock } = makeDeps();
+
+    await handleDocsGapDigest(
+      { id: "job-3" } as unknown as Parameters<typeof handleDocsGapDigest>[0],
+      deps,
+    );
+
+    // Log line is still emitted -- persistence is additive, not a replacement.
+    expect(infoMock).toHaveBeenCalledTimes(1);
+
+    expect(insertDocsGapDigestRunMock).toHaveBeenCalledTimes(1);
+    const [db, row] = insertDocsGapDigestRunMock.mock.calls[0]!;
+    expect(db).toBe(deps.db);
+    expect(row).toMatchObject({
+      totalWeakEvents: 2,
+      byEndpoint: { search: 1, ask: 1 },
+    });
+    expect(row.windowSince).toBeInstanceOf(Date);
+    expect(row.windowUntil).toBeInstanceOf(Date);
+    // No question text, hash, or other reversible derivative anywhere in the
+    // persisted row -- only the same display-only aggregate that's logged.
+    expect(JSON.stringify(row)).not.toMatch(/questionHash|question_hash/i);
+  });
+
+  it("still persists a zero-count row when there are no weak-result events", async () => {
+    getWeakResultAuditEventsMock.mockResolvedValue([]);
+    const { deps } = makeDeps();
+
+    await handleDocsGapDigest(
+      { id: "job-4" } as unknown as Parameters<typeof handleDocsGapDigest>[0],
+      deps,
+    );
+
+    expect(insertDocsGapDigestRunMock).toHaveBeenCalledTimes(1);
+    const [, row] = insertDocsGapDigestRunMock.mock.calls[0]!;
+    expect(row).toMatchObject({
       totalWeakEvents: 0,
       byEndpoint: {},
       bySourceGroup: [],

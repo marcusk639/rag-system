@@ -1,17 +1,21 @@
-import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
   auditLog,
   chunks,
+  docsGapDigestRuns,
   documents,
   ingestLog,
   ingestionJobs,
   pendingUploads,
   sources,
   type AuditLog,
+  type DocsGapDigestRun,
+  type DocsGapDigestSourceGroup,
   type NewAuditLog,
   type NewChunk,
+  type NewDocsGapDigestRun,
   type NewDocument,
   type NewIngestionJob,
   type NewIngestLog,
@@ -818,6 +822,50 @@ export async function getWeakResultAuditEvents(
         ),
       ),
     );
+}
+
+export interface DocsGapDigestRunRow {
+  windowSince: Date;
+  windowUntil: Date;
+  totalWeakEvents: number;
+  byEndpoint: Record<string, number>;
+  bySourceGroup: DocsGapDigestSourceGroup[];
+}
+
+/**
+ * Persists one row of the already-computed `DocsGapDigestSummary` aggregate
+ * (see `aggregateWeakResultEvents` in `docs-gap-digest.ts`) unchanged --
+ * Tier 1 only. Never pass question text, a hash, or any other reversible
+ * derivative here; `byEndpoint`/`bySourceGroup` are the same small,
+ * display-only count aggregates the digest job already logs.
+ */
+export async function insertDocsGapDigestRun(
+  db: Db,
+  row: DocsGapDigestRunRow,
+): Promise<void> {
+  const values: NewDocsGapDigestRun = {
+    windowSince: row.windowSince,
+    windowUntil: row.windowUntil,
+    totalWeakEvents: row.totalWeakEvents,
+    byEndpoint: row.byEndpoint,
+    bySourceGroup: row.bySourceGroup,
+  };
+  await db.insert(docsGapDigestRuns).values(values);
+}
+
+/**
+ * Most recent digest runs, newest first, for the admin UI (Step 8). No
+ * filtering by inner jsonb keys -- these are small, whole-row reads.
+ */
+export async function listDocsGapDigestRuns(
+  db: Db,
+  limit = 20,
+): Promise<DocsGapDigestRun[]> {
+  return db
+    .select()
+    .from(docsGapDigestRuns)
+    .orderBy(desc(docsGapDigestRuns.runAt))
+    .limit(limit);
 }
 
 // ---------------------------------------------------------------------------

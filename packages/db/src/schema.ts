@@ -532,6 +532,51 @@ export const staffSourceAssignments = pgTable(
   }),
 );
 
+// ----------------------------------------------------------------------------
+// docs_gap_digest_runs — one row per weekly documentation-gap digest tick
+// (apps/worker/src/handlers/docs-gap-digest.ts), persisting the exact
+// DocsGapDigestSummary aggregate the job already logs so it's queryable and
+// admin-visible instead of existing only as a structured log line.
+//
+// Tier 1 only, deliberately: by_endpoint/by_source_group are small,
+// display-only count aggregates -- never raw question text, a hash, or any
+// other reversible derivative. Do NOT add a column here that could
+// reconstruct what was asked; that is a separate, out-of-scope policy
+// decision (see docs/TWK-MANUAL-RUNBOOK.md).
+// ----------------------------------------------------------------------------
+/**
+ * Structurally mirrors `SourceGroupSummary` in
+ * `apps/worker/src/handlers/docs-gap-digest.ts`, redeclared here rather than
+ * imported so `@rag/db` doesn't take a dependency on an app package.
+ */
+export interface DocsGapDigestSourceGroup {
+  sourceIds: string[];
+  count: number;
+  byEndpoint: Record<string, number>;
+}
+
+export const docsGapDigestRuns = pgTable("docs_gap_digest_runs", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`uuid_generate_v4()`),
+  runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+  windowSince: timestamp("window_since", { withTimezone: true }).notNull(),
+  windowUntil: timestamp("window_until", { withTimezone: true }).notNull(),
+  totalWeakEvents: integer("total_weak_events").notNull(),
+  /** Keyed by endpoint ("ask" | "search") -> count. */
+  byEndpoint: jsonb("by_endpoint")
+    .notNull()
+    .default({})
+    .$type<Record<string, number>>(),
+  /** Array of source-id-group summaries -- sourceIds/count/byEndpoint. */
+  bySourceGroup: jsonb("by_source_group")
+    .notNull()
+    .default({})
+    .$type<DocsGapDigestSourceGroup[]>(),
+});
+export type DocsGapDigestRun = typeof docsGapDigestRuns.$inferSelect;
+export type NewDocsGapDigestRun = typeof docsGapDigestRuns.$inferInsert;
+
 export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =
   typeof staffClientAssignments.$inferInsert;
