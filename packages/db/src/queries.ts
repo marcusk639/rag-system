@@ -754,6 +754,13 @@ export interface AskEventRow {
   questionHash: string;
   channel: "api" | "mcp";
   model: string | null;
+  /**
+   * §7216/Circular 230 §10.22 disclosure recordkeeping — which embedding
+   * provider/model processed the query text. Always present: both /ask and
+   * /search embed the query, even when there's no generation model.
+   */
+  embeddingProvider: string;
+  embeddingModel: string;
   sourceIds: string[];
   chunkIds: string[];
   docIds: string[];
@@ -777,6 +784,8 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     questionHash: row.questionHash,
     channel: row.channel,
     model: row.model ?? null,
+    embeddingProvider: row.embeddingProvider,
+    embeddingModel: row.embeddingModel,
     sourceIds: row.sourceIds,
     chunkIds: row.chunkIds,
     docIds: row.docIds,

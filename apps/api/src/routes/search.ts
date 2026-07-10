@@ -40,6 +40,8 @@ function auditSearch(
     questionHash: createHash("sha256").update(query).digest("hex"),
     channel: "api",
     model: null,
+    embeddingProvider: deps.embedder.name,
+    embeddingModel: deps.embedder.model,
     sourceIds: [...new Set(results.map((r) => r.document.sourceId))],
     chunkIds: results.map((r) => r.chunk.id),
     docIds: [...new Set(results.map((r) => r.document.id))],

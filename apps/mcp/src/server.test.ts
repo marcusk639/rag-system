@@ -57,6 +57,10 @@ function makeDeps(): Deps {
     config: {} as Config,
     db: {} as Deps["db"],
     retriever: {} as Deps["retriever"],
+    embedder: {
+      name: "test-provider",
+      model: "test-model",
+    } as Deps["embedder"],
     queue: {} as Deps["queue"],
     generator: null,
     close: async () => {},

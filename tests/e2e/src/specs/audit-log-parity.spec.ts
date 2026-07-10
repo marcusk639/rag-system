@@ -8,7 +8,7 @@ import { FakeConnector, FakeGenerator, plainTextDoc } from "@rag/test-fixtures";
 import { createCustomSource, openTestDb } from "../helpers/db.js";
 import { buildTestApi } from "../helpers/api.js";
 import { runOneIngestion } from "../helpers/ingestion.js";
-import { TEST_INTERNAL_SCOPE_SECRET } from "../env.js";
+import { TEST_API_TOKEN, TEST_INTERNAL_SCOPE_SECRET } from "../env.js";
 
 /**
  * Phase 3 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
@@ -29,6 +29,29 @@ import { TEST_INTERNAL_SCOPE_SECRET } from "../env.js";
  * design — other specs never touch that table) and instead scopes each
  * assertion to a uniquely-hashed row so runs don't interfere with each other.
  */
+
+/**
+ * The route handlers' audit write is fire-and-forget (`void logAskEvent(...)
+ * .catch(...)`) so the HTTP response can return before the INSERT commits.
+ * Poll briefly instead of assuming synchronous completion — a real gap,
+ * observed directly: back-to-back /ask + /search injects in the same test
+ * flaked on the second row without this.
+ */
+async function waitForAuditRow<T>(
+  query: () => Promise<T | undefined>,
+  timeoutMs = 2000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const row = await query();
+    if (row !== undefined) return row;
+    if (Date.now() > deadline) {
+      throw new Error(`audit_log row did not appear within ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
   let db: Db;
   let close: () => Promise<void>;
@@ -43,7 +66,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     await close();
   });
 
-  it("audit_log has endpoint/top_score/principal_subject with the expected types/defaults", async () => {
+  it("audit_log has endpoint/top_score/principal_subject/embedding_provider/embedding_model with the expected types/defaults", async () => {
     const res = await db.execute<{
       column_name: string;
       data_type: string;
@@ -53,7 +76,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns
       WHERE table_name = 'audit_log'
-        AND column_name IN ('endpoint', 'top_score', 'principal_subject')
+        AND column_name IN ('endpoint', 'top_score', 'principal_subject', 'embedding_provider', 'embedding_model')
     `);
 
     const byName = new Map(res.rows.map((r) => [r.column_name, r]));
@@ -72,6 +95,21 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     expect(principalSubject?.data_type).toBe("text");
     expect(principalSubject?.is_nullable).toBe("YES");
     expect(principalSubject?.column_default).toBeNull();
+
+    // §7216/§10.22 disclosure recordkeeping (P3, docs/ISSUES-AND-OPTIMIZATIONS.md).
+    // Nullable at the SQL level (a pre-existing row backfills to NULL) even
+    // though AskEventRow/logAskEvent require it at the TypeScript layer for
+    // every NEW row — mirrors endpoint/topScore's own nullable-but-required
+    // pattern above.
+    const embeddingProvider = byName.get("embedding_provider");
+    expect(embeddingProvider?.data_type).toBe("text");
+    expect(embeddingProvider?.is_nullable).toBe("YES");
+    expect(embeddingProvider?.column_default).toBeNull();
+
+    const embeddingModel = byName.get("embedding_model");
+    expect(embeddingModel?.data_type).toBe("text");
+    expect(embeddingModel?.is_nullable).toBe("YES");
+    expect(embeddingModel?.column_default).toBeNull();
   });
 
   it("a row inserted WITHOUT specifying endpoint/top_score backfills to the column defaults — the exact mechanism a pre-existing row relies on", async () => {
@@ -110,6 +148,8 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       questionHash: marker,
       channel: "api",
       model: null,
+      embeddingProvider: "test-embedding-provider",
+      embeddingModel: "test-embedding-model",
       sourceIds: ["11111111-1111-1111-1111-111111111111"],
       chunkIds: ["22222222-2222-2222-2222-222222222222"],
       docIds: ["33333333-3333-3333-3333-333333333333"],
@@ -137,6 +177,8 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       questionHash: marker,
       channel: "api",
       model: "gemini-1.5-flash",
+      embeddingProvider: "test-embedding-provider",
+      embeddingModel: "test-embedding-model",
       sourceIds: [],
       chunkIds: [],
       docIds: [],
@@ -164,6 +206,8 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       questionHash: marker,
       channel: "api",
       model: null,
+      embeddingProvider: "test-embedding-provider",
+      embeddingModel: "test-embedding-model",
       sourceIds: [],
       chunkIds: [],
       docIds: [],
@@ -190,6 +234,8 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       questionHash: marker,
       channel: "api",
       model: null,
+      embeddingProvider: "test-embedding-provider",
+      embeddingModel: "test-embedding-model",
       sourceIds: [],
       chunkIds: [],
       docIds: [],
@@ -256,6 +302,81 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
 
       expect(row?.principal_kind).toBe("scoped");
       expect(row?.principal_subject).toBe(subject);
+    } finally {
+      await closeApi();
+    }
+  });
+
+  it("a real /ask and /search request record the embedding provider/model used (§7216/§10.22 disclosure trail)", async () => {
+    // Previously: /ask logged only the generation model (null for /search,
+    // which has none); the embedding provider that processes the query text
+    // on EVERY call — the actual §7216 disclosure event — was never recorded
+    // at all. buildTestApi wires a real FakeEmbedder into Deps (same
+    // embedder instance the route reads deps.embedder.name/.model from), so
+    // this proves the wiring end-to-end rather than just the schema shape.
+    const sourceId = await createCustomSource(db, "audit-provider-e2e-source");
+    await runOneIngestion(
+      db,
+      sourceId,
+      new FakeConnector([
+        plainTextDoc({
+          externalId: "audit-provider-doc",
+          title: "Audit Provider Doc",
+          text: "Disclosure recordkeeping tracks which provider processed a query.",
+        }),
+      ]),
+    );
+
+    const generator = new FakeGenerator();
+    const { inject, close: closeApi } = await buildTestApi({ db, generator });
+    try {
+      const question = `what tracks disclosure recordkeeping? ${Date.now()}-${Math.random()}`;
+      const askRes = await inject({
+        method: "POST",
+        url: "/ask",
+        headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+        payload: { question },
+      });
+      expect(askRes.statusCode).toBe(200);
+
+      const askHash = createHash("sha256").update(question).digest("hex");
+      const askRow = await waitForAuditRow(() =>
+        db
+          .execute<{
+            embedding_provider: string | null;
+            embedding_model: string | null;
+          }>(
+            sql`SELECT embedding_provider, embedding_model FROM audit_log WHERE question_hash = ${askHash}`,
+          )
+          .then((r) => r.rows[0]),
+      );
+      expect(askRow.embedding_provider).toBe("local");
+      expect(askRow.embedding_model).toBe("fake-bow-768");
+
+      const query = `disclosure recordkeeping query ${Date.now()}-${Math.random()}`;
+      const searchRes = await inject({
+        method: "POST",
+        url: "/search",
+        headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+        payload: { query },
+      });
+      expect(searchRes.statusCode).toBe(200);
+
+      const searchHash = createHash("sha256").update(query).digest("hex");
+      const searchRow = await waitForAuditRow(() =>
+        db
+          .execute<{
+            embedding_provider: string | null;
+            embedding_model: string | null;
+          }>(
+            sql`SELECT embedding_provider, embedding_model FROM audit_log WHERE question_hash = ${searchHash}`,
+          )
+          .then((r) => r.rows[0]),
+      );
+      // /search has no generation model, but it still embeds the query, so
+      // this must be populated exactly like /ask's row above.
+      expect(searchRow.embedding_provider).toBe("local");
+      expect(searchRow.embedding_model).toBe("fake-bow-768");
     } finally {
       await closeApi();
     }

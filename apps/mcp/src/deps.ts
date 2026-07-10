@@ -1,6 +1,6 @@
 import type { Generator, Retriever } from "@rag/rag";
 import type { Db } from "@rag/db";
-import { buildCoreDeps, type Queue } from "@rag/runtime";
+import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 import { type Config } from "@rag/core";
 import type { Logger } from "pino";
 
@@ -15,6 +15,12 @@ export interface Deps {
   config: Config;
   db: Db;
   retriever: Retriever;
+  /**
+   * The configured embedding provider. Tools read `.name`/`.model` for the
+   * §7216/§10.22 disclosure audit trail — see `tools/ask.ts`/
+   * `tools/search-documents.ts`.
+   */
+  embedder: Embedder;
   queue: Queue;
   generator: Generator | null;
   close: () => Promise<void>;
@@ -22,9 +28,7 @@ export interface Deps {
 }
 
 export async function buildDeps(config: Config, logger: Logger): Promise<Deps> {
-  const { db, retriever, queue, generator, close } = await buildCoreDeps(
-    config,
-    logger,
-  );
-  return { config, db, retriever, queue, generator, close, logger };
+  const { db, embedder, retriever, queue, generator, close } =
+    await buildCoreDeps(config, logger);
+  return { config, db, embedder, retriever, queue, generator, close, logger };
 }

@@ -250,7 +250,7 @@ This system is being stood up over a **CPA firm's** corpus — SharePoint engage
 
 **Current state:** `packages/core/src/metadata-policy.ts`'s `sanitizeMetadata`/`sanitizeRetrievalResult` strip PII-risky fields before any response crosses the API boundary.
 
-### ⚠️ P3 — Third-party LLM disclosure (IRC §7216 / Circular 230) — SUBSTANTIALLY RESOLVED
+### ✅ P3 — Third-party LLM disclosure (IRC §7216 / Circular 230) — RESOLVED
 
 **Original concern:** embedding/generation sends client tax-return content to third-party providers (Gemini/OpenAI) with no gating, classification, or audit trail — a §7216 disclosure exposure.
 
@@ -260,8 +260,8 @@ This system is being stood up over a **CPA firm's** corpus — SharePoint engage
 - `COMPLIANCE_MODE=client-data` refuses to boot without a signed DPA file on disk — the code-level gate has teeth, not just a doc comment.
 - `EGRESS_ALLOWED_HOSTS` can block all external embedding/generation calls entirely, making the on-device `EMBEDDING_PROVIDER=local` path a real, exercised option.
 - A per-source `dataClass` (`general | research | sop | client_confidential`) gates ingestion: `client_confidential` sources are mapped to the pipeline's Class D and **blocked outright** by `ClassBlockedError` (`packages/ingestion/src/classify-source.ts`, wired into `handleSyncSource` as of 2026-07-08 — this enforcement wiring was itself a gap until this session).
-
-**Still open:** a minimal disclosure audit trail (what source, when, which provider) for §10.22 recordkeeping is not yet implemented — the existing `audit_log` records retrieval (principal, sources/chunks retrieved) but not which LLM provider processed a given request.
+- **Disclosure audit trail for §10.22 recordkeeping (2026-07-09):** `audit_log` now has `embedding_provider`/`embedding_model` columns, populated on every `/ask` and `/search` call (both endpoints always embed the query — `/search` has no generation model but still discloses the query text to the embedding provider, which the old `model`-only field never captured). `apps/api/src/deps.ts` and `apps/mcp/src/deps.ts` both expose `embedder` from `CoreDeps` for this.
+- **A larger, previously-undiscovered gap closed in the same pass:** MCP's `ask`/`search_documents` tools — the "agent-facing surface" per root CLAUDE.md, and per `docs/CPA_Firm_Operations_Consultant_Briefing.md` likely the dominant real-usage channel (Teams bot) — wrote **no `audit_log` row at all**, not just an incomplete one. Both tools now call the same `logAskEvent` the HTTP routes use, with `channel: "mcp"`. Known remaining limitation: `AuthorizationScope` (unlike the HTTP route's `Principal`) doesn't carry `subject`, so MCP rows have `principal_subject: null` — wiring per-user subject through the MCP transport layer (`http.ts`'s `scopeForRequest` currently discards the resolved `Principal` down to just an `AuthorizationScope` before it reaches tool handlers) is a separate, larger change than adding the audit trail itself; worth a follow-up.
 
 ### 🟡 P4 — Encryption-at-rest & retention/deletion (PARTIALLY RESOLVED)
 
@@ -371,12 +371,12 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### CPA-deployment blockers — close before ingesting real client data (§9)
 
-| Item                                                                  | Sev | Effort | Status                                                                                                                                                                          |
-| --------------------------------------------------------------------- | --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L    | ✅ done (`access-control.ts` + `hybridSearch` scope enforcement; per-user web auth via PR #31)                                                                                  |
-| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S      | ✅ done (`metadata-policy.ts`)                                                                                                                                                  |
-| P3 — LLM-provider disclosure (§7216): agreement + code-level gating   | 🔴  | M      | ⚠️ substantially done — DPA signed; `COMPLIANCE_MODE`/`EGRESS_ALLOWED_HOSTS`/`dataClass` gate all ship. Disclosure audit trail (which provider processed a request) still open. |
-| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M      | 🟡 partial — `DELETE /sources/:id` + `purgeSource` cascade done; column-level encryption + single-client (not whole-source) deletion still open                                 |
+| Item                                                                  | Sev | Effort | Status                                                                                                                                                                                                                                   |
+| --------------------------------------------------------------------- | --- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L    | ✅ done (`access-control.ts` + `hybridSearch` scope enforcement; per-user web auth via PR #31)                                                                                                                                           |
+| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S      | ✅ done (`metadata-policy.ts`)                                                                                                                                                                                                           |
+| P3 — LLM-provider disclosure (§7216): agreement + code-level gating   | 🔴  | M      | ✅ done — DPA signed; `COMPLIANCE_MODE`/`EGRESS_ALLOWED_HOSTS`/`dataClass` gate all ship; `audit_log` now records embedding provider/model on every /ask + /search call, both API and MCP (MCP previously had zero audit logging at all) |
+| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M      | 🟡 partial — `DELETE /sources/:id` + `purgeSource` cascade done; column-level encryption + single-client (not whole-source) deletion still open                                                                                          |
 
 ### Ingestion operator-experience (§10) — needed for a non-developer operator
 

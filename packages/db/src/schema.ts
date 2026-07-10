@@ -365,6 +365,15 @@ export const auditLog = pgTable(
     channel: text("channel").notNull(),
     /** Generation model identifier (null when not applicable). */
     model: text("model"),
+    /**
+     * §7216/Circular 230 §10.22 disclosure recordkeeping: which embedding
+     * provider/model processed the query text. Populated on EVERY /ask and
+     * /search call (both endpoints always embed the query, even /search
+     * which has no generation model) — distinct from `model` above, which
+     * only covers the generation call and is null for /search.
+     */
+    embeddingProvider: text("embedding_provider"),
+    embeddingModel: text("embedding_model"),
     sourceIds: text("source_ids").array().notNull(),
     chunkIds: text("chunk_ids").array().notNull(),
     docIds: text("doc_ids").array().notNull(),
