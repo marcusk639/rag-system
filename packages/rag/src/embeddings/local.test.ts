@@ -313,6 +313,12 @@ describe("LocalEmbeddingProvider", () => {
       }
     });
 
+    it("never throws even when the pipeline exposes no tokenizer at all", async () => {
+      mockPipeFn.tokenizer = undefined;
+      const provider = new LocalEmbeddingProvider();
+      await expect(provider.embedBatch(["some text"])).resolves.toBeDefined();
+    });
+
     it("detection is best-effort — a tokenizer failure never blocks the actual embed call", async () => {
       mockTokenizerFn.mockImplementation(() => {
         throw new Error("tokenizer explosion");

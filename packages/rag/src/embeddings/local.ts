@@ -178,36 +178,42 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * real embed.
    */
   private warnOnOverlongText(pipe: HFPipeline, texts: string[]): void {
-    const limit = pipe.tokenizer.model_max_length ?? this.maxTokens;
-    for (let i = 0; i < texts.length; i++) {
-      const text = texts[i]!;
-      let tokenCount: number;
-      try {
-        const encoded = pipe.tokenizer(text, {
-          truncation: false,
-          padding: false,
-          return_tensor: false,
-        });
-        tokenCount = Array.isArray(encoded.input_ids)
-          ? encoded.input_ids.length
-          : 0;
-      } catch {
-        continue;
+    try {
+      const limit = pipe.tokenizer.model_max_length ?? this.maxTokens;
+      for (let i = 0; i < texts.length; i++) {
+        const text = texts[i]!;
+        let tokenCount: number;
+        try {
+          const encoded = pipe.tokenizer(text, {
+            truncation: false,
+            padding: false,
+            return_tensor: false,
+          });
+          tokenCount = Array.isArray(encoded.input_ids)
+            ? encoded.input_ids.length
+            : 0;
+        } catch {
+          continue;
+        }
+        if (tokenCount > limit) {
+          this.logger.warn(
+            {
+              textIndex: i,
+              tokenCount,
+              limit,
+              textPreview: text.length > 80 ? `${text.slice(0, 80)}…` : text,
+            },
+            `Local embedding input exceeds the ${limit}-token model limit ` +
+              `(${tokenCount} tokens) and will be truncated by ` +
+              `@huggingface/transformers, degrading retrieval quality for this ` +
+              `chunk. Lower CHUNK_SIZE or split this document further.`,
+          );
+        }
       }
-      if (tokenCount > limit) {
-        this.logger.warn(
-          {
-            textIndex: i,
-            tokenCount,
-            limit,
-            textPreview: text.length > 80 ? `${text.slice(0, 80)}…` : text,
-          },
-          `Local embedding input exceeds the ${limit}-token model limit ` +
-            `(${tokenCount} tokens) and will be truncated by ` +
-            `@huggingface/transformers, degrading retrieval quality for this ` +
-            `chunk. Lower CHUNK_SIZE or split this document further.`,
-        );
-      }
+    } catch {
+      // any error during truncation detection is best-effort and must not
+      // escape — even if pipe.tokenizer is missing/undefined, the embed
+      // must continue
     }
   }
 
