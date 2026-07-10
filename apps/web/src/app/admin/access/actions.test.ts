@@ -10,14 +10,26 @@ vi.mock("@rag/db", async () => {
     ...actual,
     grantClientAccess: vi.fn(),
     revokeClientAccess: vi.fn(),
+    grantSourceAccess: vi.fn(),
+    revokeSourceAccess: vi.fn(),
   };
 });
 
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin-check";
 import { resolveOidByEmail } from "@/lib/graph-client";
-import { grantClientAccess, revokeClientAccess } from "@rag/db";
-import { grantAccessAction, revokeAccessAction } from "./actions";
+import {
+  grantClientAccess,
+  revokeClientAccess,
+  grantSourceAccess,
+  revokeSourceAccess,
+} from "@rag/db";
+import {
+  grantAccessAction,
+  revokeAccessAction,
+  grantSourceAccessAction,
+  revokeSourceAccessAction,
+} from "./actions";
 
 beforeEach(() => {
   // Reset mock call history between tests — without this, `grantClientAccess`
@@ -86,6 +98,56 @@ describe("revokeAccessAction", () => {
     expect(revokeClientAccess).toHaveBeenCalledWith("fake-db", {
       userId: "target-oid-1",
       clientId: "acme-2024",
+    });
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+describe("grantSourceAccessAction", () => {
+  it("resolves the target email to an oid and grants direct source access", async () => {
+    vi.mocked(resolveOidByEmail).mockResolvedValue("target-oid-1");
+    const result = await grantSourceAccessAction(
+      fd({ email: "jane@firm.com", sourceId: "source-1" }),
+    );
+    expect(grantSourceAccess).toHaveBeenCalledWith("fake-db", {
+      userId: "target-oid-1",
+      sourceId: "source-1",
+      grantedBy: "admin-oid-1",
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("returns an error when the email doesn't resolve to a known user", async () => {
+    vi.mocked(resolveOidByEmail).mockResolvedValue(null);
+    const result = await grantSourceAccessAction(
+      fd({ email: "nobody@firm.com", sourceId: "source-1" }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "No Entra ID user found for nobody@firm.com",
+    });
+    expect(grantSourceAccess).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the caller is not an admin (defense in depth beyond page-level gating)", async () => {
+    vi.mocked(isAdmin).mockResolvedValue(false);
+    const result = await grantSourceAccessAction(
+      fd({ email: "jane@firm.com", sourceId: "source-1" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden" });
+    expect(grantSourceAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeSourceAccessAction", () => {
+  it("resolves the target email and revokes direct source access", async () => {
+    vi.mocked(resolveOidByEmail).mockResolvedValue("target-oid-1");
+    const result = await revokeSourceAccessAction(
+      fd({ email: "jane@firm.com", sourceId: "source-1" }),
+    );
+    expect(revokeSourceAccess).toHaveBeenCalledWith("fake-db", {
+      userId: "target-oid-1",
+      sourceId: "source-1",
     });
     expect(result).toEqual({ ok: true });
   });

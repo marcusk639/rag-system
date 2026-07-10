@@ -487,6 +487,51 @@ export const sourceClientAssignments = pgTable(
   }),
 );
 
+/**
+ * Direct per-source access grants — a staff member ↔ source pairing that
+ * bypasses the client-routed model entirely. Exists for firm-internal
+ * sources (e.g. firm-sop, firm-research) that have no client to route
+ * through. NOT a nullable-clientId sentinel on staffClientAssignments: that
+ * would need a special-cased NULL-match join branch that would grant every
+ * "direct" user access to every "direct" source, not a specific
+ * per-user-per-source pairing. Soft-delete only (revoked_at), same §7216
+ * reconstructibility rule as staffClientAssignments.
+ */
+export const staffSourceAssignments = pgTable(
+  "staff_source_assignments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    /** PropelAuth/IdP userId (opaque string — not a DB FK). */
+    userId: text("user_id").notNull(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** userId of the admin who granted access — audit trail. */
+    grantedBy: text("granted_by").notNull(),
+    /** Null = active. Set to now() to revoke. Never DELETE. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    ssaUserSourceUnique: uniqueIndex("ssa_user_source_unique").on(
+      table.userId,
+      table.sourceId,
+    ),
+    // Deliberate deviation from strictly mirroring staffClientAssignments
+    // (which has no equivalent standalone index): source_id carries an ON
+    // DELETE CASCADE FK, so a standalone index here avoids a sequential scan
+    // on every source deletion (mirrors src_client_source_idx on
+    // sourceClientAssignments). No separate user_id-only index — the
+    // composite unique index above already leads with user_id, so lookups
+    // by user_id alone use it via leftmost-prefix matching.
+    sourceIdx: index("ssa_source_idx").on(table.sourceId),
+  }),
+);
+
 export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =
   typeof staffClientAssignments.$inferInsert;
@@ -495,6 +540,10 @@ export type SourceClientAssignment =
   typeof sourceClientAssignments.$inferSelect;
 export type NewSourceClientAssignment =
   typeof sourceClientAssignments.$inferInsert;
+
+export type StaffSourceAssignment = typeof staffSourceAssignments.$inferSelect;
+export type NewStaffSourceAssignment =
+  typeof staffSourceAssignments.$inferInsert;
 
 export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

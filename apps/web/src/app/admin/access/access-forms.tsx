@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { ActionResult, HistoryActionResult } from "./actions";
+import type {
+  ActionResult,
+  HistoryActionResult,
+  SourceHistoryActionResult,
+} from "./actions";
+
+export type SourceOption = { id: string; name: string };
 
 type Feedback = { kind: "success" | "error"; message: string };
 
@@ -219,6 +225,236 @@ export function AccessHistoryForm({
               {history.map((row, index) => (
                 <tr key={index} className="border-b">
                   <td className="py-1 pr-2">{row.clientId}</td>
+                  <td className="py-1 pr-2">
+                    {new Date(row.grantedAt).toLocaleString()}
+                  </td>
+                  <td className="py-1 pr-2">{row.grantedBy}</td>
+                  <td className="py-1 pr-2">
+                    {row.revokedAt
+                      ? new Date(row.revokedAt).toLocaleString()
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+    </form>
+  );
+}
+
+/**
+ * Direct per-source grants — bypasses the client-routed model entirely, for
+ * firm-internal sources (firm-sop, firm-research) that have no client to
+ * route through. Mirrors GrantAccessForm's pattern exactly, swapping the
+ * free-text clientId input for a source select.
+ */
+export function GrantSourceAccessForm({
+  action,
+  sources,
+}: {
+  action: (formData: FormData) => Promise<ActionResult>;
+  sources: SourceOption[];
+}) {
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  // See GrantAccessForm above for why this is a manual boolean rather than
+  // useTransition's `isPending` on React 18.3.1.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    setIsSubmitting(true);
+    try {
+      const result = await action(formData);
+      if (result.ok) {
+        setFeedback({ kind: "success", message: "Access granted." });
+        form.reset();
+      } else {
+        setFeedback({ kind: "error", message: result.error });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+      <h2 className="text-lg font-medium">Grant direct source access</h2>
+      <input
+        name="email"
+        type="email"
+        placeholder="staff@firm.com"
+        required
+        className="w-full rounded border px-3 py-2"
+      />
+      <select
+        name="sourceId"
+        required
+        defaultValue=""
+        className="w-full rounded border px-3 py-2"
+      >
+        <option value="" disabled>
+          Select a source
+        </option>
+        {sources.map((source) => (
+          <option key={source.id} value={source.id}>
+            {source.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+      >
+        {isSubmitting ? "Granting..." : "Grant"}
+      </button>
+      <FeedbackBanner feedback={feedback} />
+    </form>
+  );
+}
+
+export function RevokeSourceAccessForm({
+  action,
+  sources,
+}: {
+  action: (formData: FormData) => Promise<ActionResult>;
+  sources: SourceOption[];
+}) {
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  // See GrantAccessForm above for why this is a manual boolean rather than
+  // useTransition's `isPending` on React 18.3.1.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    setIsSubmitting(true);
+    try {
+      const result = await action(formData);
+      if (result.ok) {
+        setFeedback({ kind: "success", message: "Access revoked." });
+        form.reset();
+      } else {
+        setFeedback({ kind: "error", message: result.error });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+      <h2 className="text-lg font-medium">Revoke direct source access</h2>
+      <input
+        name="email"
+        type="email"
+        placeholder="staff@firm.com"
+        required
+        className="w-full rounded border px-3 py-2"
+      />
+      <select
+        name="sourceId"
+        required
+        defaultValue=""
+        className="w-full rounded border px-3 py-2"
+      >
+        <option value="" disabled>
+          Select a source
+        </option>
+        {sources.map((source) => (
+          <option key={source.id} value={source.id}>
+            {source.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="rounded border px-4 py-2 disabled:opacity-50"
+      >
+        {isSubmitting ? "Revoking..." : "Revoke"}
+      </button>
+      <FeedbackBanner feedback={feedback} />
+    </form>
+  );
+}
+
+type SourceHistoryRows = Extract<
+  SourceHistoryActionResult,
+  { ok: true }
+>["history"];
+
+export function SourceAccessHistoryForm({
+  action,
+}: {
+  action: (email: string) => Promise<SourceHistoryActionResult>;
+}) {
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [history, setHistory] = useState<SourceHistoryRows | null>(null);
+  // See GrantAccessForm above for why this is a manual boolean rather than
+  // useTransition's `isPending` on React 18.3.1.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "");
+    setIsSubmitting(true);
+    setHistory(null);
+    try {
+      const result = await action(email);
+      if (result.ok) {
+        setFeedback(null);
+        setHistory(result.history);
+      } else {
+        setFeedback({ kind: "error", message: result.error });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+      <h2 className="text-lg font-medium">View direct source access history</h2>
+      <input
+        name="email"
+        type="email"
+        placeholder="staff@firm.com"
+        required
+        className="w-full rounded border px-3 py-2"
+      />
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="rounded border px-4 py-2 disabled:opacity-50"
+      >
+        {isSubmitting ? "Loading..." : "View history"}
+      </button>
+      <FeedbackBanner feedback={feedback} />
+      {history &&
+        (history.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No direct source access history found for this user.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left">
+                <th className="py-1 pr-2">Source ID</th>
+                <th className="py-1 pr-2">Granted at</th>
+                <th className="py-1 pr-2">Granted by</th>
+                <th className="py-1 pr-2">Revoked at</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((row, index) => (
+                <tr key={index} className="border-b">
+                  <td className="py-1 pr-2">{row.sourceId}</td>
                   <td className="py-1 pr-2">
                     {new Date(row.grantedAt).toLocaleString()}
                   </td>

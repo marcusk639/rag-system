@@ -6,15 +6,23 @@ import { resolveOidByEmail } from "@/lib/graph-client";
 import { getWebDb } from "@/lib/db";
 import {
   grantClientAccess,
+  grantSourceAccess,
   revokeClientAccess,
+  revokeSourceAccess,
   listAssignmentHistoryForStaff,
+  listSourceAssignmentHistoryForStaff,
   type StaffAssignmentHistoryRow,
+  type StaffSourceAssignmentHistoryRow,
 } from "@rag/db";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 export type HistoryActionResult =
   | { ok: true; history: StaffAssignmentHistoryRow[] }
+  | { ok: false; error: string };
+
+export type SourceHistoryActionResult =
+  | { ok: true; history: StaffSourceAssignmentHistoryRow[] }
   | { ok: false; error: string };
 
 /**
@@ -96,5 +104,75 @@ export async function getHistoryAction(
     };
   }
   const history = await listAssignmentHistoryForStaff(getWebDb(), targetOid);
+  return { ok: true, history };
+}
+
+export async function grantSourceAccessAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return gate;
+
+  const email = String(formData.get("email") ?? "");
+  const sourceId = String(formData.get("sourceId") ?? "");
+  if (!email || !sourceId) {
+    return { ok: false, error: "Email and source are required." };
+  }
+
+  const targetOid = await resolveOidByEmail(email);
+  if (!targetOid) {
+    return { ok: false, error: `No Entra ID user found for ${email}` };
+  }
+
+  await grantSourceAccess(getWebDb(), {
+    userId: targetOid,
+    sourceId,
+    grantedBy: gate.oid,
+  });
+  return { ok: true };
+}
+
+export async function revokeSourceAccessAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return gate;
+
+  const email = String(formData.get("email") ?? "");
+  const sourceId = String(formData.get("sourceId") ?? "");
+  if (!email || !sourceId) {
+    return { ok: false, error: "Email and source are required." };
+  }
+
+  const targetOid = await resolveOidByEmail(email);
+  if (!targetOid) {
+    return { ok: false, error: `No Entra ID user found for ${email}` };
+  }
+
+  await revokeSourceAccess(getWebDb(), { userId: targetOid, sourceId });
+  return { ok: true };
+}
+
+export async function getSourceHistoryAction(
+  email: string,
+): Promise<SourceHistoryActionResult> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { ok: false, error: gate.error };
+
+  if (!email) {
+    return { ok: false, error: "Email is required." };
+  }
+
+  const targetOid = await resolveOidByEmail(email);
+  if (!targetOid) {
+    return {
+      ok: false,
+      error: `No Entra ID user found for ${email}`,
+    };
+  }
+  const history = await listSourceAssignmentHistoryForStaff(
+    getWebDb(),
+    targetOid,
+  );
   return { ok: true, history };
 }
