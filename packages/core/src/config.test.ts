@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "./config.js";
 
 const BASE_ENV = {
@@ -70,6 +70,67 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
       },
     );
     expect(called).toBe(false);
+  });
+});
+
+describe("loadConfig — provider-aware chunk-size cap (local embedding provider)", () => {
+  it("non-local providers are unaffected by the 512-token cap", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "gemini",
+      CHUNK_SIZE: "800",
+    });
+    expect(cfg.retrieval.chunkSize).toBe(800);
+  });
+
+  it("local provider with no explicit CHUNK_SIZE is capped to 512 (default 800 exceeds the limit) without warning", () => {
+    const warn = () => {
+      throw new Error("warn should not be called for the implicit default");
+    };
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local" },
+      { warn },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(512);
+  });
+
+  it("local provider with CHUNK_SIZE <= 512 passes through unchanged and does not warn", () => {
+    let warned = false;
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local", CHUNK_SIZE: "400" },
+      { warn: () => (warned = true) },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(400);
+    expect(warned).toBe(false);
+  });
+
+  it("local provider with an explicit CHUNK_SIZE > 512 is capped to 512 and logs a warning", () => {
+    const warnings: string[] = [];
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local", CHUNK_SIZE: "800" },
+      { warn: (msg) => warnings.push(msg) },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(512);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/CHUNK_SIZE=800/);
+    expect(warnings[0]).toMatch(/512/);
+  });
+
+  it("defaults the warn sink to stderr when none is injected (pino isn't constructed yet at loadConfig time)", () => {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      loadConfig({
+        ...BASE_ENV,
+        EMBEDDING_PROVIDER: "local",
+        CHUNK_SIZE: "800",
+      });
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0]![0]).toMatch(/CHUNK_SIZE=800/);
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 });
 

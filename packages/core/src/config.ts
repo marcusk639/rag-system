@@ -425,14 +425,34 @@ function defaultCheckDpa(cwd = process.cwd()): boolean {
   );
 }
 
+/**
+ * Xenova/bge-base-en-v1.5 (the local embedding model — the ONLY provider
+ * allowed under COMPLIANCE_MODE=client-data) has a hard 512-token limit.
+ * Chunks longer than this are silently truncated by the underlying ONNX
+ * pipeline with no signal, degrading retrieval quality invisibly. Capping
+ * CHUNK_SIZE here makes overflow rare rather than routine; the local
+ * embedder's `embedBatch` (packages/rag/src/embeddings/local.ts) backstops
+ * the rare remaining case with a logged, non-fatal truncation warning.
+ */
+const LOCAL_PROVIDER_MAX_CHUNK_SIZE = 512;
+
 /** Read env into a typed Config. Centralizes all env access in one place. */
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   opts?: {
     /** Override the DPA presence check for tests. Defaults to `defaultCheckDpa`. */
     checkDpa?: () => boolean;
+    /**
+     * Sink for startup warnings (e.g. the local-provider chunk-size cap).
+     * Defaults to stderr — pino isn't constructed yet at loadConfig time
+     * (every app's main.ts calls loadConfig() before building its logger).
+     */
+    warn?: (message: string) => void;
   },
 ): Config {
+  const warn =
+    opts?.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+
   const provider = (env.EMBEDDING_PROVIDER ?? "gemini") as
     "gemini" | "openai" | "local";
   const apiKey =
@@ -461,6 +481,27 @@ export function loadConfig(
           refreshToken: env.GOOGLE_REFRESH_TOKEN,
         }
       : undefined;
+
+  const requestedChunkSize = Number(env.CHUNK_SIZE ?? 800);
+  let effectiveChunkSize = requestedChunkSize;
+  if (provider === "local") {
+    const userSetChunkSize = env.CHUNK_SIZE !== undefined;
+    if (
+      userSetChunkSize &&
+      requestedChunkSize > LOCAL_PROVIDER_MAX_CHUNK_SIZE
+    ) {
+      warn(
+        `CHUNK_SIZE=${requestedChunkSize} exceeds the local embedding model's ` +
+          `${LOCAL_PROVIDER_MAX_CHUNK_SIZE}-token limit (Xenova/bge-base-en-v1.5). ` +
+          `Capping effective chunkSize to ${LOCAL_PROVIDER_MAX_CHUNK_SIZE} to avoid ` +
+          `systematic silent truncation of every full-size chunk's embedding.`,
+      );
+    }
+    effectiveChunkSize = Math.min(
+      requestedChunkSize,
+      LOCAL_PROVIDER_MAX_CHUNK_SIZE,
+    );
+  }
 
   const cfg = Config.parse({
     databaseUrl: env.DATABASE_URL,
@@ -511,7 +552,7 @@ export function loadConfig(
       pollIntervalMs: Number(env.WORKER_POLL_INTERVAL_MS ?? 2000),
     },
     retrieval: {
-      chunkSize: Number(env.CHUNK_SIZE ?? 800),
+      chunkSize: effectiveChunkSize,
       chunkOverlap: Number(env.CHUNK_OVERLAP ?? 120),
       defaultTopK: env.DEFAULT_TOP_K ? Number(env.DEFAULT_TOP_K) : undefined,
       hybridDenseWeight: Number(env.HYBRID_DENSE_WEIGHT ?? 0.7),
