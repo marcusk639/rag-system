@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { createDb, createSource, type Db } from "@rag/db";
+import { createDb, createSource, type DataClass, type Db } from "@rag/db";
 import { env } from "../env.js";
 
 /**
@@ -33,11 +33,13 @@ export async function createCustomSource(
   db: Db,
   name: string,
   config: Record<string, unknown> = {},
+  dataClass?: DataClass,
 ): Promise<string> {
   const row = await createSource(db, {
     kind: "custom",
     name,
     config,
+    ...(dataClass ? { dataClass } : {}),
   });
   return row.id;
 }
