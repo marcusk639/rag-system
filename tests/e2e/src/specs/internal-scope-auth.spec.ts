@@ -130,7 +130,7 @@ describe("E2E: internal-scope-auth (web app per-user auth mechanism)", () => {
   it("rejects a token signed with an unconfigured secret (forged token)", async () => {
     const forgedToken = await signInternalScopeToken(
       { sub: "attacker-oid", allowedSourceIds: ["anything"] },
-      "a-secret-never-configured-on-the-server",
+      "different-forged-secret-not-configured-on-server-padding-xxxxxxx",
     );
     const res = await inject({
       method: "GET",

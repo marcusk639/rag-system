@@ -16,7 +16,8 @@ vi.mock("@rag/db", async () => {
 
 import { getScopeAssertionToken } from "./scope-token";
 
-const SECRET = "test-secret-at-least-32-bytes-long-here";
+const SECRET =
+  "test-secret-at-least-32-bytes-long-herexxxxxxxxxxxxxxxxxxxxxxxxx";
 
 describe("getScopeAssertionToken", () => {
   it("mints a token embedding the resolved allowedSourceIds", async () => {

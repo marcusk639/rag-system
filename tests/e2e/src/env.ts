@@ -15,7 +15,7 @@ export const TEST_API_TOKEN = "e2e-test-token";
  * per HS256 (see `signInternalScopeToken`'s doc comment).
  */
 export const TEST_INTERNAL_SCOPE_SECRET =
-  "e2e-test-internal-scope-secret-32-bytes-min";
+  "e2e-test-internal-scope-secret-32-bytes-minxxxxxxxxxxxxxxxxxxxxxxx";
 
 export const env = {
   databaseUrl:

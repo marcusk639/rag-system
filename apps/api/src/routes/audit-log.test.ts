@@ -247,7 +247,8 @@ describe("audit_log parity — POST /ask", () => {
  * `request.principal.subject` -> row plumbing without needing Postgres (the
  * `db` fake here mirrors the rest of this file).
  */
-const INTERNAL_SCOPE_SECRET = "audit-log-test-internal-scope-secret-32bytes+";
+const INTERNAL_SCOPE_SECRET =
+  "audit-log-test-internal-scope-secret-32bytes+xxxxxxxxxxxxxxxxxxx";
 
 const compositeConfig = {
   api: { tokens: [ADMIN_TOKEN], principals: [] },
