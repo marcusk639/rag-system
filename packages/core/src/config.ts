@@ -254,6 +254,24 @@ export const Config = z
       /** Retrieval `score` below this (0-1) counts as "weak". */
       minScore: z.number().min(0).max(1).default(0.3),
     }),
+
+    /**
+     * Off-host shipping of `audit_log` rows (e.g. to Datadog/Splunk/Papertrail
+     * or any generic HTTPS collector) — a scheduled, cursor-based job (see
+     * apps/worker/src/handlers/ship-audit-log.ts), NOT write-time. `none`
+     * (default) disables shipping entirely; `webhook` POSTs rows as JSON to
+     * `webhookUrl`, gated by `EgressPolicy` since rows carry real per-user
+     * identity (`principalSubject`).
+     */
+    auditSink: z.object({
+      provider: z.enum(["none", "webhook"]).default("none"),
+      webhookUrl: z.string().url().optional(),
+      webhookToken: z.string().optional(),
+      /** 5-field crontab expression for the shipping job. Default: hourly. */
+      cron: z.string().min(1).default("0 * * * *"),
+      /** IANA timezone the cron expression is evaluated in. */
+      tz: z.string().min(1).default("UTC"),
+    }),
   })
   .superRefine((cfg, ctx) => {
     // Production gate: the parser shared secret is mandatory in production so the
@@ -605,6 +623,13 @@ export function loadConfig(
         env.DOCS_GAP_DIGEST_MIN_SCORE !== undefined
           ? Number(env.DOCS_GAP_DIGEST_MIN_SCORE)
           : undefined,
+    },
+    auditSink: {
+      provider: (env.AUDIT_SINK_PROVIDER ?? "none") as "none" | "webhook",
+      webhookUrl: env.AUDIT_SINK_WEBHOOK_URL || undefined,
+      webhookToken: env.AUDIT_SINK_WEBHOOK_TOKEN || undefined,
+      cron: env.AUDIT_SINK_CRON || undefined,
+      tz: env.AUDIT_SINK_TZ || undefined,
     },
   });
 

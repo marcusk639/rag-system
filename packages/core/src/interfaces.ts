@@ -212,3 +212,41 @@ export interface ObjectStore {
   /** Remove the object under the logical key. A missing key is not an error. */
   delete(key: string): Promise<void>;
 }
+
+// ============================================================================
+// AuditLogSink — ships audit_log rows off-host to an external log/SIEM
+// collector (Datadog, Splunk, Papertrail, any generic HTTPS collector). Swap
+// destinations by implementing this.
+// ============================================================================
+
+/**
+ * The shape of an `audit_log` row a sink ships. Redeclared here (mirroring
+ * `DocsGapDigestSourceGroup`'s precedent in @rag/db) rather than imported,
+ * since @rag/core does not depend on @rag/db.
+ */
+export interface AuditLogRecord {
+  id: string;
+  principalKind: string;
+  principalSources: string[] | null;
+  /** Real AAD object id when authenticated via a per-user scope-assertion JWT. */
+  principalSubject: string | null;
+  questionHash: string;
+  channel: string;
+  model: string | null;
+  sourceIds: string[];
+  chunkIds: string[];
+  docIds: string[];
+  retrievedCount: number;
+  endpoint: string;
+  topScore: number | null;
+  createdAt: Date;
+}
+
+export interface AuditLogSink {
+  /**
+   * Ship a batch of audit_log rows to the external destination.
+   * Implementations MUST throw (never silently swallow) on failure so the
+   * caller's watermark is not advanced past unshipped rows.
+   */
+  ship(rows: AuditLogRecord[]): Promise<void>;
+}

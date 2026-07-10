@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   pgEnum,
   customType,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { EMBEDDING_COLUMN_DIMENSIONS } from "./embedding-dimensions.js";
 
@@ -576,6 +577,20 @@ export const docsGapDigestRuns = pgTable("docs_gap_digest_runs", {
 });
 export type DocsGapDigestRun = typeof docsGapDigestRuns.$inferSelect;
 export type NewDocsGapDigestRun = typeof docsGapDigestRuns.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// audit_log_shipper_state — single-row watermark for the off-host audit-log
+// shipping job (apps/worker/src/handlers/ship-audit-log.ts). A dedicated
+// table (not overloading `sources.cursor`) so the shipping watermark's
+// lifecycle is independent of any single source's sync state. Boolean-
+// sentinel pattern (`id` is always `true`) since this table only ever has
+// one row — NOT `uuid_generate_v4()`.
+// ----------------------------------------------------------------------------
+export const auditLogShipperState = pgTable("audit_log_shipper_state", {
+  id: boolean("id").primaryKey().default(true),
+  lastShippedAt: timestamp("last_shipped_at", { withTimezone: true }),
+});
+export type AuditLogShipperState = typeof auditLogShipperState.$inferSelect;
 
 export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =

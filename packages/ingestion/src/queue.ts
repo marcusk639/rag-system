@@ -14,6 +14,13 @@ export const JOB_NAMES = {
    * enqueued job, so it has no `*Payload` interface like `SyncSourcePayload`.
    */
   docsGapDigest: "rag.docs_gap_digest",
+  /**
+   * Second recurring (pg-boss `schedule()`) job in this codebase — ships
+   * `audit_log` rows to the configured off-host sink (see
+   * apps/worker/src/handlers/ship-audit-log.ts). No payload, same as
+   * docsGapDigest.
+   */
+  shipAuditLog: "rag.ship_audit_log",
 } as const;
 
 export interface SyncSourcePayload {
@@ -59,6 +66,14 @@ export interface QueueOptions {
   docsGapDigestCron: string;
   /** IANA timezone the cron expression above is evaluated in. */
   docsGapDigestTz: string;
+  /**
+   * Cron schedule for the recurring audit-log-shipping job. Required for the
+   * same reason as `docsGapDigestCron` — callers must thread it through from
+   * `Config.auditSink.cron` (`packages/core/src/config.ts`).
+   */
+  shipAuditLogCron: string;
+  /** IANA timezone the cron expression above is evaluated in. */
+  shipAuditLogTz: string;
 }
 
 export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
@@ -116,6 +131,16 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
     // (types.d.ts's `schedule` signature), unlike the plan's draft snippet.
     undefined,
     { tz: opts.docsGapDigestTz },
+  );
+
+  // Register the audit-log-shipping job the same way — upsert-by-name, safe
+  // to call from every process on every boot, must run after the createQueue
+  // loop above (same FK-to-queue constraint as docsGapDigest).
+  await boss.schedule(
+    JOB_NAMES.shipAuditLog,
+    opts.shipAuditLogCron,
+    undefined,
+    { tz: opts.shipAuditLogTz },
   );
 
   return boss;

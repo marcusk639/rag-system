@@ -1,8 +1,9 @@
-import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
   auditLog,
+  auditLogShipperState,
   chunks,
   docsGapDigestRuns,
   documents,
@@ -866,6 +867,54 @@ export async function listDocsGapDigestRuns(
     .from(docsGapDigestRuns)
     .orderBy(desc(docsGapDigestRuns.runAt))
     .limit(limit);
+}
+
+// ============================================================================
+// Audit-log shipping (off-host sink) — cursor-based scheduled job, see
+// apps/worker/src/handlers/ship-audit-log.ts. `audit_log_shipper_state` is a
+// dedicated single-row watermark table (not overloading `sources.cursor`).
+// ============================================================================
+
+/** The current shipping watermark, or `null` if the job has never run. */
+export async function getAuditLogShipperWatermark(
+  db: Db,
+): Promise<Date | null> {
+  const [row] = await db.select().from(auditLogShipperState).limit(1);
+  return row?.lastShippedAt ?? null;
+}
+
+/**
+ * Advance the shipping watermark to `lastShippedAt`. Callers MUST only call
+ * this after a successful `ship()` — never on a thrown egress-rejection or
+ * network error — so a failed batch is retried on the next tick.
+ */
+export async function advanceAuditLogShipperWatermark(
+  db: Db,
+  lastShippedAt: Date,
+): Promise<void> {
+  await db
+    .insert(auditLogShipperState)
+    .values({ id: true, lastShippedAt })
+    .onConflictDoUpdate({
+      target: auditLogShipperState.id,
+      set: { lastShippedAt },
+    });
+}
+
+/**
+ * `audit_log` rows created strictly after `since` (or all rows when `since`
+ * is `null` — the job's first-ever tick), oldest first so the caller can
+ * advance the watermark to the last row's `createdAt`.
+ */
+export async function getAuditLogRowsSince(
+  db: Db,
+  since: Date | null,
+): Promise<AuditLog[]> {
+  return db
+    .select()
+    .from(auditLog)
+    .where(since ? gt(auditLog.createdAt, since) : undefined)
+    .orderBy(auditLog.createdAt);
 }
 
 // ---------------------------------------------------------------------------

@@ -92,6 +92,13 @@
       "when": 1791000000000,
       "tag": "0013_docs_gap_digest_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0014_audit_log_shipper_state",
+      "breakpoints": true
     }
   ]
 }
