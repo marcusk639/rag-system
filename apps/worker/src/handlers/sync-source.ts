@@ -6,6 +6,7 @@ import {
 } from "@rag/db";
 import {
   enqueueContinuation,
+  mapDataClassToDocumentClass,
   MAX_SYNC_CONTINUATIONS,
   runIngestion,
   type SyncSourcePayload,
@@ -113,7 +114,15 @@ export async function handleSyncSource(
         pageSize: 50,
         maxPagesPerRun: PAGES_PER_RUN,
       },
-      { db, parser, chunker, embedder, objectStore, logger: log },
+      {
+        db,
+        parser,
+        chunker,
+        embedder,
+        objectStore,
+        logger: log,
+        sourceDocClass: mapDataClassToDocumentClass(source.dataClass),
+      },
     );
 
     // Accumulate this run's counts into the single history row (additive, not

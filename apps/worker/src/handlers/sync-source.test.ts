@@ -25,14 +25,28 @@ vi.mock("@rag/db", () => ({
   markSourceSynced: markSyncedMock,
 }));
 
-const { runIngestionMock, enqueueContinuationMock } = vi.hoisted(() => ({
+const {
+  runIngestionMock,
+  enqueueContinuationMock,
+  mapDataClassToDocumentClassMock,
+} = vi.hoisted(() => ({
   runIngestionMock: vi.fn(),
   enqueueContinuationMock: vi.fn(),
+  mapDataClassToDocumentClassMock: vi.fn((dataClass) => {
+    const mapping: Record<string, string> = {
+      general: "A",
+      sop: "A",
+      research: "B",
+      client_confidential: "C",
+    };
+    return mapping[dataClass] || "A";
+  }),
 }));
 
 vi.mock("@rag/ingestion", () => ({
   runIngestion: runIngestionMock,
   enqueueContinuation: enqueueContinuationMock,
+  mapDataClassToDocumentClass: mapDataClassToDocumentClassMock,
   MAX_SYNC_CONTINUATIONS: 100_000,
 }));
 
@@ -270,5 +284,26 @@ describe("handleSyncSource per-page continuation", () => {
       ),
     ).rejects.toThrow(/continuations/i);
     expect(runIngestionMock).not.toHaveBeenCalled();
+  });
+
+  it("passes sourceDocClass derived from source.dataClass into runIngestion's deps", async () => {
+    const { deps } = makeDeps();
+    getSourceMock.mockResolvedValue({ ...SOURCE, dataClass: "research" });
+    await handleSyncSource(job({}), deps);
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ sourceDocClass: "B" }),
+    );
+  });
+
+  it("does not default to Class A when the source is client_confidential", async () => {
+    const { deps } = makeDeps();
+    getSourceMock.mockResolvedValue({
+      ...SOURCE,
+      dataClass: "client_confidential",
+    });
+    await handleSyncSource(job({}), deps);
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ sourceDocClass: "C" }),
+    );
   });
 });
