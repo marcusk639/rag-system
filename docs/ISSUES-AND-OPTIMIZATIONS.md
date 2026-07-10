@@ -60,10 +60,11 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 - Expected effect: cross-encoder reranking typically lifts answer-relevant precision substantially over fusion-only pipelines; it is the standard "next step" after hybrid search.
   **Effort:** M. **Value:** very high. This is the #1 RAG-quality win.
 
-### 🟠 H2 — Metadata filter is a guaranteed full scan `[review:H3]`
+### ✅ H2 — Metadata filter is a guaranteed full scan (RESOLVED) `[review:H3]`
 
-The metadata post-filter builds `doc.metadata->>'key' IN (...)` (`packages/db/src/queries.ts:252`). The shipped GIN `jsonb_ops` index (`0001_documents_metadata_gin.sql`) only accelerates `?`/`@>`/`@@` — **not** `->>` text equality — so every metadata-filtered query scans all documents. As the corpus grows this dominates query latency, and it interacts badly with the 8× candidate pool.
-**Fix:** either B-tree expression indexes on the actual filterable keys (`CREATE INDEX ... ON documents ((metadata->>'path'))`), or rewrite the filter to `metadata @> '{"key":"value"}'::jsonb` with a `jsonb_path_ops` GIN index. The latter is generic and matches the existing index intent.
+**Original concern:** the metadata post-filter built `doc.metadata->>'key' IN (...)`. The shipped GIN `jsonb_ops` index (`0001_documents_metadata_gin.sql`) only accelerates `?`/`@>`/`@@` — **not** `->>` text equality — so every metadata-filtered query scanned all documents.
+
+**Current state (2026-07-09):** `hybridSearch` (`packages/db/src/queries.ts`) now builds `metadata @> jsonb_build_object(key, value)` containment conditions instead, which the existing GIN index does accelerate — confirmed via `EXPLAIN ANALYZE` with `enable_seqscan=off`: the old `->>` shape produced a forced `Seq Scan` with no viable index path at all, the new `@>` shape produces a `Bitmap Index Scan` on `documents_metadata_gin_idx`. Also fixed a real correctness edge case introduced by the rewrite: `@>` is type-sensitive (`{"k":"5"}` doesn't contain `{"k":5}`), so a caller filtering on a numeric metadata field (e.g. `sizeBytes`) by its string form — which the old `->>` text-coercion matched — would silently stop matching; the fix tries the filter value as both a string and (when it parses as one) a JSON number, still fully index-backed via Postgres's `BitmapOr`. `metadataFilter` previously had zero test coverage anywhere in the repo; added `tests/e2e/src/specs/metadata-filter.spec.ts` covering single-value, multi-value (OR), multi-key (AND), no-match, and the numeric edge case.
 
 ### 🟠 H3 — No startup guard that embedding dimensions match the `vector(768)` column `[review:M7 — promoted]`
 
@@ -332,13 +333,13 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Highest-ROI RAG-quality upgrades
 
-| Item                                                     | Sev   | Effort |
-| -------------------------------------------------------- | ----- | ------ |
-| H1 — reranking stage over the existing 8× pool           | 🟠/🟢 | M      |
-| OPT-C1 — contextual retrieval (optional chunk transform) | 🟢    | M      |
-| H2 — make metadata filtering index-backed                | 🟠    | S–M    |
-| M-N3 — per-document cap / MMR diversity                  | 🟡    | S      |
-| **Build a small retrieval eval set first** (see §12)     | —     | M      |
+| Item                                                     | Sev   | Effort | Status                                                                 |
+| -------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------- |
+| H1 — reranking stage over the existing 8× pool           | 🟠/🟢 | M      | OPEN — blocked on a real-embedder eval baseline (see EVAL-BASELINE.md) |
+| OPT-C1 — contextual retrieval (optional chunk transform) | 🟢    | M      | OPEN                                                                   |
+| H2 — make metadata filtering index-backed                | 🟠    | S–M    | ✅ done (`@>` containment + numeric fallback, index-backed, tested)    |
+| M-N3 — per-document cap / MMR diversity                  | 🟡    | S      | OPEN                                                                   |
+| **Build a small retrieval eval set first** (see §12)     | —     | M      | Partial — harness is real-embedder-capable; no real run recorded yet   |
 
 ### Connector extensibility (the "easy to add sources" goal)
 

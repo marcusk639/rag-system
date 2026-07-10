@@ -446,12 +446,36 @@ export async function hybridSearch(
   const metadataConditions = Object.entries(opts.metadataFilter ?? {}).map(
     ([key, value]) => {
       const values = Array.isArray(value) ? value : [value];
-      // Same fix as sourceFilter — IN-list of parameterised text values.
-      // `key` rides through `->>${key}` as a single parameter and `values`
-      // expands into a per-value parameter list, both injection-safe.
-      return sql`AND doc.metadata->>${key} IN (${sql.join(
-        values.map((v) => sql`${v}`),
-        sql`, `,
+      // `->>${key} IN (...)` extracts metadata as text and compares — the
+      // `documents_metadata_gin_idx` GIN index (default jsonb_ops opclass)
+      // cannot accelerate that operator, only `@>` containment (verified via
+      // EXPLAIN ANALYZE with enable_seqscan=off: `->>` forces a seq scan
+      // regardless, `@>` produces a Bitmap Index Scan on the GIN index).
+      // Rewrite to an OR of per-value containment checks, built with
+      // `jsonb_build_object` so both key and value stay parameterised
+      // (injection-safe) rather than string-concatenated into a JSON literal.
+      //
+      // `@>` is type-sensitive: `{"k":"5"}` does not contain `{"k":5}`. The
+      // filter API only ever sends string values (packages/core/src/
+      // validation.ts's filterSchema), but DocumentMetadata has at least one
+      // numeric field (`sizeBytes`) a caller could filter on, and `->>`'s old
+      // text coercion matched a number against a string filter value. Also
+      // try the value as a JSON number when it parses as one, so numeric
+      // metadata fields keep matching post-fix — confirmed via EXPLAIN this
+      // still produces a BitmapOr over the same GIN index, not a fallback scan.
+      return sql`AND (${sql.join(
+        values.flatMap((v) => {
+          const conditions = [
+            sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::text)`,
+          ];
+          if (v.trim() !== "" && Number.isFinite(Number(v))) {
+            conditions.push(
+              sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::numeric)`,
+            );
+          }
+          return conditions;
+        }),
+        sql` OR `,
       )})`;
     },
   );
