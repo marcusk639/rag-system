@@ -4,8 +4,9 @@ import {
   signInternalScopeToken,
 } from "./internal-scope-auth.js";
 
-const SECRET = "test-secret-at-least-32-bytes-long-for-hs256";
-const OTHER_SECRET = "a-different-rotation-secret-also-long-enough";
+// Valid 64-character hex secrets (256 bits of entropy for HS256)
+const SECRET = "a".repeat(64);
+const OTHER_SECRET = "b".repeat(64);
 
 describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
   it("round-trips a valid token to a scoped principal carrying the verified subject", async () => {
@@ -121,5 +122,31 @@ describe("signInternalScopeToken / InternalScopeAuthProvider", () => {
     expect(() => new InternalScopeAuthProvider([])).toThrow(
       /at least one secret/,
     );
+  });
+
+  it("signInternalScopeToken rejects a secret shorter than 64 characters", async () => {
+    const shortSecret = "a".repeat(63);
+    await expect(
+      signInternalScopeToken(
+        { sub: "user-1", allowedSourceIds: ["src-a"] },
+        shortSecret,
+      ),
+    ).rejects.toThrow(/at least 64/);
+  });
+
+  it("signInternalScopeToken accepts a secret exactly 64 characters", async () => {
+    const validSecret = "a".repeat(64);
+    const token = await signInternalScopeToken(
+      { sub: "user-2", allowedSourceIds: ["src-b"] },
+      validSecret,
+    );
+    expect(token).toBeTruthy();
+    const provider = new InternalScopeAuthProvider([validSecret]);
+    const principal = await provider.authenticate(token);
+    expect(principal).toEqual({
+      kind: "scoped",
+      allowedSourceIds: ["src-b"],
+      subject: "user-2",
+    });
   });
 });

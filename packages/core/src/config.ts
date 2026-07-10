@@ -104,8 +104,19 @@ export const Config = z
        * `InternalScopeAuthProvider`). Comma-separated to support rotation
        * without downtime. Empty by default — the provider is simply excluded
        * from `composite` until at least one secret is configured.
+       * Each secret must be at least 64 hex characters (256 bits of entropy
+       * for HS256). Generate with `openssl rand -hex 32`.
        */
-      internalScopeSecrets: z.array(z.string().min(1)).default([]),
+      internalScopeSecrets: z
+        .array(
+          z
+            .string()
+            .min(
+              64,
+              "INTERNAL_SCOPE_JWT_SECRETS entries must be at least 64 hex characters (256 bits of entropy for HS256) — generate with: openssl rand -hex 32",
+            ),
+        )
+        .default([]),
     }),
 
     worker: z.object({

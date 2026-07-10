@@ -74,6 +74,12 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
 });
 
 describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
+  // Valid 64-character hex secrets for testing (256 bits of entropy)
+  const VALID_SECRET_ONE = "a".repeat(64);
+  const VALID_SECRET_TWO = "b".repeat(64);
+  const VALID_SECRET_THREE = "c".repeat(64);
+  const VALID_SECRET_WITH_COMMAS = "d".repeat(30) + "," + "e".repeat(33); // 64 total
+
   it("defaults to an empty array when unset", () => {
     const cfg = loadConfig({ ...BASE_ENV });
     expect(cfg.auth.internalScopeSecrets).toEqual([]);
@@ -82,51 +88,68 @@ describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
   it("parses a single secret", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one",
+      INTERNAL_SCOPE_JWT_SECRETS: VALID_SECRET_ONE,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([VALID_SECRET_ONE]);
   });
 
   it("parses multiple comma-separated secrets (rotation) and trims whitespace", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one, secret-two , secret-three",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE}, ${VALID_SECRET_TWO} , ${VALID_SECRET_THREE}`,
     });
     expect(cfg.auth.internalScopeSecrets).toEqual([
-      "secret-one",
-      "secret-two",
-      "secret-three",
+      VALID_SECRET_ONE,
+      VALID_SECRET_TWO,
+      VALID_SECRET_THREE,
     ]);
   });
 
   it("filters out empty entries from trailing/double commas", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,,",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE},,`,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([VALID_SECRET_ONE]);
   });
 
   it("accepts a JSON array form for secrets that might contain a comma", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
       INTERNAL_SCOPE_JWT_SECRETS: JSON.stringify([
-        "secret,with,commas",
-        "plain-secret",
+        VALID_SECRET_WITH_COMMAS,
+        VALID_SECRET_TWO,
       ]),
     });
     expect(cfg.auth.internalScopeSecrets).toEqual([
-      "secret,with,commas",
-      "plain-secret",
+      VALID_SECRET_WITH_COMMAS,
+      VALID_SECRET_TWO,
     ]);
   });
 
   it("still supports the legacy comma-separated form for backward compatibility", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,secret-two",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE},${VALID_SECRET_TWO}`,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one", "secret-two"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([
+      VALID_SECRET_ONE,
+      VALID_SECRET_TWO,
+    ]);
+  });
+
+  it("rejects an INTERNAL_SCOPE_JWT_SECRETS entry shorter than 64 characters", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, INTERNAL_SCOPE_JWT_SECRETS: "a".repeat(63) }),
+    ).toThrow(/at least 64/);
+  });
+
+  it("accepts an INTERNAL_SCOPE_JWT_SECRETS entry exactly 64 characters", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "a".repeat(64),
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["a".repeat(64)]);
   });
 
   it("fails loud on malformed JSON-looking input", () => {
