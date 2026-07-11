@@ -9,10 +9,13 @@ import type { DataClass } from "@rag/db";
  * records) from Class D (client tax-return data) — it only knows
  * `client_confidential`. Both are blocked identically today (see
  * `ClassBlockedError` in pipeline.ts), so this choice has no behavioral
- * effect yet, but `client_confidential` maps to the more conservative "D"
- * (resolved decision — see `docs/TWK-MANUAL-RUNBOOK.md` item 9) so a source
- * that turns out to hold return data is never under-classified as merely
- * "business records."
+ * effect yet. `client_confidential` maps to the more conservative "D" — a
+ * deliberate decision (2026-07-11), not an accident: since `data_class`
+ * can't yet distinguish general client business records from actual
+ * tax-return data, defaulting to the stricter class means nothing is ever
+ * under-classified as merely "business records" when it might hold return
+ * data. Revisit if `sources.data_class` ever gains a distinct value for
+ * tax-return-specific content.
  *
  * Fails CLOSED on an unrecognized value (throws) rather than falling
  * through to `undefined`, which the pipeline's `?? "A"` default would
