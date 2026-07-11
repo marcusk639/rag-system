@@ -43,8 +43,8 @@ const { runIngestionMock, enqueueContinuationMock, mapDataClassMock } =
 vi.mock("@rag/ingestion", () => ({
   runIngestion: runIngestionMock,
   enqueueContinuation: enqueueContinuationMock,
-  MAX_SYNC_CONTINUATIONS: 100_000,
   mapDataClassToDocumentClass: mapDataClassMock,
+  MAX_SYNC_CONTINUATIONS: 100_000,
 }));
 
 function fakeLogger() {

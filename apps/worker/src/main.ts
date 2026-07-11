@@ -9,6 +9,7 @@ import { initMonitoring } from "@rag/runtime";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
 import { handleDocsGapDigest } from "./handlers/docs-gap-digest.js";
+import { handleShipAuditLog } from "./handlers/ship-audit-log.js";
 import { handleSyncSource } from "./handlers/sync-source.js";
 
 /**
@@ -89,6 +90,27 @@ async function main(): Promise<void> {
     async (jobs) => {
       for (const job of jobs) {
         await handleDocsGapDigest(job, builtDeps);
+      }
+    },
+  );
+
+  // Second recurring job (registered via `boss.schedule()` in `createQueue`,
+  // same as docsGapDigest above) — ships `audit_log` rows to the configured
+  // off-host sink. No-ops per-tick when `AUDIT_SINK_PROVIDER=none`
+  // (builtDeps.auditLogSink is null) — see handleShipAuditLog.
+  await builtDeps.queue.work<object>(
+    JOB_NAMES.shipAuditLog,
+    {
+      batchSize: 1,
+      pollingIntervalSeconds: Math.max(
+        1,
+        Math.round(config.worker.pollIntervalMs / 1000),
+      ),
+      includeMetadata: true,
+    },
+    async (jobs) => {
+      for (const job of jobs) {
+        await handleShipAuditLog(job, builtDeps);
       }
     },
   );

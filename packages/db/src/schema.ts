@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   pgEnum,
   customType,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { EMBEDDING_COLUMN_DIMENSIONS } from "./embedding-dimensions.js";
 
@@ -498,6 +499,110 @@ export const sourceClientAssignments = pgTable(
   }),
 );
 
+/**
+ * Direct per-source access grants — a staff member ↔ source pairing that
+ * bypasses the client-routed model entirely. Exists for firm-internal
+ * sources (e.g. firm-sop, firm-research) that have no client to route
+ * through. NOT a nullable-clientId sentinel on staffClientAssignments: that
+ * would need a special-cased NULL-match join branch that would grant every
+ * "direct" user access to every "direct" source, not a specific
+ * per-user-per-source pairing. Soft-delete only (revoked_at), same §7216
+ * reconstructibility rule as staffClientAssignments.
+ */
+export const staffSourceAssignments = pgTable(
+  "staff_source_assignments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    /** PropelAuth/IdP userId (opaque string — not a DB FK). */
+    userId: text("user_id").notNull(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** userId of the admin who granted access — audit trail. */
+    grantedBy: text("granted_by").notNull(),
+    /** Null = active. Set to now() to revoke. Never DELETE. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    ssaUserSourceUnique: uniqueIndex("ssa_user_source_unique").on(
+      table.userId,
+      table.sourceId,
+    ),
+    // Deliberate deviation from strictly mirroring staffClientAssignments
+    // (which has no equivalent standalone index): source_id carries an ON
+    // DELETE CASCADE FK, so a standalone index here avoids a sequential scan
+    // on every source deletion (mirrors src_client_source_idx on
+    // sourceClientAssignments). No separate user_id-only index — the
+    // composite unique index above already leads with user_id, so lookups
+    // by user_id alone use it via leftmost-prefix matching.
+    sourceIdx: index("ssa_source_idx").on(table.sourceId),
+  }),
+);
+
+// ----------------------------------------------------------------------------
+// docs_gap_digest_runs — one row per weekly documentation-gap digest tick
+// (apps/worker/src/handlers/docs-gap-digest.ts), persisting the exact
+// DocsGapDigestSummary aggregate the job already logs so it's queryable and
+// admin-visible instead of existing only as a structured log line.
+//
+// Tier 1 only, deliberately: by_endpoint/by_source_group are small,
+// display-only count aggregates -- never raw question text, a hash, or any
+// other reversible derivative. Do NOT add a column here that could
+// reconstruct what was asked; that is a separate, out-of-scope policy
+// decision (see docs/TWK-MANUAL-RUNBOOK.md).
+// ----------------------------------------------------------------------------
+/**
+ * Structurally mirrors `SourceGroupSummary` in
+ * `apps/worker/src/handlers/docs-gap-digest.ts`, redeclared here rather than
+ * imported so `@rag/db` doesn't take a dependency on an app package.
+ */
+export interface DocsGapDigestSourceGroup {
+  sourceIds: string[];
+  count: number;
+  byEndpoint: Record<string, number>;
+}
+
+export const docsGapDigestRuns = pgTable("docs_gap_digest_runs", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`uuid_generate_v4()`),
+  runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+  windowSince: timestamp("window_since", { withTimezone: true }).notNull(),
+  windowUntil: timestamp("window_until", { withTimezone: true }).notNull(),
+  totalWeakEvents: integer("total_weak_events").notNull(),
+  /** Keyed by endpoint ("ask" | "search") -> count. */
+  byEndpoint: jsonb("by_endpoint")
+    .notNull()
+    .default({})
+    .$type<Record<string, number>>(),
+  /** Array of source-id-group summaries -- sourceIds/count/byEndpoint. */
+  bySourceGroup: jsonb("by_source_group")
+    .notNull()
+    .default({})
+    .$type<DocsGapDigestSourceGroup[]>(),
+});
+export type DocsGapDigestRun = typeof docsGapDigestRuns.$inferSelect;
+export type NewDocsGapDigestRun = typeof docsGapDigestRuns.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// audit_log_shipper_state — single-row watermark for the off-host audit-log
+// shipping job (apps/worker/src/handlers/ship-audit-log.ts). A dedicated
+// table (not overloading `sources.cursor`) so the shipping watermark's
+// lifecycle is independent of any single source's sync state. Boolean-
+// sentinel pattern (`id` is always `true`) since this table only ever has
+// one row — NOT `uuid_generate_v4()`.
+// ----------------------------------------------------------------------------
+export const auditLogShipperState = pgTable("audit_log_shipper_state", {
+  id: boolean("id").primaryKey().default(true),
+  lastShippedAt: timestamp("last_shipped_at", { withTimezone: true }),
+});
+export type AuditLogShipperState = typeof auditLogShipperState.$inferSelect;
+
 export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =
   typeof staffClientAssignments.$inferInsert;
@@ -506,6 +611,10 @@ export type SourceClientAssignment =
   typeof sourceClientAssignments.$inferSelect;
 export type NewSourceClientAssignment =
   typeof sourceClientAssignments.$inferInsert;
+
+export type StaffSourceAssignment = typeof staffSourceAssignments.$inferSelect;
+export type NewStaffSourceAssignment =
+  typeof staffSourceAssignments.$inferInsert;
 
 export type NewIngestLog = typeof ingestLog.$inferInsert;
 export type NewPendingUpload = typeof pendingUploads.$inferInsert;

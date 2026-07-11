@@ -3,6 +3,7 @@ export { initMonitoring, captureException } from "./monitoring.js";
 import {
   EgressPolicy,
   createAuthProvider,
+  type AuditLogSink,
   type AuthProvider,
   type Config,
   type ObjectStore,
@@ -11,6 +12,7 @@ import { createDb, pgSslOption, type Db } from "@rag/db";
 import { createQueue } from "@rag/ingestion";
 import {
   Retriever,
+  createAuditLogSink,
   createEmbeddingProvider,
   createGenerator,
   createObjectStore,
@@ -47,6 +49,11 @@ export interface CoreDeps {
    * download route returns 404.
    */
   objectStore: ObjectStore | null;
+  /**
+   * Off-host sink for `audit_log` rows. Null when shipping is disabled
+   * (`AUDIT_SINK_PROVIDER=none`) — the ship-audit-log job then no-ops.
+   */
+  auditLogSink: AuditLogSink | null;
   /** Drain pg-boss (graceful) then the DB pool. Idempotent. */
   close: () => Promise<void>;
 }
@@ -127,12 +134,18 @@ export async function buildCoreDeps(
     ssl: pgSslOption(config.databaseSsl),
   });
 
+  // Shared across every provider that needs egress enforcement (embedder,
+  // audit-log sink) so they all honor the SAME EGRESS_ALLOWED_HOSTS allow-list.
+  const egressPolicy = EgressPolicy.fromEnv();
+
   const embedder = createEmbeddingProvider(config.embedding, {
-    egressPolicy: EgressPolicy.fromEnv(),
+    egressPolicy,
     complianceMode: config.complianceMode,
   });
 
   const objectStore = createObjectStore(config.objectStore);
+
+  const auditLogSink = createAuditLogSink(config.auditSink, { egressPolicy });
 
   const reranker = createReranker(config.rerank);
 
@@ -157,6 +170,8 @@ export async function buildCoreDeps(
     schema: config.pgBossSchema,
     docsGapDigestCron: config.docsGapDigest.cron,
     docsGapDigestTz: config.docsGapDigest.tz,
+    shipAuditLogCron: config.auditSink.cron,
+    shipAuditLogTz: config.auditSink.tz,
   });
 
   // Generation reuses the embedding provider's API key — same vendor in
@@ -197,5 +212,14 @@ export async function buildCoreDeps(
     }
   };
 
-  return { db, embedder, retriever, queue, generator, objectStore, close };
+  return {
+    db,
+    embedder,
+    retriever,
+    queue,
+    generator,
+    objectStore,
+    auditLogSink,
+    close,
+  };
 }

@@ -15,7 +15,7 @@ export const TEST_API_TOKEN = "e2e-test-token";
  * per HS256 (see `signInternalScopeToken`'s doc comment).
  */
 export const TEST_INTERNAL_SCOPE_SECRET =
-  "e2e-test-internal-scope-secret-32-bytes-min";
+  "e2e-test-internal-scope-secret-32-bytes-minxxxxxxxxxxxxxxxxxxxxxxx";
 
 export const env = {
   databaseUrl:
@@ -100,5 +100,8 @@ export function makeTestConfig(): Config {
     // Digest itself is never triggered by the e2e harness (no worker cron
     // ticks during tests) — values only need to satisfy the Config shape.
     docsGapDigest: { cron: "0 6 * * 1", tz: "UTC", minScore: 0.3 },
+    // Shipping disabled by default in the e2e harness; specs that need a
+    // configured sink build their own Config/deps override.
+    auditSink: { provider: "none", cron: "0 * * * *", tz: "UTC" },
   };
 }

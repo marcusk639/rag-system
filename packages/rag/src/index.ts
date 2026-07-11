@@ -29,6 +29,10 @@ export {
 export { S3ObjectStore } from "./storage/s3-object-store.js";
 export { createObjectStore, documentStorageKey } from "./storage/factory.js";
 
+// Audit-log shipping (off-host sink for audit_log rows)
+export { HttpWebhookAuditLogSink } from "./audit-sink/http-webhook.js";
+export { createAuditLogSink } from "./audit-sink/factory.js";
+
 // Retrieval
 export { Retriever } from "./retrieval/retriever.js";
 export {

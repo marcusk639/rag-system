@@ -7,12 +7,24 @@ const BGE_QUERY_PREFIX =
 
 // vi.hoisted() ensures these are available inside vi.mock() factories, which
 // are hoisted to the top of the module graph by vitest before any imports run.
-const { mockPipeFn, mockPipelineFactory, mockHFEnv } = vi.hoisted(() => {
-  const mockPipeFn = vi.fn();
-  const mockHFEnv: Record<string, string | undefined> = {};
-  const mockPipelineFactory = vi.fn().mockResolvedValue(mockPipeFn);
-  return { mockPipeFn, mockPipelineFactory, mockHFEnv };
-});
+const { mockPipeFn, mockPipelineFactory, mockHFEnv, mockTokenizerFn } =
+  vi.hoisted(() => {
+    const mockPipeFn = vi.fn() as ReturnType<typeof vi.fn> & {
+      tokenizer?: ReturnType<typeof vi.fn>;
+    };
+    const mockHFEnv: Record<string, string | undefined> = {};
+    const mockPipelineFactory = vi.fn().mockResolvedValue(mockPipeFn);
+    // Real @huggingface/transformers pipeline instances expose their
+    // tokenizer as a public `.tokenizer` property (see Pipeline base class in
+    // src/pipelines.js) — a callable that returns { input_ids }. There is no
+    // truncation option on the FeatureExtractionPipeline call itself (verified
+    // against the installed package's own .d.ts: FeatureExtractionPipelineOptions
+    // only has pooling/normalize/quantize/precision), so the real fix detects
+    // overflow via this tokenizer rather than a nonexistent pipe() option.
+    const mockTokenizerFn = vi.fn();
+    mockPipeFn.tokenizer = mockTokenizerFn;
+    return { mockPipeFn, mockPipelineFactory, mockHFEnv, mockTokenizerFn };
+  });
 
 // Intercept the dynamic import("@huggingface/transformers") inside _loadPipeline.
 vi.mock("@huggingface/transformers", () => ({
@@ -47,6 +59,14 @@ describe("LocalEmbeddingProvider", () => {
       const texts = Array.isArray(inputs) ? inputs : [inputs];
       return Promise.resolve(makeTensor(texts.length, 768));
     });
+    mockPipeFn.tokenizer = mockTokenizerFn;
+    // Default: approximate real BPE tokenization (~4 chars/token) so ordinary
+    // short test strings stay well under the 512-token limit and never
+    // trigger a spurious truncation warning. Tests that need to exercise
+    // overflow override this per-test.
+    mockTokenizerFn.mockImplementation((text: string) => ({
+      input_ids: new Array(Math.ceil(String(text).length / 4)).fill(0),
+    }));
   });
 
   afterEach(() => {
@@ -188,6 +208,126 @@ describe("LocalEmbeddingProvider", () => {
       await expect(p.embedBatch(["a", "b", "c"])).rejects.toThrow(
         EmbeddingError,
       );
+    });
+  });
+
+  // ── Truncation backstop ───────────────────────────────────────────────────────
+  //
+  // @huggingface/transformers hardcodes `truncation: true` inside
+  // FeatureExtractionPipeline._call with no way to configure it via the public
+  // pipe() options (FeatureExtractionPipelineOptions only exposes
+  // pooling/normalize/quantize/precision — verified against the installed
+  // v3.8.1 .d.ts). So truncation already happens silently today; the fix
+  // detects it via pipe.tokenizer (a public property) and logs a warning
+  // rather than throwing — one anomalously long chunk should degrade
+  // gracefully, not fail the whole ingestion batch.
+
+  describe("truncation backstop", () => {
+    it("REGRESSION: a chunk exceeding the 512-token limit no longer embeds with zero signal — it now logs a warning (previously silent)", async () => {
+      // 3000 chars / 4 ≈ 750 tokens — well past the 512-token limit.
+      const longText = "word ".repeat(600);
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      const results = await p.embedBatch([longText]);
+
+      expect(results).toHaveLength(1);
+      // Fixed: the call still succeeds, but is no longer silent.
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs a warning identifying an overlong chunk without throwing", async () => {
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(750).fill(0) });
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      const results = await p.embedBatch(["an anomalously long paragraph"]);
+
+      expect(results).toHaveLength(1);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [details, message] = logger.warn.mock.calls[0]!;
+      expect(details).toMatchObject({ tokenCount: 750, limit: 512 });
+      expect(message).toMatch(/512/);
+    });
+
+    it("does not warn for chunks within the token limit", async () => {
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(100).fill(0) });
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["a short chunk"]);
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("identifies which specific text in a batch was truncated", async () => {
+      mockTokenizerFn.mockImplementation((text: string) => ({
+        input_ids: new Array(text === "overlong" ? 900 : 50).fill(0),
+      }));
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["short one", "overlong", "short two"]);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [details] = logger.warn.mock.calls[0]!;
+      expect(details).toMatchObject({ textIndex: 1, tokenCount: 900 });
+    });
+
+    it("still succeeds (does not throw) when a chunk requires truncation", async () => {
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(1000).fill(0) });
+      const p = new LocalEmbeddingProvider({ logger: { warn: vi.fn() } });
+
+      await expect(
+        p.embedBatch(["a very long anomalous chunk"]),
+      ).resolves.toHaveLength(1);
+    });
+
+    it("respects the tokenizer's own model_max_length over the constructor default", async () => {
+      (
+        mockPipeFn.tokenizer as unknown as { model_max_length: number }
+      ).model_max_length = 256;
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(300).fill(0) });
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["text tokenizing to 300 tokens"]);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [details] = logger.warn.mock.calls[0]!;
+      expect(details).toMatchObject({ tokenCount: 300, limit: 256 });
+
+      delete (mockPipeFn.tokenizer as unknown as { model_max_length?: number })
+        .model_max_length;
+    });
+
+    it("falls back to a no-op console-based logger when none is injected (no logging library in this package)", async () => {
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(700).fill(0) });
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const p = new LocalEmbeddingProvider();
+        await p.embedBatch(["overlong without an injected logger"]);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("never throws even when the pipeline exposes no tokenizer at all", async () => {
+      mockPipeFn.tokenizer = undefined;
+      const provider = new LocalEmbeddingProvider();
+      await expect(provider.embedBatch(["some text"])).resolves.toBeDefined();
+    });
+
+    it("detection is best-effort — a tokenizer failure never blocks the actual embed call", async () => {
+      mockTokenizerFn.mockImplementation(() => {
+        throw new Error("tokenizer explosion");
+      });
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await expect(p.embedBatch(["text"])).resolves.toHaveLength(1);
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 

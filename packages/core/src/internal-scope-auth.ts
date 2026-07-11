@@ -20,13 +20,20 @@ const CLOCK_TOLERANCE_SECONDS = 5;
 
 /**
  * Sign a short-lived scope-assertion JWT. Called by a trusted BFF, never by
- * Fastify itself. `secret` must be at least 32 bytes for HS256 per RFC 7518 —
- * callers are responsible for generating an adequately long secret.
+ * Fastify itself. `secret` must be at least 64 hex characters (256 bits of
+ * entropy) for HS256 — enforced here since the BFF reads the secret directly
+ * from process.env and never routes through config validation.
  */
 export async function signInternalScopeToken(
   payload: InternalScopeTokenPayload,
   secret: string,
 ): Promise<string> {
+  if (secret.length < 64) {
+    throw new Error(
+      "INTERNAL_SCOPE_JWT_SECRET must be at least 64 hex characters (256 bits of entropy for HS256) — " +
+        "generate with: openssl rand -hex 32",
+    );
+  }
   const key = new TextEncoder().encode(secret);
   return new SignJWT({ allowedSourceIds: payload.allowedSourceIds })
     .setProtectedHeader({ alg: ALG })

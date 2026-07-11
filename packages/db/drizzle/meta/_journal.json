@@ -83,21 +83,42 @@
       "idx": 11,
       "version": "7",
       "when": 1790000000000,
-      "tag": "0012_add_git_markdown_source_kind",
+      "tag": "0012_staff_source_assignments",
       "breakpoints": true
     },
     {
       "idx": 12,
       "version": "7",
-      "when": 1790000000001,
-      "tag": "0013_add_ecfr_part4_source_kind",
+      "when": 1791000000000,
+      "tag": "0013_docs_gap_digest_runs",
       "breakpoints": true
     },
     {
       "idx": 13,
       "version": "7",
-      "when": 1791000000000,
-      "tag": "0014_add_audit_log_provider_disclosure",
+      "when": 1792000000000,
+      "tag": "0014_audit_log_shipper_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0015_add_git_markdown_source_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793000000001,
+      "tag": "0016_add_ecfr_part4_source_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0017_add_audit_log_provider_disclosure",
       "breakpoints": true
     }
   ]

@@ -1,17 +1,22 @@
-import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
   auditLog,
+  auditLogShipperState,
   chunks,
+  docsGapDigestRuns,
   documents,
   ingestLog,
   ingestionJobs,
   pendingUploads,
   sources,
   type AuditLog,
+  type DocsGapDigestRun,
+  type DocsGapDigestSourceGroup,
   type NewAuditLog,
   type NewChunk,
+  type NewDocsGapDigestRun,
   type NewDocument,
   type NewIngestionJob,
   type NewIngestLog,
@@ -860,19 +865,120 @@ export async function getWeakResultAuditEvents(
     );
 }
 
+export interface DocsGapDigestRunRow {
+  windowSince: Date;
+  windowUntil: Date;
+  totalWeakEvents: number;
+  byEndpoint: Record<string, number>;
+  bySourceGroup: DocsGapDigestSourceGroup[];
+}
+
+/**
+ * Persists one row of the already-computed `DocsGapDigestSummary` aggregate
+ * (see `aggregateWeakResultEvents` in `docs-gap-digest.ts`) unchanged --
+ * Tier 1 only. Never pass question text, a hash, or any other reversible
+ * derivative here; `byEndpoint`/`bySourceGroup` are the same small,
+ * display-only count aggregates the digest job already logs.
+ */
+export async function insertDocsGapDigestRun(
+  db: Db,
+  row: DocsGapDigestRunRow,
+): Promise<void> {
+  const values: NewDocsGapDigestRun = {
+    windowSince: row.windowSince,
+    windowUntil: row.windowUntil,
+    totalWeakEvents: row.totalWeakEvents,
+    byEndpoint: row.byEndpoint,
+    bySourceGroup: row.bySourceGroup,
+  };
+  await db.insert(docsGapDigestRuns).values(values);
+}
+
+/**
+ * Most recent digest runs, newest first, for the admin UI (Step 8). No
+ * filtering by inner jsonb keys -- these are small, whole-row reads.
+ */
+export async function listDocsGapDigestRuns(
+  db: Db,
+  limit = 20,
+): Promise<DocsGapDigestRun[]> {
+  return db
+    .select()
+    .from(docsGapDigestRuns)
+    .orderBy(desc(docsGapDigestRuns.runAt))
+    .limit(limit);
+}
+
+// ============================================================================
+// Audit-log shipping (off-host sink) — cursor-based scheduled job, see
+// apps/worker/src/handlers/ship-audit-log.ts. `audit_log_shipper_state` is a
+// dedicated single-row watermark table (not overloading `sources.cursor`).
+// ============================================================================
+
+/** The current shipping watermark, or `null` if the job has never run. */
+export async function getAuditLogShipperWatermark(
+  db: Db,
+): Promise<Date | null> {
+  const [row] = await db.select().from(auditLogShipperState).limit(1);
+  return row?.lastShippedAt ?? null;
+}
+
+/**
+ * Advance the shipping watermark to `lastShippedAt`. Callers MUST only call
+ * this after a successful `ship()` — never on a thrown egress-rejection or
+ * network error — so a failed batch is retried on the next tick.
+ */
+export async function advanceAuditLogShipperWatermark(
+  db: Db,
+  lastShippedAt: Date,
+): Promise<void> {
+  await db
+    .insert(auditLogShipperState)
+    .values({ id: true, lastShippedAt })
+    .onConflictDoUpdate({
+      target: auditLogShipperState.id,
+      set: { lastShippedAt },
+    });
+}
+
+/**
+ * `audit_log` rows created strictly after `since` (or all rows when `since`
+ * is `null` — the job's first-ever tick), oldest first so the caller can
+ * advance the watermark to the last row's `createdAt`.
+ */
+export async function getAuditLogRowsSince(
+  db: Db,
+  since: Date | null,
+): Promise<AuditLog[]> {
+  return db
+    .select()
+    .from(auditLog)
+    .where(since ? gt(auditLog.createdAt, since) : undefined)
+    .orderBy(auditLog.createdAt);
+}
+
 // ---------------------------------------------------------------------------
 // Identity → scope mapping (Phase B / Adoption-Plan Phase 1)
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the source IDs accessible to a given user via client assignments.
+ * Resolves the source IDs accessible to a given user via client assignments
+ * AND direct source assignments.
  *
- * Joins staff_client_assignments → source_client_assignments on clientId to
- * find every source the user's active (non-revoked) engagements cover.
+ * Unions two branches:
+ *   1. staff_client_assignments → source_client_assignments on clientId —
+ *      every source the user's active (non-revoked) engagements cover.
+ *   2. staff_source_assignments — every source the user was directly and
+ *      actively granted, with no client involved at all (e.g. firm-internal
+ *      sources like firm-sop/firm-research).
  *
  * Returns [] for unmapped users. Callers MUST treat [] as fail-closed:
  * pass it as `enforcedSourceIds` to hybridSearch, which short-circuits to an
  * empty result set without touching the DB. This satisfies CR-5.
+ *
+ * Uses UNION (not UNION ALL) so cross-branch duplicates are removed
+ * automatically — the inner DISTINCT on branch 1 alone would be redundant
+ * once wrapped in a UNION, so it's dropped here.
  *
  * Never hard-deletes grants — soft-delete only (revoked_at IS NULL = active),
  * preserving §7216 reconstructibility.
@@ -882,11 +988,18 @@ export async function resolveSourceIdsForUser(
   userId: string,
 ): Promise<string[]> {
   const rows = await db.execute<{ source_id: string }>(sql`
-    SELECT DISTINCT sca.source_id
-    FROM staff_client_assignments sta
-    JOIN source_client_assignments sca ON sca.client_id = sta.client_id
-    WHERE sta.user_id = ${userId}
-      AND sta.revoked_at IS NULL
+    SELECT source_id FROM (
+      SELECT sca.source_id
+      FROM staff_client_assignments sta
+      JOIN source_client_assignments sca ON sca.client_id = sta.client_id
+      WHERE sta.user_id = ${userId}
+        AND sta.revoked_at IS NULL
+      UNION
+      SELECT source_id
+      FROM staff_source_assignments
+      WHERE user_id = ${userId}
+        AND revoked_at IS NULL
+    ) combined
   `);
   return rows.rows.map((r) => r.source_id);
 }
@@ -963,6 +1076,83 @@ export async function listAssignmentHistoryForStaff(
   `);
   return rows.rows.map((r) => ({
     clientId: r.client_id,
+    grantedAt: r.granted_at,
+    grantedBy: r.granted_by,
+    revokedAt: r.revoked_at,
+  }));
+}
+
+export interface GrantSourceAccessInput {
+  userId: string;
+  sourceId: string;
+  grantedBy: string;
+}
+
+/**
+ * Grant a staff member direct access to a source (no client involved).
+ * Un-revokes an existing (possibly revoked) row for this exact
+ * (userId, sourceId) pair if one exists, rather than inserting a duplicate —
+ * same atomic `INSERT ... ON CONFLICT DO UPDATE` pattern as
+ * `grantClientAccess`, relying on the `ssa_user_source_unique` unique index
+ * (migration 0012) to avoid the TOCTOU race a SELECT-then-INSERT/UPDATE
+ * version would have.
+ */
+export async function grantSourceAccess(
+  db: Db,
+  { userId, sourceId, grantedBy }: GrantSourceAccessInput,
+): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO staff_source_assignments (user_id, source_id, granted_by)
+    VALUES (${userId}, ${sourceId}, ${grantedBy})
+    ON CONFLICT (user_id, source_id)
+    DO UPDATE SET
+      revoked_at = NULL,
+      granted_by = ${grantedBy},
+      granted_at = now()
+  `);
+}
+
+/**
+ * Revoke a staff member's direct access to a source. Soft-delete only (sets
+ * `revoked_at`) — never a hard `DELETE`, preserving the audit trail per the
+ * schema's existing design intent. A no-op if no active grant exists.
+ */
+export async function revokeSourceAccess(
+  db: Db,
+  { userId, sourceId }: { userId: string; sourceId: string },
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE staff_source_assignments
+    SET revoked_at = now()
+    WHERE user_id = ${userId} AND source_id = ${sourceId} AND revoked_at IS NULL
+  `);
+}
+
+export interface StaffSourceAssignmentHistoryRow {
+  sourceId: string;
+  grantedAt: Date;
+  grantedBy: string;
+  revokedAt: Date | null;
+}
+
+/** Full grant/revoke history for one staff member's direct source grants, newest first — powers the admin UI's history view. */
+export async function listSourceAssignmentHistoryForStaff(
+  db: Db,
+  userId: string,
+): Promise<StaffSourceAssignmentHistoryRow[]> {
+  const rows = await db.execute<{
+    source_id: string;
+    granted_at: Date;
+    granted_by: string;
+    revoked_at: Date | null;
+  }>(sql`
+    SELECT source_id, granted_at, granted_by, revoked_at
+    FROM staff_source_assignments
+    WHERE user_id = ${userId}
+    ORDER BY granted_at DESC
+  `);
+  return rows.rows.map((r) => ({
+    sourceId: r.source_id,
     grantedAt: r.granted_at,
     grantedBy: r.granted_by,
     revokedAt: r.revoked_at,

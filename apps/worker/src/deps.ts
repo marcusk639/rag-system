@@ -1,4 +1,4 @@
-import type { Config, Connector, ObjectStore } from "@rag/core";
+import type { AuditLogSink, Config, Connector, ObjectStore } from "@rag/core";
 import {
   claimPendingUploads,
   getPendingUploadByExternalId,
@@ -42,6 +42,8 @@ export interface WorkerDeps {
   queue: Queue;
   /** Where original document bytes are persisted; null when storage is disabled. */
   objectStore: ObjectStore | null;
+  /** Off-host sink for `audit_log` rows; null when shipping is disabled. */
+  auditLogSink: AuditLogSink | null;
   /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
@@ -62,10 +64,8 @@ export async function buildDeps(
 ): Promise<WorkerDeps> {
   // Shared core graph (db/embedder/queue/close + an unused generator). Worker-
   // only resources (parser, chunker, connector factory) are layered on below.
-  const { db, embedder, queue, objectStore, close } = await buildCoreDeps(
-    config,
-    logger,
-  );
+  const { db, embedder, queue, objectStore, auditLogSink, close } =
+    await buildCoreDeps(config, logger);
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -137,6 +137,7 @@ export async function buildDeps(
     embedder,
     queue,
     objectStore,
+    auditLogSink,
     makeConnector,
     close,
   };

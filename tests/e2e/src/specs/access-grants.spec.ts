@@ -1,12 +1,29 @@
 import { sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
 import {
   grantClientAccess,
+  grantSourceAccess,
   listAssignmentHistoryForStaff,
+  listSourceAssignmentHistoryForStaff,
+  resolveSourceIdsForUser,
   revokeClientAccess,
+  revokeSourceAccess,
 } from "@rag/db";
 import type { Db } from "@rag/db";
-import { openTestDb } from "../helpers/db.js";
+import {
+  assignSourceToClient,
+  createCustomSource,
+  openTestDb,
+  truncateAll,
+} from "../helpers/db.js";
 
 /**
  * SDD Task 5 (per-user-auth): `grantClientAccess` / `revokeClientAccess` /
@@ -150,5 +167,211 @@ describe("E2E: grantClientAccess / revokeClientAccess / listAssignmentHistoryFor
       DELETE FROM staff_client_assignments
       WHERE user_id = ${userId} AND client_id = ${clientId}
     `);
+  });
+});
+
+/**
+ * SDD Task 9 (per-user-auth): `grantSourceAccess` / `revokeSourceAccess` /
+ * `listSourceAssignmentHistoryForStaff` on the new `staff_source_assignments`
+ * table, plus the `resolveSourceIdsForUser` UNION change that reads it.
+ *
+ * Lives here (not `packages/db`'s unit suite) for the exact reason given in
+ * this file's header comment above: `pnpm --filter @rag/db test` runs
+ * DB-free, and proving grant/revoke/re-grant row semantics — and, critically,
+ * proving the UNION doesn't leak one user's direct grant into another user's
+ * resolved scope — needs real Postgres row state, not a hand-rolled stub.
+ *
+ * Unlike `staff_client_assignments`, `staff_source_assignments.source_id` DOES
+ * carry `ON DELETE CASCADE → sources`, so `truncateAll` (which cascades from
+ * `sources`) cleans this table for free — no manual DELETE cleanup needed.
+ */
+describe("E2E: grantSourceAccess / revokeSourceAccess / listSourceAssignmentHistoryForStaff", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  beforeAll(() => {
+    const handle = openTestDb();
+    db = handle.db;
+    close = handle.close;
+  });
+
+  beforeEach(async () => {
+    await truncateAll(db);
+  });
+
+  afterAll(async () => {
+    await close();
+  });
+
+  it("grants access, then listSourceAssignmentHistoryForStaff shows one active (non-revoked) row", async () => {
+    const sourceId = await createCustomSource(db, "e2e-direct-source-1");
+
+    await grantSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-1",
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+
+    const history = await listSourceAssignmentHistoryForStaff(
+      db,
+      "e2e-aad-oid-src-grant-1",
+    );
+    expect(history).toHaveLength(1);
+    expect(history[0]!).toMatchObject({
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+      revokedAt: null,
+    });
+  });
+
+  it("revoking sets revokedAt without deleting the row (audit trail preserved)", async () => {
+    const sourceId = await createCustomSource(db, "e2e-direct-source-2");
+
+    await grantSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-2",
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+    await revokeSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-2",
+      sourceId,
+    });
+
+    const history = await listSourceAssignmentHistoryForStaff(
+      db,
+      "e2e-aad-oid-src-grant-2",
+    );
+    expect(history).toHaveLength(1);
+    expect(history[0]!.revokedAt).not.toBeNull();
+  });
+
+  it("re-granting after a revoke un-revokes the SAME row instead of duplicating it", async () => {
+    const sourceId = await createCustomSource(db, "e2e-direct-source-3");
+
+    await grantSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-3",
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+    await revokeSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-3",
+      sourceId,
+    });
+    await grantSourceAccess(db, {
+      userId: "e2e-aad-oid-src-grant-3",
+      sourceId,
+      grantedBy: "e2e-admin-oid-2",
+    });
+
+    const history = await listSourceAssignmentHistoryForStaff(
+      db,
+      "e2e-aad-oid-src-grant-3",
+    );
+    expect(history).toHaveLength(1); // not 2 — same row, re-activated
+    expect(history[0]!.revokedAt).toBeNull();
+    expect(history[0]!.grantedBy).toBe("e2e-admin-oid-2");
+  });
+
+  it("concurrent grants for the same (userId, sourceId) pair never create duplicate rows", async () => {
+    const sourceId = await createCustomSource(db, "e2e-direct-source-4");
+    const userId = `concurrent-user-${Date.now()}`;
+
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        grantSourceAccess(db, { userId, sourceId, grantedBy: "test-admin" }),
+      ),
+    );
+
+    const rows = await db.execute<{ count: string }>(sql`
+      SELECT count(*)::text as count FROM staff_source_assignments
+      WHERE user_id = ${userId} AND source_id = ${sourceId}
+    `);
+    expect(rows.rows[0]?.count).toBe("1");
+  });
+});
+
+/**
+ * SDD Task 9: `resolveSourceIdsForUser`'s UNION of the client-routed branch
+ * and the new direct-grant branch.
+ *
+ * The negative/isolation case is the load-bearing one: a `UNION` where the
+ * new subquery's `user_id = $1` binding is dropped or mis-bound would make
+ * the positive case pass while silently granting every user access to every
+ * directly-granted source — a real cross-tenant confidentiality break. Only
+ * asserting what user A CAN see would miss that; asserting what user B and C
+ * do NOT see is what actually catches it.
+ */
+describe("E2E: resolveSourceIdsForUser — direct grants unioned with client-routed grants", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  beforeAll(() => {
+    const handle = openTestDb();
+    db = handle.db;
+    close = handle.close;
+  });
+
+  beforeEach(async () => {
+    await truncateAll(db);
+  });
+
+  afterAll(async () => {
+    await close();
+  });
+
+  it("a user with a direct source grant sees that source resolved (positive case)", async () => {
+    const sourceId = await createCustomSource(db, "e2e-union-direct-source");
+    await grantSourceAccess(db, {
+      userId: "e2e-union-user-direct",
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+
+    const resolved = await resolveSourceIdsForUser(db, "e2e-union-user-direct");
+    expect(resolved).toContain(sourceId);
+  });
+
+  it("a user with NO grants at all does not see another user's direct source grant (isolation)", async () => {
+    const sourceId = await createCustomSource(db, "e2e-union-isolation-source");
+    await grantSourceAccess(db, {
+      userId: "e2e-union-user-a",
+      sourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+
+    const resolvedForB = await resolveSourceIdsForUser(db, "e2e-union-user-b");
+    expect(resolvedForB).not.toContain(sourceId);
+    expect(resolvedForB).toEqual([]);
+  });
+
+  it("a user with only a client-routed grant sees the client-routed source but NOT another user's unrelated direct grant", async () => {
+    const directSourceId = await createCustomSource(
+      db,
+      "e2e-union-other-users-direct-source",
+    );
+    const clientRoutedSourceId = await createCustomSource(
+      db,
+      "e2e-union-client-routed-source",
+    );
+    const clientId = "e2e-union-client-1";
+
+    await grantSourceAccess(db, {
+      userId: "e2e-union-user-direct-owner",
+      sourceId: directSourceId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+    await assignSourceToClient(db, clientRoutedSourceId, clientId);
+    await grantClientAccess(db, {
+      userId: "e2e-union-user-client-routed",
+      clientId,
+      grantedBy: "e2e-admin-oid-1",
+    });
+
+    const resolved = await resolveSourceIdsForUser(
+      db,
+      "e2e-union-user-client-routed",
+    );
+    expect(resolved).toContain(clientRoutedSourceId);
+    expect(resolved).not.toContain(directSourceId);
   });
 });

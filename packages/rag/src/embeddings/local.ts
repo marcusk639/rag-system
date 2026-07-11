@@ -30,16 +30,58 @@ import { EmbeddingError } from "@rag/core";
 const BGE_QUERY_PREFIX =
   "Represent this sentence for searching relevant passages: ";
 
+/**
+ * Default token ceiling for the local model (Xenova/bge-base-en-v1.5's
+ * 512-token limit). Used only as a fallback when the loaded tokenizer
+ * doesn't expose its own `model_max_length`.
+ */
+const DEFAULT_MAX_TOKENS = 512;
+
+/**
+ * Minimal logger surface this file needs — matches the pino `.warn(details,
+ * message)` call shape already used elsewhere in this codebase (e.g.
+ * packages/runtime/src/index.ts), so a real pino logger drops in directly.
+ * @rag/rag has no logging library dependency of its own, so when no logger
+ * is injected we fall back to `console.warn` (same fallback rationale as
+ * apps/web/src/lib/rag-api.ts, which has the same "no logging library" note).
+ */
+export interface EmbeddingLogger {
+  warn: (details: Record<string, unknown>, message: string) => void;
+}
+
+const defaultLogger: EmbeddingLogger = {
+  warn: (details, message) => console.warn(message, details),
+};
+
 // Minimal surface of the @huggingface/transformers pipeline we actually use,
 // typed locally so the import stays dynamic (no top-level type dependency).
 interface HFTensor {
   dims: number[];
   data: Float32Array;
 }
-type HFPipeline = (
+/**
+ * The tokenizer instance a loaded pipeline exposes as a public `.tokenizer`
+ * property (see @huggingface/transformers' Pipeline base class). Calling it
+ * directly (bypassing the pipeline's own inference call) is how we detect an
+ * over-length input BEFORE the pipeline silently truncates it — the
+ * FeatureExtractionPipeline's public options (`FeatureExtractionPipelineOptions`
+ * in the installed package's own .d.ts) expose only pooling/normalize/quantize/
+ * precision, with no truncation-related field at all; truncation is hardcoded
+ * `true` inside the pipeline's internal tokenizer call and cannot be configured
+ * through pipe(). Detecting overflow ourselves, via this same tokenizer, is the
+ * only way to surface a warning without forking the library.
+ */
+interface HFTokenizer {
+  model_max_length?: number;
+  (
+    text: string,
+    opts?: { truncation?: boolean; padding?: boolean; return_tensor?: boolean },
+  ): { input_ids: number[] | number[][] };
+}
+type HFPipeline = ((
   input: string | string[],
   opts: { pooling: "mean"; normalize: boolean },
-) => Promise<HFTensor>;
+) => Promise<HFTensor>) & { tokenizer: HFTokenizer };
 
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
@@ -51,10 +93,21 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   // `embed()` calls all await the same load rather than launching duplicate
   // downloads.
   private _pipelinePromise: Promise<HFPipeline> | null = null;
+  private readonly logger: EmbeddingLogger;
+  private readonly maxTokens: number;
 
-  constructor(opts: { model?: string; dimensions?: number } = {}) {
+  constructor(
+    opts: {
+      model?: string;
+      dimensions?: number;
+      logger?: EmbeddingLogger;
+      maxTokens?: number;
+    } = {},
+  ) {
     this.model = opts.model ?? "Xenova/bge-base-en-v1.5";
     this.dimensions = opts.dimensions ?? 768;
+    this.logger = opts.logger ?? defaultLogger;
+    this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
   /** Return the cached pipeline, loading it on first access. */
@@ -115,10 +168,61 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     return vec;
   }
 
+  /**
+   * Backstop for the rare chunk that still exceeds the token limit after the
+   * provider-aware CHUNK_SIZE cap (packages/core/src/config.ts). Tokenizes
+   * each text WITHOUT truncation (bypassing the pipeline's hardcoded
+   * truncation) to find its true length, then logs — never throws — when a
+   * text will be truncated by the actual embedding call below. Detection is
+   * best-effort: any failure here is swallowed so it can never block the
+   * real embed.
+   */
+  private warnOnOverlongText(pipe: HFPipeline, texts: string[]): void {
+    try {
+      const limit = pipe.tokenizer.model_max_length ?? this.maxTokens;
+      for (let i = 0; i < texts.length; i++) {
+        const text = texts[i]!;
+        let tokenCount: number;
+        try {
+          const encoded = pipe.tokenizer(text, {
+            truncation: false,
+            padding: false,
+            return_tensor: false,
+          });
+          tokenCount = Array.isArray(encoded.input_ids)
+            ? encoded.input_ids.length
+            : 0;
+        } catch {
+          continue;
+        }
+        if (tokenCount > limit) {
+          this.logger.warn(
+            {
+              textIndex: i,
+              tokenCount,
+              limit,
+              textPreview: text.length > 80 ? `${text.slice(0, 80)}…` : text,
+            },
+            `Local embedding input exceeds the ${limit}-token model limit ` +
+              `(${tokenCount} tokens) and will be truncated by ` +
+              `@huggingface/transformers, degrading retrieval quality for this ` +
+              `chunk. Lower CHUNK_SIZE or split this document further.`,
+          );
+        }
+      }
+    } catch {
+      // any error during truncation detection is best-effort and must not
+      // escape — even if pipe.tokenizer is missing/undefined, the embed
+      // must continue
+    }
+  }
+
   async embedBatch(texts: string[]): Promise<Embedding[]> {
     if (texts.length === 0) return [];
 
     const pipe = await this.getPipeline();
+
+    this.warnOnOverlongText(pipe, texts);
 
     let output: HFTensor;
     try {

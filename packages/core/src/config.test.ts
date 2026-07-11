@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "./config.js";
 
 const BASE_ENV = {
@@ -73,7 +73,74 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
   });
 });
 
+describe("loadConfig — provider-aware chunk-size cap (local embedding provider)", () => {
+  it("non-local providers are unaffected by the 512-token cap", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "gemini",
+      CHUNK_SIZE: "800",
+    });
+    expect(cfg.retrieval.chunkSize).toBe(800);
+  });
+
+  it("local provider with no explicit CHUNK_SIZE is capped to 512 (default 800 exceeds the limit) without warning", () => {
+    const warn = () => {
+      throw new Error("warn should not be called for the implicit default");
+    };
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local" },
+      { warn },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(512);
+  });
+
+  it("local provider with CHUNK_SIZE <= 512 passes through unchanged and does not warn", () => {
+    let warned = false;
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local", CHUNK_SIZE: "400" },
+      { warn: () => (warned = true) },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(400);
+    expect(warned).toBe(false);
+  });
+
+  it("local provider with an explicit CHUNK_SIZE > 512 is capped to 512 and logs a warning", () => {
+    const warnings: string[] = [];
+    const cfg = loadConfig(
+      { ...BASE_ENV, EMBEDDING_PROVIDER: "local", CHUNK_SIZE: "800" },
+      { warn: (msg) => warnings.push(msg) },
+    );
+    expect(cfg.retrieval.chunkSize).toBe(512);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/CHUNK_SIZE=800/);
+    expect(warnings[0]).toMatch(/512/);
+  });
+
+  it("defaults the warn sink to stderr when none is injected (pino isn't constructed yet at loadConfig time)", () => {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      loadConfig({
+        ...BASE_ENV,
+        EMBEDDING_PROVIDER: "local",
+        CHUNK_SIZE: "800",
+      });
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0]![0]).toMatch(/CHUNK_SIZE=800/);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+});
+
 describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
+  // Valid 64-character hex secrets for testing (256 bits of entropy)
+  const VALID_SECRET_ONE = "a".repeat(64);
+  const VALID_SECRET_TWO = "b".repeat(64);
+  const VALID_SECRET_THREE = "c".repeat(64);
+  const VALID_SECRET_WITH_COMMAS = "d".repeat(30) + "," + "e".repeat(33); // 64 total
+
   it("defaults to an empty array when unset", () => {
     const cfg = loadConfig({ ...BASE_ENV });
     expect(cfg.auth.internalScopeSecrets).toEqual([]);
@@ -82,51 +149,68 @@ describe("loadConfig — INTERNAL_SCOPE_JWT_SECRETS", () => {
   it("parses a single secret", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one",
+      INTERNAL_SCOPE_JWT_SECRETS: VALID_SECRET_ONE,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([VALID_SECRET_ONE]);
   });
 
   it("parses multiple comma-separated secrets (rotation) and trims whitespace", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one, secret-two , secret-three",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE}, ${VALID_SECRET_TWO} , ${VALID_SECRET_THREE}`,
     });
     expect(cfg.auth.internalScopeSecrets).toEqual([
-      "secret-one",
-      "secret-two",
-      "secret-three",
+      VALID_SECRET_ONE,
+      VALID_SECRET_TWO,
+      VALID_SECRET_THREE,
     ]);
   });
 
   it("filters out empty entries from trailing/double commas", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,,",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE},,`,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([VALID_SECRET_ONE]);
   });
 
   it("accepts a JSON array form for secrets that might contain a comma", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
       INTERNAL_SCOPE_JWT_SECRETS: JSON.stringify([
-        "secret,with,commas",
-        "plain-secret",
+        VALID_SECRET_WITH_COMMAS,
+        VALID_SECRET_TWO,
       ]),
     });
     expect(cfg.auth.internalScopeSecrets).toEqual([
-      "secret,with,commas",
-      "plain-secret",
+      VALID_SECRET_WITH_COMMAS,
+      VALID_SECRET_TWO,
     ]);
   });
 
   it("still supports the legacy comma-separated form for backward compatibility", () => {
     const cfg = loadConfig({
       ...BASE_ENV,
-      INTERNAL_SCOPE_JWT_SECRETS: "secret-one,secret-two",
+      INTERNAL_SCOPE_JWT_SECRETS: `${VALID_SECRET_ONE},${VALID_SECRET_TWO}`,
     });
-    expect(cfg.auth.internalScopeSecrets).toEqual(["secret-one", "secret-two"]);
+    expect(cfg.auth.internalScopeSecrets).toEqual([
+      VALID_SECRET_ONE,
+      VALID_SECRET_TWO,
+    ]);
+  });
+
+  it("rejects an INTERNAL_SCOPE_JWT_SECRETS entry shorter than 64 characters", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, INTERNAL_SCOPE_JWT_SECRETS: "a".repeat(63) }),
+    ).toThrow(/at least 64/);
+  });
+
+  it("accepts an INTERNAL_SCOPE_JWT_SECRETS entry exactly 64 characters", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      INTERNAL_SCOPE_JWT_SECRETS: "a".repeat(64),
+    });
+    expect(cfg.auth.internalScopeSecrets).toEqual(["a".repeat(64)]);
   });
 
   it("fails loud on malformed JSON-looking input", () => {

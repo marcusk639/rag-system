@@ -57,13 +57,13 @@ describe("createAuthProvider — internal-scope", () => {
   it("builds an InternalScopeAuthProvider for 'internal-scope'", () => {
     const provider = createAuthProvider({
       provider: "internal-scope",
-      secrets: ["a-secret-at-least-32-bytes-long-here"],
+      secrets: ["a".repeat(64)],
     });
     expect(provider).toBeInstanceOf(InternalScopeAuthProvider);
   });
 
   it("includes internal-scope in a composite when internalScopeSecrets is set", async () => {
-    const secret = "a-secret-at-least-32-bytes-long-here";
+    const secret = "a".repeat(64);
     const provider = createAuthProvider({
       provider: "composite",
       tokens: ["admin-tok"],
@@ -91,7 +91,7 @@ describe("createAuthProvider — internal-scope", () => {
     });
     const token = await signInternalScopeToken(
       { sub: "u1", allowedSourceIds: ["s1"] },
-      "irrelevant-secret-not-configured-anywhere",
+      "b".repeat(64),
     );
     // No internal-scope provider configured, so this credential is rejected.
     await expect(provider.authenticate(token)).resolves.toBeNull();
