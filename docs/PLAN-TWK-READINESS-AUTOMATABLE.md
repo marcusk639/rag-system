@@ -1189,9 +1189,9 @@
 
 - [ ] **Step 1: Read `apps/web/next.config.ts`** in full to confirm its current exact structure before adding to it.
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Write the failing test — NOT in `middleware.test.ts`**
 
-  In `apps/web/src/middleware.test.ts` (or a new dedicated test file if headers aren't set by middleware but by the Next.js config layer — confirm which layer actually applies `next.config.ts`'s `headers()` for a given request before deciding where to test this), assert a response includes `X-Frame-Options: DENY`, a `Content-Security-Policy` containing `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, and `form-action 'self'`, `Strict-Transport-Security`, and `X-Content-Type-Options: nosniff`.
+  **Confirmed by a 2026-07-11 pre-launch audit: `middleware.test.ts` cannot test this, full stop.** It invokes the exported `middleware` function directly against hand-built `NextRequest` objects with no server boot (its own header comment says so explicitly). `next.config.ts`'s `headers()` is applied by the actual Next.js server/build layer, which that test never touches. Use a real `next start`-backed check instead (an e2e/Playwright-level test hitting a booted server, or `apps/web`'s existing e2e test pattern if one already boots the app for other checks — check `tests/e2e/` for a precedent before inventing a new harness). Assert a response includes `X-Frame-Options: DENY`, a `Content-Security-Policy` containing `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, and `form-action 'self'`, `Strict-Transport-Security`, and `X-Content-Type-Options: nosniff`.
 
 - [ ] **Step 3: Confirm RED**, then add the `headers()` function to `next.config.ts`. Include `object-src`/`base-uri`/`form-action` alongside `frame-ancestors` — these are near-zero-risk additions that block plugin content, `<base>`-tag hijacking, and cross-origin form submission, meaningfully raising the floor beyond clickjacking-only protection at negligible cost to a normal Next.js app:
 
@@ -1316,7 +1316,11 @@ This task bundles five independent test-only additions — split into sub-steps,
 
 - [ ] **Step 3: Add basic alerting beyond Sentry's own channel**, scoped to what's actually cheap for this deployment: check whether Railway's own deploy/crash webhook can be pointed at a free notification channel (e.g. an email-via-webhook service, or reusing the `AuditLogSink` webhook mechanism from Task 14 for a second, differently-configured purpose — a generic "something's wrong" ping). If no cheap, zero-new-vendor option is clearly available within this task's scope, document the gap explicitly in `docs/DEPLOYMENT.md` rather than forcing a vendor choice — this may need to move to the manual runbook if it turns out to require a real decision.
 
-- [ ] **Step 4: Add deploy config for `apps/web`.** Check what config format `apps/api`/`apps/worker`/`apps/mcp` use for their Railway deployment (a `railway.json`, a `Procfile`-equivalent, or Railway dashboard-only config with no committed file — confirm before assuming a file is even the right artifact) and add the equivalent for `apps/web`, which currently has none despite being the newest and most complex service (per-user Entra auth).
+- [ ] **Step 4: Add deploy config for `apps/web` — this is the single highest-leverage step in this entire plan, per a 2026-07-11 stakeholder-value audit.** That audit found `apps/web` is a fully-built, already-reviewed web chat app with Microsoft Entra SSO that already solves "how does Doug reach the system" (see `docs/TWK-MANUAL-RUNBOOK.md` item 4, rewritten the same day) — the ONLY reason it isn't usable today is that it has zero deployment path. Confirmed gaps, more specific than this step originally assumed:
+  - `apps/api`/`apps/worker`/`apps/mcp` each have a `railway.json` with `"builder": "DOCKERFILE"` pointing at a per-app `Dockerfile` — but **`apps/web` has no `Dockerfile` at all.** This is not a drop-in copy of the sibling apps' pattern. Either author a Next.js-appropriate `Dockerfile` (standalone build output mode — check `apps/web/next.config.ts` for `output: "standalone"` or add it) from scratch, or use Railway's Nixpacks builder instead for this one app — a real decision point, not a mechanical copy.
+  - `apps/web/env.example` documents the Entra SSO vars (`AUTH_ENTRA_CLIENT_ID`/`SECRET`/`TENANT_ID`, `RAG_ADMINS_GROUP_ID`) but never mentions NextAuth's own required session-signing secret (`AUTH_SECRET`) — add it.
+  - `apps/web` has no entry in `docker/compose.prod.yml` — add one, matching the sibling apps' pattern once a builder choice is confirmed.
+  - The actual Azure AD app registration and `RAG-Admins` security group creation are human/infra actions, not code — tracked in `docs/TWK-MANUAL-RUNBOOK.md` item 4, not this task.
 
 - [ ] **Step 5: Commit**
 

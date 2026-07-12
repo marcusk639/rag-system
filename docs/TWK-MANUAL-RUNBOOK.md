@@ -79,20 +79,30 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ## P1 — close before adding a second real user beyond the smallest possible internal check
 
-### 4. Decide how a non-technical partner actually reaches the system
+### 4. Deploy `apps/web` — supersedes the earlier MCP-tradeoff framing
 
-**Why:** The assessment found that the "Doug just asks inside Claude" vision requires either (a) hand-editing a JSON config file containing a direct database connection string and the Gemini API key, granting that session unrestricted admin-level access to every source in the system (the MCP stdio transport), or (b) per-user token provisioning via the MCP HTTP transport plus a "custom connector" setup in the MCP client — neither of which is the zero-friction experience described to Chris. This is a real tradeoff between convenience and the exact GLBA/scope-fencing story that's supposed to be this project's differentiator, and it's your call, not a default to accept by inertia.
+**Why this item changed (2026-07-11):** this item originally framed "how does Doug reach the system" as a forced choice between two bad MCP options (a shared admin credential on his laptop, or per-user token/client setup). That framing predates a fact a fresh audit just surfaced: **`apps/web` — a full web chat app with Microsoft Entra ID (Office 365) SSO, already merged to `main`, already reviewed, working tree clean — already solves this.** Doug signs in with the same Microsoft account he already uses for Outlook/Teams, lands on a page with a document list and a chat box, asks a question in plain English, and gets a streamed answer with clickable citations and a non-dismissible "AI-generated draft, requires review" disclaimer. Access is properly per-user-scoped server-side (a fresh 60-second JWT re-derived from his real grants on every request) — this is the good, narrow-scope option, not the credentials-on-a-laptop one, and it's not hypothetical: the code exists and passed review.
+
+**The actual remaining gap is deployment, not architecture.** `apps/web` has:
+
+- No `railway.json` (unlike `apps/api`/`apps/mcp`/`apps/worker`, which each have one).
+- No `Dockerfile` at all — the sibling apps' Dockerfiles aren't a drop-in copy; this needs either a Next.js-appropriate Dockerfile (standalone build output) authored from scratch, or a different Railway builder (Nixpacks) for this one app specifically.
+- No entry in `docker/compose.prod.yml`.
+- An `env.example` that documents the Entra SSO variables (`AUTH_ENTRA_CLIENT_ID`/`AUTH_ENTRA_CLIENT_SECRET`/`AUTH_ENTRA_TENANT_ID`, `RAG_ADMINS_GROUP_ID`) but never mentions NextAuth's own required session-signing secret (`AUTH_SECRET`) — a real, separate value to generate.
+- No Azure AD app registration yet, and no `RAG-Admins` security group in the firm's tenant (both needed for Entra SSO + the admin gate to work at all).
 
 **Exact steps:**
 
-1. Read the tradeoff again, concretely: option (a) means Doug's laptop has a config file with real database credentials on it — if his laptop is compromised or the config file is ever shared/copied, that's a credentials leak with admin-level corpus access, not just his own scope. Option (b) means more setup work (issuing Doug a personal bearer token, walking him through MCP client "custom connector" configuration) but keeps his session properly scoped to only what he's allowed to see, and revocable independently of anyone else's access.
-2. Decide, in writing (a one-paragraph note is enough): for the initial pilot (Doug + 1-2 others, firm-SOP-only content, low stakes), is option (a)'s convenience an acceptable tradeoff given the low blast radius of what's actually indexed (assuming item 1's audit came back clean)? Or do you want to invest the extra setup time for option (b) from day one?
-3. If you pick (a): document explicitly that this is a deliberate, time-boxed tradeoff for the pilot phase only, and set a reminder to revisit before any firm-wide rollout (per the original partner-review timeline, that's weeks 12-18 — don't let a pilot-phase convenience choice quietly become the permanent architecture).
-4. If you pick (b): this becomes a code-adjacent task — flag it back to the automatable plan as a new item (per-user MCP HTTP token provisioning + client setup documentation), since it's genuinely buildable once you've made the decision.
+1. Register an Azure AD (Entra ID) application in the firm's tenant for this app — redirect URI, client secret, tenant ID. This is a ~15-30 minute task in the Azure/Microsoft 365 admin portal, not a code task; Chris or whoever manages the firm's M365 tenant may need to do this or grant you access.
+2. Create a `RAG-Admins` security group in the same tenant, add yourself (and later Chris/Doug as appropriate) to it, and note its object ID for `RAG_ADMINS_GROUP_ID`.
+3. Generate a real `AUTH_SECRET` (NextAuth's session-signing key — `openssl rand -base64 32` is the standard way) and the existing `INTERNAL_SCOPE_JWT_SECRET` per Task 3's now-enforced 64-character minimum (see `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 3).
+4. This is where code work picks back up — flag to whoever's driving the automatable-plan work next: author `apps/web/Dockerfile` (Next.js standalone output mode), `apps/web/railway.json` (mirroring the sibling apps' pattern once a working builder choice is confirmed), and add `apps/web` to `docker/compose.prod.yml`. Update `apps/web/env.example` to document `AUTH_SECRET` alongside the Entra vars it's missing today.
+5. Deploy, confirm you personally can sign in and ask a real question against the firm-SOP index.
+6. Write the 2-minute "how do I ask a question" doc for staff — a screenshot-driven one-pager is enough. This is the single highest-leverage artifact currently missing: the code that makes this feel like a real tool instead of an engineering project already exists, unused.
 
-**Done when:** you've written down which option you're using and why, so it's a deliberate choice on record rather than whatever happened to get demoed first.
+**Done when:** you've personally signed into the deployed app with your Microsoft account and gotten a real answer to a real question, and the one-pager exists for handing to Doug.
 
-**Depends on / blocks:** Depends on items 1 and 2 (both P0 gates) — don't make this decision, and don't hand Doug access under either option, until the audit and counsel/carrier sign-off are done. Blocks a real pilot rollout to Doug — do this before actually handing him access, not after.
+**Depends on / blocks:** Depends on items 1 and 2 (both P0 gates) — don't deploy this for real staff use until the audit and counsel/carrier sign-off are done. Once deployed, granting Doug an actual source (via `/admin/access`) still requires an admin to explicitly grant him access to the firm-SOP source — the access-grant admin UI is per-client by data model, so onboarding a Phase-1 firm-SOP-only user is a small manual workaround today, not yet a one-click "add to firm index" action. Note this before promising Doug instant access on day one.
 
 ---
 
@@ -167,6 +177,8 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ### 9. Decide build-vs-buy for the document type/class classifier
 
+**Update (2026-07-11):** a separate, cross-repo design effort (a generic `DocumentClassifier` engine in `rag-system` plus product-owned rule sets in `cpa-consulting`/`veteran-claims-app`) was explored and then explicitly deferred — see `cpa-consulting/docs/superpowers/specs/2026-07-11-classifier-migration-design.md`, now marked "Status: DEFERRED... Explicitly not required for the TWK KB launch." That effort is a possible future path if this item is ever revisited, but changes nothing about the decision below, which remains open.
+
 **Why:** This item was excluded entirely from the automatable code plan — it's a genuine multi-day machine-learning feature build, and the firm's own planning docs (`~/dev/cpa-consulting/docs/rag/evaluations/document-classification-automation.md`) already frame this as an open "Slice A (build) vs. Slice B (buy SurePrep/GruntWorx for client tax documents)" decision that hasn't been made. Building it without that decision risks building the wrong thing.
 
 **Exact steps:**
@@ -182,27 +194,46 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ---
 
+### 10. Reset the shared local dev Postgres container (`rag-postgres`)
+
+**Why:** A pre-launch DB audit (2026-07-11) root-caused a recurring problem this session — `pnpm --filter @rag/db test`/e2e runs against this container have periodically reported tables as missing despite the migration journal claiming they're applied. Root cause, confirmed precisely: Drizzle's migrator only checks a single MAX(`created_at`) watermark, not per-migration hash presence — any migration whose journal `when` value sits _below_ the container's current watermark gets silently skipped forever, even if it was genuinely never applied. This container's watermark currently sits above `0012_staff_source_assignments`'s and `0013_docs_gap_digest_runs`'s `when` values (both tables confirmed missing via direct inspection), and its migration lineage is provably mixed with at least one other, unrelated, unmerged branch (`feat/kb-governance-phase5-staleness-archive`) that was also migrated against this same shared container at some point.
+
+**This is not safe to fix by just running `pnpm db:migrate` again** — the audit confirmed that would crash outright (`0015_add_git_markdown_source_kind.sql` tries to add an enum value already present under this container's mixed lineage, with no `IF NOT EXISTS` guard, and Drizzle wraps the whole migration run in one transaction, so the crash rolls back anything else that migration attempted too).
+
+**Exact steps:**
+
+1. Confirm nothing you (or anyone else sharing this machine's docker state) currently need from this container — the audit found it holds only trivial dev data (1 source, 1 document, 1 chunk, 275 dev-noise audit-log rows), but this is your call to make, not an assumption to accept from an agent.
+2. Reset it: `pnpm docker:down` then `pnpm docker:up` with the Postgres volume wiped (or `docker exec rag-postgres psql -U rag -d postgres -c "DROP DATABASE rag;"` + recreate), then run a fresh `pnpm --filter @rag/db migrate` — this exact 0000→0017 chain was already verified to apply cleanly from scratch against a disposable database during the PR #33 merge.
+3. Consider, as a low-cost follow-up (not blocking, not urgent): add `ADD VALUE IF NOT EXISTS` to future enum-extending migrations, and/or a CI check asserting every migration's `when` value is strictly greater than every other committed migration's `when` — this exact failure mode (a non-monotonic/skip-prone migration ordering) has now recurred at least twice this project's history under concurrent-branch merges.
+
+**Done when:** the container's `\dt` output matches the full expected table list, and a fresh `pnpm --filter @rag/e2e test` run (against this container, not a disposable one) passes.
+
+**Depends on / blocks:** Independent of the P0 gates. Not urgent for TWK's actual production data (this is a _local dev_ container, not the live Railway deployment), but it should happen before trusting any future local e2e run against this container, and before deploying item 4's `apps/web` work if any local verification against this container is part of that process.
+
+---
+
 ## Quick reference — what's already handled by the automatable plan vs. here
 
-| Assessment doc item                          | Where it's handled                                                                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| P0-1 Audit what's indexed                    | **Here, item 1**                                                                                                            |
-| P0-2 Wire data-class gate                    | Automatable plan, Task 1                                                                                                    |
-| P0-3 Counsel + carrier                       | **Here, item 2**                                                                                                            |
-| P0-4 Correct stale doc                       | Automatable plan, Task 2                                                                                                    |
-| P0-5 Verify backup/restore                   | 100% manual — **here, item 3** (the automatable plan builds no backup mechanism; Task 17 is deployment docs/hardening only) |
-| P0-6 Raise secret min length                 | Automatable plan, Task 3                                                                                                    |
-| P1-7 MCP audit-logging gap                   | Automatable plan, Task 4                                                                                                    |
-| P1-8 Decide reachability model               | **Here, item 4**                                                                                                            |
-| P1-9 Reconcile admin-access model            | Automatable plan, Task 9                                                                                                    |
-| P1-10 Migration-timestamp guard              | Automatable plan, Task 5                                                                                                    |
-| P1-11 `purge_source` test                    | Automatable plan, Task 6                                                                                                    |
-| P1-12 Baseline diary                         | **Here, item 6**                                                                                                            |
-| P2-13 512-token truncation                   | Automatable plan, Task 7                                                                                                    |
-| P2-14 Real eval baseline                     | Harness: automatable plan Task 8; real questions: **here, item 7**                                                          |
-| P2-15 Weekly digest / KB-gap queue           | Tier 1: automatable plan Task 13; Tier 2 decision: **here, item 5**                                                         |
-| P2-16 Type/class classifier                  | **Here, item 9** (build-vs-buy decision, then its own plan if "build")                                                      |
-| P2-17 Citation/table/versioning fixes        | Automatable plan, Tasks 10-12                                                                                               |
-| P2-18 Security headers + test coverage       | Automatable plan, Tasks 15-16                                                                                               |
-| P3-19 Off-host log shipping                  | Mechanism: automatable plan Task 14; destination: **here, item 8**                                                          |
-| P3-20 Rollback docs, alerting, deploy config | Automatable plan, Task 17                                                                                                   |
+| Assessment doc item                          | Where it's handled                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| P0-1 Audit what's indexed                    | **Here, item 1**                                                                                                                  |
+| P0-2 Wire data-class gate                    | Automatable plan, Task 1                                                                                                          |
+| P0-3 Counsel + carrier                       | **Here, item 2**                                                                                                                  |
+| P0-4 Correct stale doc                       | Automatable plan, Task 2                                                                                                          |
+| P0-5 Verify backup/restore                   | 100% manual — **here, item 3** (the automatable plan builds no backup mechanism; Task 17 is deployment docs/hardening only)       |
+| P0-6 Raise secret min length                 | Automatable plan, Task 3                                                                                                          |
+| P1-7 MCP audit-logging gap                   | Automatable plan, Task 4                                                                                                          |
+| P1-8 Deploy `apps/web` for staff access      | **Here, item 4** (reframed 2026-07-11 — the web app already exists and is reviewed; the gap is deployment, not a design tradeoff) |
+| P1-9 Reconcile admin-access model            | Automatable plan, Task 9                                                                                                          |
+| P1-10 Migration-timestamp guard              | Automatable plan, Task 5                                                                                                          |
+| P1-11 `purge_source` test                    | Automatable plan, Task 6                                                                                                          |
+| P1-12 Baseline diary                         | **Here, item 6**                                                                                                                  |
+| P2-13 512-token truncation                   | Automatable plan, Task 7                                                                                                          |
+| P2-14 Real eval baseline                     | Harness: automatable plan Task 8; real questions: **here, item 7**                                                                |
+| P2-15 Weekly digest / KB-gap queue           | Tier 1: automatable plan Task 13; Tier 2 decision: **here, item 5**                                                               |
+| P2-16 Type/class classifier                  | **Here, item 9** (build-vs-buy decision, then its own plan if "build")                                                            |
+| P2-17 Citation/table/versioning fixes        | Automatable plan, Tasks 10-12                                                                                                     |
+| P2-18 Security headers + test coverage       | Automatable plan, Tasks 15-16                                                                                                     |
+| P3-19 Off-host log shipping                  | Mechanism: automatable plan Task 14; destination: **here, item 8**                                                                |
+| P3-20 Rollback docs, alerting, deploy config | Automatable plan, Task 17                                                                                                         |
+| (New) Shared dev DB drift                    | **Here, item 10** — not in the original assessment; found by the 2026-07-11 pre-launch audit                                      |
