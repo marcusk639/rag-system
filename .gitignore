@@ -19,7 +19,11 @@ venv/
 .env
 .env.local
 .env.*.local
+.env.wip*
 !.env.example
+
+# OAuth / credential files
+gemini-oauth-info.json
 
 # Database
 postgres-data/
