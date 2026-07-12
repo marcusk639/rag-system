@@ -451,12 +451,43 @@ export async function hybridSearch(
   const metadataConditions = Object.entries(opts.metadataFilter ?? {}).map(
     ([key, value]) => {
       const values = Array.isArray(value) ? value : [value];
-      // Same fix as sourceFilter — IN-list of parameterised text values.
-      // `key` rides through `->>${key}` as a single parameter and `values`
-      // expands into a per-value parameter list, both injection-safe.
-      return sql`AND doc.metadata->>${key} IN (${sql.join(
-        values.map((v) => sql`${v}`),
-        sql`, `,
+      // `->>${key} IN (...)` extracts metadata as text and compares — the
+      // `documents_metadata_gin_idx` GIN index (default jsonb_ops opclass)
+      // cannot accelerate that operator, only `@>` containment (verified via
+      // EXPLAIN ANALYZE with enable_seqscan=off: `->>` forces a seq scan
+      // regardless, `@>` produces a Bitmap Index Scan on the GIN index).
+      // Rewrite to an OR of per-value containment checks, built with
+      // `jsonb_build_object` so both key and value stay parameterised
+      // (injection-safe) rather than string-concatenated into a JSON literal.
+      //
+      // `@>` is type-sensitive: `{"k":"5"}` does not contain `{"k":5}`, and
+      // `{"k":"true"}` does not contain `{"k":true}`. The filter API only
+      // ever sends string values (packages/core/src/validation.ts's
+      // filterSchema), but DocumentMetadata is `.passthrough()` and could
+      // hold non-string top-level values (e.g. the numeric `sizeBytes`) that
+      // `->>`'s old text coercion matched against a string filter value.
+      // Also try the value as a JSON number/boolean when it parses as one,
+      // so those metadata fields keep matching post-fix — confirmed via
+      // EXPLAIN this still produces a BitmapOr over the same GIN index, not
+      // a fallback scan, for both the numeric and boolean cases.
+      return sql`AND (${sql.join(
+        values.flatMap((v) => {
+          const conditions = [
+            sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::text)`,
+          ];
+          if (v.trim() !== "" && Number.isFinite(Number(v))) {
+            conditions.push(
+              sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::numeric)`,
+            );
+          }
+          if (v === "true" || v === "false") {
+            conditions.push(
+              sql`doc.metadata @> jsonb_build_object(${key}::text, ${v}::boolean)`,
+            );
+          }
+          return conditions;
+        }),
+        sql` OR `,
       )})`;
     },
   );
@@ -735,6 +766,13 @@ export interface AskEventRow {
   questionHash: string;
   channel: "api" | "mcp";
   model: string | null;
+  /**
+   * §7216/Circular 230 §10.22 disclosure recordkeeping — which embedding
+   * provider/model processed the query text. Always present: both /ask and
+   * /search embed the query, even when there's no generation model.
+   */
+  embeddingProvider: string;
+  embeddingModel: string;
   sourceIds: string[];
   chunkIds: string[];
   docIds: string[];
@@ -758,6 +796,8 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     questionHash: row.questionHash,
     channel: row.channel,
     model: row.model ?? null,
+    embeddingProvider: row.embeddingProvider,
+    embeddingModel: row.embeddingModel,
     sourceIds: row.sourceIds,
     chunkIds: row.chunkIds,
     docIds: row.docIds,

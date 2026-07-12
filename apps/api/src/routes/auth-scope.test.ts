@@ -122,6 +122,10 @@ function makeDeps(
     db: {} as Deps["db"],
     queue: {} as Deps["queue"],
     retriever: retriever as unknown as Deps["retriever"],
+    embedder: {
+      name: "test-provider",
+      model: "test-model",
+    } as Deps["embedder"],
     generator: generator as unknown as Deps["generator"],
     logger: pino({ level: "silent" }),
     close: async () => {},

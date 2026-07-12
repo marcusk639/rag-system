@@ -121,6 +121,10 @@ export async function handleSyncSource(
         embedder,
         objectStore,
         logger: log,
+        // Enforce the source's declared §7216/GLBA classification. Without
+        // this, the pipeline's ClassBlockedError gate defaults every source
+        // to Class A regardless of `sources.data_class` — see
+        // packages/ingestion/src/classify-source.ts.
         sourceDocClass: mapDataClassToDocumentClass(source.dataClass),
       },
     );

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { ADMIN_SCOPE } from "@rag/core";
+import { ADMIN_SCOPE, type EmbeddingProvider } from "@rag/core";
 import { Retriever } from "@rag/rag";
 import type { Db } from "@rag/db";
 import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
@@ -47,10 +47,16 @@ export interface EvalReport {
  * Seed the labeled corpus into a fresh source and return a map from the stored
  * document UUID → its ground-truth externalId, so retrieval results (which only
  * carry `document.id`) can be scored against the golden labels.
+ *
+ * `embedder` defaults to the deterministic `FakeEmbedder` (matches
+ * `runRetrievalEval`'s default) — pass a real provider to seed with real
+ * vectors, and pass that SAME instance to `runRetrievalEval` so queries land
+ * in the same embedding space as the corpus.
  */
 export async function seedEvalCorpus(
   db: Db,
   sourceId: string,
+  embedder?: EmbeddingProvider,
 ): Promise<Map<string, string>> {
   const connector = new FakeConnector(
     EVAL_DOCS.map((d) =>
@@ -61,7 +67,7 @@ export async function seedEvalCorpus(
       }),
     ),
   );
-  await runOneIngestion(db, sourceId, connector);
+  await runOneIngestion(db, sourceId, connector, { embedder });
 
   const rows = await db.execute<{ id: string; external_id: string }>(sql`
     SELECT id, external_id FROM documents WHERE source_id = ${sourceId}
@@ -100,13 +106,20 @@ export async function runRetrievalEval(
     ks?: number[];
     poolK?: number;
     questions?: EvalQuestion[];
+    /**
+     * Defaults to `FakeEmbedder`. Pass a real provider to measure retrieval
+     * quality against real semantics — see `eval/run-real-eval.ts`. Must be
+     * the SAME instance/config used to seed the corpus (`seedEvalCorpus`),
+     * or dense scores compare vectors from two different embedding spaces.
+     */
+    embedder?: EmbeddingProvider;
   },
 ): Promise<EvalReport> {
   const ks = opts.ks ?? [...DEFAULT_KS];
   const poolK = opts.poolK ?? Math.max(...ks, 10);
   const questions = opts.questions ?? EVAL_QUESTIONS;
 
-  const retriever = new Retriever(db, new FakeEmbedder(), {
+  const retriever = new Retriever(db, opts.embedder ?? new FakeEmbedder(), {
     topK: poolK,
     denseWeight: opts.weights.dense,
     sparseWeight: opts.weights.sparse,
@@ -203,11 +216,12 @@ export async function sweepWeights(
   externalIdByDocId: Map<string, string>,
   weightConfigs: RrfWeights[],
   ks: number[] = [...DEFAULT_KS],
+  embedder?: EmbeddingProvider,
 ): Promise<EvalReport[]> {
   const reports: EvalReport[] = [];
   for (const weights of weightConfigs) {
     reports.push(
-      await runRetrievalEval(db, externalIdByDocId, { weights, ks }),
+      await runRetrievalEval(db, externalIdByDocId, { weights, ks, embedder }),
     );
   }
   return reports;

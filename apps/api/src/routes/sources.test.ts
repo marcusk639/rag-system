@@ -60,6 +60,10 @@ function makeDeps(): Deps {
     db: {} as Deps["db"],
     queue: {} as Deps["queue"],
     retriever: {} as Deps["retriever"],
+    embedder: {
+      name: "test-provider",
+      model: "test-model",
+    } as Deps["embedder"],
     generator: null,
     logger: pino({ level: "silent" }),
     close: async () => {},

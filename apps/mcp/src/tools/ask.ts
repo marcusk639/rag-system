@@ -1,8 +1,14 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope } from "@rag/core";
 import { filterSchema } from "@rag/core";
-import { askQuestion, GenerationNotConfiguredError } from "@rag/services";
+import { logAskEvent } from "@rag/db";
+import {
+  askQuestion,
+  type AskResult,
+  GenerationNotConfiguredError,
+} from "@rag/services";
 import type { Deps } from "../deps.js";
 
 const MAX_TOP_K = 50;
@@ -59,6 +65,38 @@ function renderAnswer(
   return `${answer}\n\nSources:\n${block}`;
 }
 
+/**
+ * Fire-and-forget audit record for every `ask` call — mirrors `auditAsk` in
+ * `apps/api/src/routes/ask.ts` (same `audit_log` table, `channel: "mcp"`).
+ * See `search-documents.ts`'s `auditSearch` doc comment for why
+ * `principalSubject` is null here (AuthorizationScope, unlike the HTTP
+ * route's Principal, doesn't carry it).
+ */
+function auditAsk(
+  deps: Deps,
+  scope: AuthorizationScope,
+  question: string,
+  retrieved: AskResult["retrieved"],
+  model: string | undefined,
+): void {
+  void logAskEvent(deps.db, {
+    principalKind: scope.enforcedSourceIds === null ? "admin" : "scoped",
+    principalSources: scope.enforcedSourceIds,
+    principalSubject: null,
+    questionHash: createHash("sha256").update(question).digest("hex"),
+    channel: "mcp",
+    model: model ?? null,
+    embeddingProvider: deps.embedder.name,
+    embeddingModel: deps.embedder.model,
+    sourceIds: [...new Set(retrieved.map((r) => r.document.sourceId))],
+    chunkIds: retrieved.map((r) => r.chunk.id),
+    docIds: [...new Set(retrieved.map((r) => r.document.id))],
+    retrievedCount: retrieved.length,
+    endpoint: "ask",
+    topScore: retrieved[0]?.score ?? null,
+  }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
+}
+
 export function registerAsk(
   server: McpServer,
   deps: Deps,
@@ -103,6 +141,7 @@ export function registerAsk(
       // `askQuestion` already enforced the confidentiality scope and short-
       // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
       const { answer, citations, retrieved, reviewStatus, disclaimer } = result;
+      auditAsk(deps, scope, question, retrieved, deps.config.generation?.model);
       return {
         // Lead with the practitioner-review disclaimer so a consuming agent
         // cannot present the draft as a finished answer (Circular 230 §10.37).

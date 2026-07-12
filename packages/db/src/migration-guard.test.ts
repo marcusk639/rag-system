@@ -76,3 +76,41 @@ describe("drizzle migration guard — protected search objects", () => {
     expect(nonOwner.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Regression guard for the migration-timestamp-ordering bug (found 2026-07-06,
+ * fixed 2026-07-08): drizzle-orm's migrator applies a migration only if its
+ * journal `when` exceeds the single most-recently-recorded timestamp, not
+ * "has this specific migration run yet." A journal entry with a `when` smaller
+ * than an earlier entry's causes every migration after it to be silently
+ * skipped on any environment that migrates incrementally (exactly what a
+ * `preDeployCommand` running on every deploy does) — invisible on a cold
+ * start against an empty database, which is why it went unnoticed twice.
+ */
+describe("drizzle migration guard — journal timestamp ordering", () => {
+  it("every journal entry's 'when' is strictly greater than the previous entry's", async () => {
+    const journalPath = join(MIGRATIONS_DIR, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: { idx: number; tag: string; when: number }[];
+    };
+
+    const violations: string[] = [];
+    for (let i = 1; i < journal.entries.length; i++) {
+      const prev = journal.entries[i - 1]!;
+      const curr = journal.entries[i]!;
+      if (!(curr.when > prev.when)) {
+        violations.push(
+          `entry ${curr.idx} (${curr.tag}, when=${curr.when}) is not greater than entry ${prev.idx} (${prev.tag}, when=${prev.when})`,
+        );
+      }
+    }
+
+    expect(
+      violations,
+      `Journal entries must have strictly increasing 'when' values in file order, ` +
+        `or drizzle-orm's migrator will silently skip migrations on an incremental ` +
+        `apply. Check every existing entry's 'when' (not just the immediately-preceding ` +
+        `one) before hand-authoring a new one. Violations:\n${violations.join("\n")}`,
+    ).toEqual([]);
+  });
+});

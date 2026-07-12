@@ -41,6 +41,8 @@ function auditAsk(
     questionHash: createHash("sha256").update(question).digest("hex"),
     channel: "api",
     model: model ?? null,
+    embeddingProvider: deps.embedder.name,
+    embeddingModel: deps.embedder.model,
     sourceIds: [...new Set(retrieved.map((r) => r.document.sourceId))],
     chunkIds: retrieved.map((r) => r.chunk.id),
     docIds: [...new Set(retrieved.map((r) => r.document.id))],

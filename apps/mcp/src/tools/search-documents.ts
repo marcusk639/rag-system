@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
 import { filterSchema } from "@rag/core";
+import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
 
@@ -51,6 +53,45 @@ function formatResults(results: SanitizedRetrievalResult[]): string {
     .join("\n\n");
 }
 
+/**
+ * Fire-and-forget audit record for every `search_documents` call — mirrors
+ * `auditSearch` in `apps/api/src/routes/search.ts` (same `audit_log` table,
+ * `channel: "mcp"`). Previously MISSING entirely: MCP tools wrote no audit
+ * row at all, not just an incomplete one — the agent-facing surface (per
+ * root CLAUDE.md) had zero §7216/§10.22 disclosure recordkeeping.
+ *
+ * `AuthorizationScope` (unlike the HTTP route's `Principal`) doesn't carry
+ * `subject` — only `enforcedSourceIds` — so `principalKind`/`principalSources`
+ * are faithfully derived from it, but `principalSubject` is null here. Wiring
+ * per-user subject through the MCP transport layer (http.ts's
+ * `scopeForRequest` currently discards the resolved `Principal` down to just
+ * an `AuthorizationScope` before it reaches tool handlers) is a separate,
+ * larger change than adding the audit trail itself.
+ */
+function auditSearch(
+  deps: Deps,
+  scope: AuthorizationScope,
+  query: string,
+  results: SanitizedRetrievalResult[],
+): void {
+  void logAskEvent(deps.db, {
+    principalKind: scope.enforcedSourceIds === null ? "admin" : "scoped",
+    principalSources: scope.enforcedSourceIds,
+    principalSubject: null,
+    questionHash: createHash("sha256").update(query).digest("hex"),
+    channel: "mcp",
+    model: null,
+    embeddingProvider: deps.embedder.name,
+    embeddingModel: deps.embedder.model,
+    sourceIds: [...new Set(results.map((r) => r.document.sourceId))],
+    chunkIds: results.map((r) => r.chunk.id),
+    docIds: [...new Set(results.map((r) => r.document.id))],
+    retrievedCount: results.length,
+    endpoint: "search",
+    topScore: results[0]?.score ?? null,
+  }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
+}
+
 export function registerSearchDocuments(
   server: McpServer,
   deps: Deps,
@@ -76,6 +117,7 @@ export function registerSearchDocuments(
         deps.config.retrieval.defaultTopK,
         scope,
       );
+      auditSearch(deps, scope, query, results);
       return {
         content: [{ type: "text", text: formatResults(results) }],
         structuredContent: { results },

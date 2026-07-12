@@ -21,7 +21,9 @@
     "@azure/msal-node": "^2.16.2",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@rag/core": "workspace:*",
+    "fast-xml-parser": "^5.9.3",
     "googleapis": "^144.0.0",
+    "gray-matter": "^4.0.3",
     "isomorphic-fetch": "^3.0.0",
     "pino": "^9.5.0",
     "zod": "^3.24.1"

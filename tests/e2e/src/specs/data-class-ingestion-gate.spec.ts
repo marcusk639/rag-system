@@ -10,7 +10,7 @@ import { env } from "../env.js";
 
 /**
  * End-to-end classification gate: when a source's real `data_class` column is
- * `client_confidential` (which maps to DocumentClass C), the REAL worker
+ * `client_confidential` (which maps to DocumentClass D), the REAL worker
  * handler (`handleSyncSource`) should reject documents before they are
  * written to the database, record the rejection in the ingest_log, and leave
  * zero documents and chunks in the database. This drives the full production
@@ -127,7 +127,7 @@ describe("E2E: data-class ingestion gate (Phase 3 compliance)", () => {
 
     expect(logEntries).toHaveLength(1);
     expect(logEntries[0]?.action).toBe("blocked");
-    expect(logEntries[0]?.doc_class).toBe("C");
+    expect(logEntries[0]?.doc_class).toBe("D");
     expect(logEntries[0]?.external_id).toBe("blocked-doc-1");
   });
 });

@@ -105,6 +105,10 @@ function makeDeps(
     db,
     queue: {} as Deps["queue"],
     retriever: retriever as unknown as Deps["retriever"],
+    embedder: {
+      name: "test-embedding-provider",
+      model: "test-embedding-model",
+    } as Deps["embedder"],
     generator: generator as unknown as Deps["generator"],
     logger: pino({ level: "silent" }),
     close: async () => {},
@@ -147,6 +151,10 @@ describe("audit_log parity — POST /search", () => {
         retrievedCount: 2,
         channel: "api",
         principalKind: "admin",
+        // §7216/§10.22 disclosure recordkeeping — /search has no generation
+        // model, but it still embeds the query, so this must be populated.
+        embeddingProvider: "test-embedding-provider",
+        embeddingModel: "test-embedding-model",
       });
       // No raw query text anywhere on the row — only a one-way hash.
       expect(rows[0]!.questionHash).toMatch(/^[0-9a-f]{64}$/);
@@ -200,6 +208,8 @@ describe("audit_log parity — POST /ask", () => {
         retrievedCount: 2,
         channel: "api",
         principalKind: "admin",
+        embeddingProvider: "test-embedding-provider",
+        embeddingModel: "test-embedding-model",
       });
       expect(JSON.stringify(rows[0])).not.toContain("refund policy");
     } finally {

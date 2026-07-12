@@ -99,6 +99,27 @@
       "when": 1792000000000,
       "tag": "0014_audit_log_shipper_state",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0015_add_git_markdown_source_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793000000001,
+      "tag": "0016_add_ecfr_part4_source_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0017_add_audit_log_provider_disclosure",
+      "breakpoints": true
     }
   ]
 }

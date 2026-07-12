@@ -60,31 +60,34 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 - Expected effect: cross-encoder reranking typically lifts answer-relevant precision substantially over fusion-only pipelines; it is the standard "next step" after hybrid search.
   **Effort:** M. **Value:** very high. This is the #1 RAG-quality win.
 
-### 🟠 H2 — Metadata filter is a guaranteed full scan `[review:H3]`
+### ✅ H2 — Metadata filter is a guaranteed full scan (RESOLVED) `[review:H3]`
 
-The metadata post-filter builds `doc.metadata->>'key' IN (...)` (`packages/db/src/queries.ts:252`). The shipped GIN `jsonb_ops` index (`0001_documents_metadata_gin.sql`) only accelerates `?`/`@>`/`@@` — **not** `->>` text equality — so every metadata-filtered query scans all documents. As the corpus grows this dominates query latency, and it interacts badly with the 8× candidate pool.
-**Fix:** either B-tree expression indexes on the actual filterable keys (`CREATE INDEX ... ON documents ((metadata->>'path'))`), or rewrite the filter to `metadata @> '{"key":"value"}'::jsonb` with a `jsonb_path_ops` GIN index. The latter is generic and matches the existing index intent.
+**Original concern:** the metadata post-filter built `doc.metadata->>'key' IN (...)`. The shipped GIN `jsonb_ops` index (`0001_documents_metadata_gin.sql`) only accelerates `?`/`@>`/`@@` — **not** `->>` text equality — so every metadata-filtered query scanned all documents.
+
+**Current state (2026-07-09):** `hybridSearch` (`packages/db/src/queries.ts`) now builds `metadata @> jsonb_build_object(key, value)` containment conditions instead, which the existing GIN index does accelerate — confirmed via `EXPLAIN ANALYZE` with `enable_seqscan=off`: the old `->>` shape produced a forced `Seq Scan` with no viable index path at all, the new `@>` shape produces a `Bitmap Index Scan` on `documents_metadata_gin_idx`. Also fixed a real correctness edge case introduced by the rewrite: `@>` is type-sensitive (`{"k":"5"}` doesn't contain `{"k":5}`), so a caller filtering on a numeric metadata field (e.g. `sizeBytes`) by its string form — which the old `->>` text-coercion matched — would silently stop matching; the fix tries the filter value as both a string and (when it parses as one) a JSON number, still fully index-backed via Postgres's `BitmapOr`. `metadataFilter` previously had zero test coverage anywhere in the repo; added `tests/e2e/src/specs/metadata-filter.spec.ts` covering single-value, multi-value (OR), multi-key (AND), no-match, and the numeric edge case.
 
 ### 🟠 H3 — No startup guard that embedding dimensions match the `vector(768)` column `[review:M7 — promoted]`
 
 `chunks.embedding` is hardcoded `vector(768)` for Gemini (`schema.ts:151`). Switching `EMBEDDING_PROVIDER=openai` (1536-dim) without altering the column fails **only at first insert — after embedding credits are already spent** and a sync is half-done. The system is explicitly "provider-pluggable," which makes this trap easy to hit.
 **Fix:** at startup assert `config.embedding.dimensions === <column dimensions>` (read from a constant or `information_schema`). Promoting from the audit's Medium because the pluggability is a headline feature and the failure mode wastes money + leaves partial state.
 
-### 🟠 H4 — Unvalidated external-boundary casts `[review:H5/H6/H7]`
+### ✅ H4 — Unvalidated external-boundary casts (RESOLVED)
 
-Three casts turn runtime data into lies the type system believes:
+**Original concern:** three casts turned runtime data into lies the type system believed — a malformed parser response, a `source.kind as never` defeating exhaustiveness, and a `mcp-session-id` header cast dropping the `string[]` case.
 
-- `parser-client.ts:48` — `(await res.body.json()) as ParsedDocument`; a malformed sidecar response silently corrupts every downstream chunk. Define `ParsedDocumentSchema` in `@rag/core` and `.parse()` it. (This also hardens the TS↔Python contract — see [§5 OPT-C].)
-- `apps/worker/src/deps.ts:88` — `source.kind as never` defeats the factory's exhaustiveness check; a new `SourceKind` compiles and crashes at runtime. Use `SourceKind.parse(source.kind)`.
-- `apps/mcp/src/transports/http.ts:110,182` — `mcp-session-id as string | undefined` drops the `string[]` case, so a repeated header makes every request look like a new session. `Array.isArray(raw) ? raw[0] : raw`.
+**Current state:** all three now validate instead of cast. `packages/rag/src/parser/parser-client.ts:60` uses `ParsedDocumentSchema.safeParse(raw)`, throwing a `ParserError` on a malformed sidecar response instead of trusting it. `apps/worker/src/deps.ts:123` uses `SourceKind.parse(source.kind)`. `apps/mcp/src/transports/http.ts`'s `normalizeSessionId` does `Array.isArray(raw) ? raw[0] : raw`, with a code comment explaining exactly why the cast was wrong.
 
-### 🟠 H5 — No rate limiting on API or MCP `[review:H9]`
+### ✅ H5 — No rate limiting on API or MCP (RESOLVED) `[review:H9]`
 
-`POST /ask` triggers an embedding + LLM call per request; an unbounded loop from any valid token drains quota and saturates the DB pool. Add `@fastify/rate-limit` (stricter on `/ask` and `/sources/:id/sync`) and limit the MCP HTTP transport.
+**Original concern:** `POST /ask` triggers an embedding + LLM call per request; an unbounded loop from any valid token drains quota and saturates the DB pool.
 
-### 🟠 H6 — `express@4` runtime with `@types/express@5` types (MCP) `[review:H4]`
+**Current state:** `@fastify/rate-limit` is registered globally in `apps/api/src/server.ts`, with tighter per-route limits on `/ask` (10/min) and `/sources/:id/sync`/`DELETE` (6/min). See §9 for the full CPA-blocker write-up.
 
-`apps/mcp` runs Express 4 but type-checks against Express 5 signatures — runtime mismatches in `http.ts` won't be caught by `tsc`. Align both to one major.
+### ✅ H6 — `express@4`/`@types/express@5` mismatch (RESOLVED) `[review:H4]`
+
+**Original concern:** `apps/mcp` ran Express 4 at runtime but type-checked against Express 5 signatures — runtime mismatches in `http.ts` wouldn't be caught by `tsc`.
+
+**Current state:** `apps/mcp/package.json` now pins `express@^5.2.1` and `@types/express@^5.0.0` — both major version 5, confirmed against the resolved lockfile version, not just the package.json range.
 
 ---
 
@@ -231,39 +234,53 @@ Today the only idempotency gate is the content hash computed _after_ parse (`pip
 
 ## 9. 🔴 PII, access control & §7216 compliance (CPA-firm blockers)
 
-This system is being stood up over a **CPA firm's** corpus — SharePoint engagement files, and Gmail/Outlook mailboxes that contain client tax data. That changes the risk profile entirely: the documents being embedded are **taxpayer return information** and client-confidential records, and the people who can query them are not all entitled to see every client. None of the controls that context requires exist yet. These are not hypothetical hardening items; for this deployment they are go/no-go blockers.
+> **Process note:** this section is a point-in-time audit, not a static snapshot — revisit it whenever a PR referenced below merges or a listed item's real-world status changes (e.g. a DPA gets signed/renewed). The 2026-06-07 version of this section described P1/P2/H5 as unresolved for weeks after the code that resolved them had already shipped; that gap is exactly the confusion this note exists to prevent. See `docs/RAG-VALIDATION-REPORT.md` (2026-07-06) for the verification pass that caught the drift.
 
-### 🔴 P1 — No access control: any API token reads the entire corpus
+This system is being stood up over a **CPA firm's** corpus — SharePoint engagement files, and Gmail/Outlook mailboxes that contain client tax data. That changes the risk profile entirely: the documents being embedded are **taxpayer return information** and client-confidential records, and the people who can query them are not all entitled to see every client. These were originally written as go/no-go blockers with none of the required controls in place; as of 2026-07-08, P1/P2/H5 are resolved and P3/P4 are partially resolved — see each item below for what's still open.
 
-`ARCHITECTURE.md:160` states it plainly — _"Not a permission/ACL system. All documents in the corpus are searchable by anyone with an API token."_ For a generic internal wiki that is a defensible scope cut. For a CPA firm it is not: staff are routinely walled off from clients they don't work (and partners from each other's books), and a single shared bearer token flattens all of that. There is no per-user identity on `/search` or `/ask` (`apps/api/src/routes/search.ts:45`, `ask.ts:35`), no notion of which clients/sources a caller may see, and `SearchQuery` only supports a caller-supplied `sourceIds`/metadata filter (`packages/core/src/types.ts:164`) — a _convenience_ filter the caller chooses, not an _enforced_ boundary.
+### ✅ P1 — Access control (RESOLVED)
 
-**Why it's Critical here:** the first time someone asks "_what's Acme Corp's projected tax liability?_" and gets a grounded answer sourced from another partner's client folder, the firm has an internal-confidentiality incident.
-**Fix (minimum viable):** introduce a caller identity (per-user/role token), attach an allowed-`sourceId` (or client/engagement tag) set to it, and **enforce** that set inside `Retriever.search` / `hybridSearch` as a mandatory `WHERE`, not the optional filter. The architecture note already prescribes exactly this ("wrap retrieval with your own authz layer that filters `sourceIds`") — it just hasn't been built. Pairs with OPT-B4 (surface SharePoint client/engagement columns) so the filter has something firm-meaningful to key on.
+**Original concern:** any API token could read the entire corpus (`ARCHITECTURE.md:160`'s "not a permission/ACL system"), with no per-user identity or enforced `sourceId` boundary on `/search`/`/ask`.
 
-### 🔴 P2 — Sender/recipient/subject PII flows to every caller and into the vector store
+**Current state:** `hybridSearch`'s `WHERE` clause enforces `enforcedSourceIds` as a mandatory condition (not the optional caller-supplied filter) — the code's own comment calls it out as "MANDATORY ACL filter... load-bearing correctness, not just a convenience." `AuthorizationScope`/`Principal` exist in `@rag/core` and are threaded through every retrieval call; any authentication ambiguity fails closed (deny-all), never admin. The web app also now has real per-user authentication (Entra ID via `InternalScopeAuthProvider`, PR #31) resolving per-user `sourceId` scope through `resolveSourceIdsForUser`, closing the gap this item's fix left open for the browser UI specifically.
 
-`DocumentMetadata` carries `author`, `from`, `to[]`, `subject` (`packages/core/src/types.ts:37,46–48`); the Gmail/Outlook connectors populate them from message headers (`gmail/index.ts:294–313,420–436`); and `RetrievalResult.document.metadata` returns the **whole metadata object** on every hit (`types.ts:172–188`). So any token-holder doing a search gets back real names, email addresses, and subject lines — taxpayer-identifying information — even before reading a chunk body. There is **no redaction, masking, or field-level allowlist anywhere in the codebase** (a repo-wide grep for `redact|mask|anonymi|pii` returns nothing in code).
+### ✅ P2 — Metadata PII exposure (RESOLVED)
 
-**Fix:** decide a metadata-exposure policy explicitly. At minimum, allowlist which metadata fields cross the API boundary (mirror the `sanitizeSource` pattern already used for source `config` in `routes/sources.ts:26`), and consider hashing/tokenizing `from`/`to` if they're needed for filtering but not for display. Email bodies themselves are chunked and embedded verbatim — see P3.
+**Original concern:** `DocumentMetadata`'s `author`/`from`/`to[]`/`subject` fields flowed to every caller on every retrieval hit with no redaction.
 
-### 🔴 P3 — Embedding/generation ships client tax data to third-party LLM providers (IRC §7216 / Circular 230)
+**Current state:** `packages/core/src/metadata-policy.ts`'s `sanitizeMetadata`/`sanitizeRetrievalResult` strip PII-risky fields before any response crosses the API boundary.
 
-Every parsed document is embedded via Gemini/OpenAI (`ARCHITECTURE.md:128`, data-flow step 7) and `/ask` sends retrieved chunks to Gemini/OpenAI for generation (`ARCHITECTURE.md:108`). When the corpus is client tax records, **sending that content to an outside API is a disclosure of taxpayer return information** — the exact thing **IRC §7216** regulates (criminal/civil penalties for unauthorized disclosure by a return preparer) and **Circular 230 §10.22** touches on diligence. This is also called out as a mandatory epistemic constraint in the consulting workspace's own `CLAUDE.md` (constraint #2). The code today has no provider data-processing agreement gating, no per-source "may leave the building" flag, and no audit trail of what content was sent to which provider.
+### ✅ P3 — Third-party LLM disclosure (IRC §7216 / Circular 230) — RESOLVED
 
-**Why it's Critical:** this is a regulatory exposure for the firm's owners personally, not just a technical risk. It must be a conscious, documented decision before any real client data is ingested.
-**Fix / decisions required (not all code):**
+**Original concern:** embedding/generation sends client tax-return content to third-party providers (Gemini/OpenAI) with no gating, classification, or audit trail — a §7216 disclosure exposure.
 
-- Confirm a **signed data-processing/BAA-equivalent** with each LLM provider and that the chosen tier contractually excludes training-on-data; or run a **self-hosted / on-tenant embedding+generation** path (the provider-pluggable design already allows a local embedder — `ARCHITECTURE.md:130`).
-- Add a per-source `dataClass` (e.g. `public | internal | client-confidential`) and **block** client-confidential sources from any provider not covered by an agreement — fail at ingestion, not after.
-- Log a minimal **disclosure audit trail** (what source, when, which provider) to satisfy the §10.22 recordkeeping expectation.
+**Current state:**
 
-### 🔴 P4 — No encryption-at-rest story for the corpus, and no data-retention/deletion path
+- **A signed data-processing agreement is now in place with the LLM provider** — the operational precondition this item was gating on.
+- `COMPLIANCE_MODE=client-data` refuses to boot without a signed DPA file on disk — the code-level gate has teeth, not just a doc comment.
+- `EGRESS_ALLOWED_HOSTS` can block all external embedding/generation calls entirely, making the on-device `EMBEDDING_PROVIDER=local` path a real, exercised option.
+- A per-source `dataClass` (`general | research | sop | client_confidential`) gates ingestion: `client_confidential` sources are mapped to the pipeline's Class D and **blocked outright** by `ClassBlockedError` (`packages/ingestion/src/classify-source.ts`, wired into `handleSyncSource` as of 2026-07-08 — this enforcement wiring was itself a gap until this session).
+- **Disclosure audit trail for §10.22 recordkeeping (2026-07-09):** `audit_log` now has `embedding_provider`/`embedding_model` columns, populated on every `/ask` and `/search` call (both endpoints always embed the query — `/search` has no generation model but still discloses the query text to the embedding provider, which the old `model`-only field never captured). `apps/api/src/deps.ts` and `apps/mcp/src/deps.ts` both expose `embedder` from `CoreDeps` for this.
+- **A larger, previously-undiscovered gap closed in the same pass:** MCP's `ask`/`search_documents` tools — the "agent-facing surface" per root CLAUDE.md, and per `docs/CPA_Firm_Operations_Consultant_Briefing.md` likely the dominant real-usage channel (Teams bot) — wrote **no `audit_log` row at all**, not just an incomplete one. Both tools now call the same `logAskEvent` the HTTP routes use, with `channel: "mcp"`. Known remaining limitation: `AuthorizationScope` (unlike the HTTP route's `Principal`) doesn't carry `subject`, so MCP rows have `principal_subject: null` — wiring per-user subject through the MCP transport layer (`http.ts`'s `scopeForRequest` currently discards the resolved `Principal` down to just an `AuthorizationScope` before it reaches tool handlers) is a separate, larger change than adding the audit trail itself; worth a follow-up.
 
-Everything — document bodies, chunk text, embeddings, and email metadata — lands in one Postgres instance (`ARCHITECTURE.md:116`). There is no application-level encryption of sensitive columns and **no retention or right-to-delete mechanism**: ingestion only ever upserts. When a client engagement ends (or a client invokes a deletion request), there is no "purge everything for source/client X" operation — `deleteDocumentsByExternalIds` exists for _delta_ removals but nothing purges a whole client, and embeddings derived from their data linger in the HNSW index.
+### 🟡 P4 — Encryption-at-rest & retention/deletion (PARTIALLY RESOLVED, remainder deliberately deferred)
 
-**Fix:** (a) rely on disk/volume encryption at minimum and document it; evaluate column-level encryption for `documents.content`/`chunks.text` if the threat model needs it. (b) Add a `DELETE /sources/:id` (and a `purgeSource`) that removes the source, its documents, its chunks, and triggers an index cleanup — both for offboarding and for honoring deletion requests. This is the disposal half of a retention policy the firm will need on paper anyway.
+**Original concern:** no application-level encryption of sensitive columns, and ingestion only ever upserts with no way to purge a client's data.
 
-> **Sequencing note for §11 roadmap:** P1–P4 are CPA-deployment blockers but several are _decisions_ (provider agreements, data classification, retention policy) as much as code. They gate ingesting **real** client data; they do **not** gate building/evaluating the pipeline on synthetic or public data. Do the eval-harness and RAG-quality work (§11) on non-sensitive data in parallel, and close P1–P4 before the first real client source is connected.
+**Current state:** `DELETE /sources/:id` + `purgeSource` now exist and cascade through documents/chunks/jobs/embeddings — the disposal half of a retention policy.
+
+**Deliberately deferred (2026-07-09), not silently skipped:**
+
+- **Column-level encryption for `documents.content`/`chunks.text`:** relies on the managed Postgres provider's disk/volume encryption (`docs/DEPLOYMENT.md` recommends Neon/Supabase/RDS — verify encryption-at-rest is actually enabled for whichever one a given deployment uses; this is an operational setting the code can't assert). Application-level column encryption was evaluated and explicitly NOT pursued this pass: it would break `hybridSearch`'s full-text (`tsvector`/GIN) search on encrypted content without a much larger redesign (searchable encryption, or decrypt-then-search which defeats the point), plus real key-management/rotation infrastructure this repo has no precedent for. Worth a dedicated design pass if a client's threat model specifically requires it, not a quick addition.
+- **Finer-grained deletion (single-client within a multi-client source):** discovered to be blocked on a missing schema concept, not just a missing query — `documents`/`chunks` have no per-document `clientId` at all today; only `source_client_assignments` exists, and that's an access-control mapping (which staff/clients may query a source), not a per-document tag. A source CAN serve multiple clients (the table is many-to-many), but nothing records which documents within it belong to which client, so there's no way to selectively purge one client's data from a shared source without first adding that tagging (folder-path inference, or manual admin tagging — both real design choices). Deferred until a concrete need for multi-client-source deletion exists, rather than building speculative infrastructure now; whole-source purge (already shipped) covers the common case of a per-engagement, single-client source.
+
+### ✅ H5 — No rate limiting (RESOLVED)
+
+**Original concern:** `POST /ask` triggers an embedding + LLM call per request with no rate limiting on API or MCP.
+
+**Current state:** `@fastify/rate-limit` is registered globally in `apps/api/src/server.ts`, with tighter per-route limits on `/ask` (10/min) and on `DELETE`/`sync` (6/min).
+
+> **Sequencing note for §11 roadmap:** P3's remaining gap (disclosure audit trail) and P4's remaining gaps (column-level encryption, single-client deletion) are worth scheduling but do not block real client data ingestion the way the original P1–P4/H5 set did — the DPA, the code-level compliance gates, and per-user access control are all now in place.
 
 ---
 
@@ -319,13 +336,13 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Highest-ROI RAG-quality upgrades
 
-| Item                                                     | Sev   | Effort |
-| -------------------------------------------------------- | ----- | ------ |
-| H1 — reranking stage over the existing 8× pool           | 🟠/🟢 | M      |
-| OPT-C1 — contextual retrieval (optional chunk transform) | 🟢    | M      |
-| H2 — make metadata filtering index-backed                | 🟠    | S–M    |
-| M-N3 — per-document cap / MMR diversity                  | 🟡    | S      |
-| **Build a small retrieval eval set first** (see §12)     | —     | M      |
+| Item                                                     | Sev   | Effort | Status                                                                 |
+| -------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------- |
+| H1 — reranking stage over the existing 8× pool           | 🟠/🟢 | M      | OPEN — blocked on a real-embedder eval baseline (see EVAL-BASELINE.md) |
+| OPT-C1 — contextual retrieval (optional chunk transform) | 🟢    | M      | OPEN                                                                   |
+| H2 — make metadata filtering index-backed                | 🟠    | S–M    | ✅ done (`@>` containment + numeric fallback, index-backed, tested)    |
+| M-N3 — per-document cap / MMR diversity                  | 🟡    | S      | OPEN                                                                   |
+| **Build a small retrieval eval set first** (see §12)     | —     | M      | Partial — harness is real-embedder-capable; no real run recorded yet   |
 
 ### Connector extensibility (the "easy to add sources" goal)
 
@@ -348,20 +365,21 @@ Ordered by **(value ÷ effort)**, grouped by intent. Effort: S < ½ day, M ≈ 1
 
 ### Operability hardening
 
-| Item                                      | Sev | Effort |
-| ----------------------------------------- | --- | ------ |
-| H5 — rate limiting (`/ask`, `/sync`, MCP) | 🟠  | S      |
-| H6 — express major alignment              | 🟠  | S      |
-| M3, M6, M17, M19 (from audit)             | 🟡  | S each |
+| Item                                      | Sev | Effort | Status                                                     |
+| ----------------------------------------- | --- | ------ | ---------------------------------------------------------- |
+| H4 — unvalidated external-boundary casts  | 🟠  | S      | ✅ done (schema validation replaces all 3 casts)           |
+| H5 — rate limiting (`/ask`, `/sync`, MCP) | 🟠  | S      | ✅ done (`@fastify/rate-limit`, global + per-route limits) |
+| H6 — express major alignment              | 🟠  | S      | ✅ done (`express@5.2.1` + `@types/express@5.0.0`)         |
+| M3, M6, M17, M19 (from audit)             | 🟡  | S each | OPEN                                                       |
 
 ### CPA-deployment blockers — close before ingesting real client data (§9)
 
-| Item                                                                  | Sev | Effort              | Status                                                          |
-| --------------------------------------------------------------------- | --- | ------------------- | --------------------------------------------------------------- |
-| P3 — LLM-provider disclosure decision (§7216): agreement or self-host | 🔴  | M (mostly decision) | OPEN (decision)                                                 |
-| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L                 | ✅ done (`access-control.ts`, scope enforced in `hybridSearch`) |
-| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S                   | ✅ done (`metadata-policy.ts`)                                  |
-| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M                   | OPEN                                                            |
+| Item                                                                  | Sev | Effort | Status                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------- | --- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — enforced per-user/role `sourceId` access control in retrieval    | 🔴  | M–L    | ✅ done (`access-control.ts` + `hybridSearch` scope enforcement; per-user web auth via PR #31)                                                                                                                                                                                                       |
+| P2 — metadata-exposure allowlist (sender/subject) at the API boundary | 🔴  | S      | ✅ done (`metadata-policy.ts`)                                                                                                                                                                                                                                                                       |
+| P3 — LLM-provider disclosure (§7216): agreement + code-level gating   | 🔴  | M      | ✅ done — DPA signed; `COMPLIANCE_MODE`/`EGRESS_ALLOWED_HOSTS`/`dataClass` gate all ship; `audit_log` now records embedding provider/model on every /ask + /search call, both API and MCP (MCP previously had zero audit logging at all)                                                             |
+| P4 — `DELETE`/purge-source + encryption-at-rest + retention policy    | 🔴  | M      | 🟡 partial (rest deliberately deferred, see §9) — `DELETE /sources/:id` + `purgeSource` cascade done; column-level encryption relies on managed-Postgres disk encryption; single-client-within-source deletion blocked on a missing `clientId`-on-documents schema concept, not just a missing query |
 
 ### Ingestion operator-experience (§10) — needed for a non-developer operator
 
