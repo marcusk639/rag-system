@@ -24,6 +24,9 @@ export default auth((req) => {
     req.nextUrl.pathname.startsWith("/api/auth/");
   if (isAuthRoute) return NextResponse.next();
 
+  // Unauthenticated liveness check — must succeed before anyone has signed in.
+  if (req.nextUrl.pathname === "/api/health") return NextResponse.next();
+
   if (process.env.WEB_AUTH_MODE === "static-fallback") {
     return NextResponse.next();
   }

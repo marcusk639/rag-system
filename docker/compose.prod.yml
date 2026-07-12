@@ -111,6 +111,49 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Web chat UI (Next.js, Entra ID SSO) ──────────────────────────────────────
+  web:
+    image: ${WEB_IMAGE:-rag-web:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3002}:3000"
+    environment:
+      NODE_ENV: production
+      RAG_API_URL: http://api:3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      # NextAuth session signing — required, generate with: openssl rand -base64 32
+      AUTH_SECRET: ${AUTH_SECRET}
+      # Microsoft Entra ID SSO — a dedicated app registration for user login
+      # (do not reuse the MS_* Graph API credentials below).
+      AUTH_ENTRA_CLIENT_ID: ${AUTH_ENTRA_CLIENT_ID}
+      AUTH_ENTRA_CLIENT_SECRET: ${AUTH_ENTRA_CLIENT_SECRET}
+      AUTH_ENTRA_TENANT_ID: ${AUTH_ENTRA_TENANT_ID}
+      # Signs the per-request scope-assertion JWT — must be at least 64
+      # characters and match one entry in the api/mcp services'
+      # INTERNAL_SCOPE_JWT_SECRETS list.
+      INTERNAL_SCOPE_JWT_SECRET: ${INTERNAL_SCOPE_JWT_SECRET}
+      # Graph API credentials for the admin-group membership check — typically
+      # the same values already used by the worker's SharePoint connector.
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+      RAG_ADMINS_GROUP_ID: ${RAG_ADMINS_GROUP_ID:-}
+      # Emergency-only fallback — leave unset for normal per-user operation.
+      WEB_AUTH_MODE: ${WEB_AUTH_MODE:-}
+      RAG_API_STATIC_FALLBACK_TOKEN: ${RAG_API_STATIC_FALLBACK_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── MCP server (HTTP transport) ──────────────────────────────────────────────
   mcp:
     image: ${MCP_IMAGE:-rag-mcp:latest}

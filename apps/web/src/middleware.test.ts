@@ -105,6 +105,12 @@ describe("middleware", () => {
     // ("/api/auth" or "/api/auth/*"), not a naive startsWith("/api/auth").
     expect(res?.status).toBe(307);
   });
+
+  it("exempts /api/health from the session gate (unauthenticated healthcheck)", async () => {
+    const req = makeRequest("http://localhost:3000/api/health");
+    const res = await invoke(req);
+    expect(res?.status).toBe(200);
+  });
 });
 
 describe("auth.ts jwt callback", () => {

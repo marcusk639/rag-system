@@ -3,12 +3,18 @@
 **/dist
 **/.turbo
 **/.next
+# TypeScript incremental-build state. Gitignored but NOT excluded here until
+# now — a real, repo-wide bug this was: a stale local .tsbuildinfo (mismatched
+# against a `dist/` regenerated or moved outside tsc's knowledge, e.g. after
+# `mv`/`rm -rf dist` without also clearing this file) gets copied verbatim
+# into the build context and makes tsc trust its own stale bookkeeping over
+# reality, silently skipping real compilation — confirmed to reproduce with
+# @rag/core/@rag/db emitting only .d.ts (or nothing) instead of real .js
+# output, with zero error message. Every app's Dockerfile (api/mcp/worker/web)
+# runs a fresh `pnpm ... build` after COPYing packages/apps, so any developer
+# machine with a locally-built (possibly stale) workspace could hit this.
+**/*.tsbuildinfo
 
-# Frontend app: the backend service images (api/worker/mcp) must not bundle or
-# build the Next.js chat UI. Excluding it also keeps the workspace `pnpm install
-# --frozen-lockfile` to the 13 backend projects (apps/web deps are intentionally
-# not in the root lockfile yet).
-apps/web
 
 # VCS / editor / local tooling
 .git
