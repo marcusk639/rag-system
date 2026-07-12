@@ -1,6 +1,6 @@
-# Generic Document Classification Service — Future Vision
+# Generic Document Classification Service — Design
 
-> **Status: DEFERRED. No current timeline. Does not block any work in `rag-system`, `cpa-consulting`, `veteran-claims-app`, or the TWK KB launch.** This is a design captured for when there's bandwidth to build it, not a scheduled initiative. Do not invoke `writing-plans` on this document until someone explicitly decides to prioritize it.
+> **Status: ACTIVE — being scoped into an implementation plan (2026-07-11).** Still does not block any work in `rag-system`, `cpa-consulting`, `veteran-claims-app`, or the TWK KB launch — this is a new, independent repo/project, adopted by existing consumers later, not a prerequisite for their current plans.
 
 **Goal:** A standalone document classification service, in its own repo, integrated with by other applications via API and MCP — genuinely reusable across arbitrary products, not just the two known today (CPA, veteran-claims-app), using retrieval-augmented, LLM-driven classification against a domain-specific knowledge base, with confidence scoring, explainable rationale, and a continuous evaluation loop.
 
@@ -22,6 +22,17 @@
 
 Rule-based/keyword classification (the interim approach used by early adopters of the minimal interface) is brittle against paraphrased, narrative content — a document describing "trouble sleeping, hypervigilance, and avoiding crowds" is clearly PTSD-adjacent without containing the word "PTSD." Accurately classifying sensitive content at the semantic level, across genuinely different domains (CPA tax-compliance content vs. veteran health-adjacent content), needs a mechanism smarter than pattern matching, grounded in real domain authority, and continuously validated — not a bigger keyword list.
 
+## 1.1 Build vs. Adopt Research Findings (2026-07-11)
+
+Before committing to a custom build, a deep-research pass (105 agents, 22 sources fetched, 25 claims adversarially verified — 15 confirmed, 10 explicitly refuted and excluded) evaluated existing open-source and commercial document-classification/sensitive-content-detection systems. Conclusion: **no end-to-end product satisfies this spec, and no product should be adopted wholesale — but two concrete adoption decisions and one validated architectural precedent change what gets built custom.**
+
+- **Adopt Microsoft Presidio (MIT license) or Philter (Apache 2.0) as the direct-identifier/PII detection layer**, replacing "hand-rolled regex" — both are mature (Presidio ~8 years, Philter actively maintained through 2026), and Presidio's custom-recognizer registration pattern (subclass `EntityRecognizer`/`PatternRecognizer`, register with a `RecognizerRegistry`) is a proven, additive extensibility mechanism directly reusable for this service's own per-domain configuration requirement (§2.3). Caveat, confirmed on verification: raw accuracy of open-source PII detectors lags commercial marketing claims substantially (best benchmarked F1 ~0.542 vs. commercial claims of 0.92-0.99) — adopt Presidio for its infrastructure and extensibility, not an assumption of high out-of-the-box accuracy; this layer still needs its own eval coverage (§2.5), not a free pass because it's a mature library.
+- **The retrieve→ground→structured-output architecture (§2.1) is a validated pattern, not a novel risk** — the closest precedent found, Contextual AI's "Contextual Policy Engine" (arXiv 2508.06204), demonstrates exactly this shape (embedding search + reranker → grounded LLM generator → structured label/category/rationale) achieving F1=0.988 on a hate-speech classification benchmark, competitive with the best commercial classifier tested (0.996) and beating other LLM-guardrail baselines. Real caveats: it's a non-peer-reviewed preprint from a vendor benchmarking its own commercial stack (conflict of interest on the "beats commercial baselines" framing), and it's evaluated on a single narrow domain — **it has not been validated across genuinely disjoint domains** (e.g., PTSD-adjacent veteran-health content vs. tax-return-adjacent CPA content, the actual two domains this service must handle). Treat as a design pattern to borrow, not proof this specific multi-domain use case will hit similar accuracy — the eval harness (§2.5) is what actually answers that question for this service, not the paper.
+- **Enterprise DLP/GRC platforms (Microsoft Purview, representative of the category) do not do RAG-grounded classification at all** — confirmed directly against current Microsoft documentation: Purview's three classification mechanisms are manual tagging, pattern-matching, and trainable classifiers (train-once on labeled samples), with no per-query LLM grounding against a reference corpus anywhere in the pipeline. Not a fit despite being the closest commercial analog to "compliance-grade multi-domain classification."
+- **LLM "guardrail" frameworks (NeMo Guardrails, Guardrails AI) are commonly mistaken for this kind of system but are architecturally different** — policy-enforcement/validator layers sitting between application code and an LLM, not purpose-built classifiers producing a sensitivity tier with confidence and cited rationale. Confirmed directly against both projects' primary documentation.
+- **Confirmed gap, applies to every product/paper surveyed**: nothing bundles a labeled-golden-set evaluation harness (§2.5) with the rest of a classification pipeline, and nothing exposes RAG-grounded classification with confidence+rationale via both an API and an MCP server as first-class delivery (§3 of the minimal-interface spec's integration goal). This remains fully custom engineering regardless of which building blocks are adopted — the research specifically looked for and did not find a shortcut here.
+- **Residual open question, not fully closed by this research pass**: vertical-specific compliance SaaS products (healthcare de-identification services, legal e-discovery platforms) were not directly investigated and could plausibly bundle something closer to this spec. Worth a narrower, targeted check before finalizing the build if time allows, but not treated as blocking — the hybrid-build path below is sound regardless of what such a product might offer, since self-hosting/data-control requirements (this service handles MST/mental-health and tax-return-adjacent content) would likely rule out a third-party SaaS dependency for the core classification path anyway.
+
 ## 2. Design
 
 ### 2.1 Classification as Retrieval-Augmented Generation
@@ -32,7 +43,7 @@ For each document to classify:
 2. Pass `{document content, retrieved context}` to an LLM with a classification-specific prompt (product-supplied, not generic — see §2.3).
 3. LLM returns structured output: `{ tier, confidence: 0.0-1.0, rationale, retrievedContextIds }`.
 
-Regex-based direct-identifier detection (SSN/DOB/etc.) runs as a separate, cheap, high-precision layer — genuinely domain-agnostic, no LLM needed for that narrow signal type.
+Direct-identifier detection (SSN/DOB/etc.) runs as a separate layer via **Microsoft Presidio** (MIT license — see §1.1 for the adoption rationale), not hand-rolled regex — genuinely domain-agnostic, no LLM needed for that narrow signal type, and its recognizer-registry pattern doubles as the extensibility mechanism for §2.3's per-domain configuration.
 
 ### 2.2 Confidence-Driven Behavior
 
@@ -66,8 +77,12 @@ Modeled directly on `veteran-claims-app`'s existing `golden-questions.eval.ts` /
 - **`veteran-claims-app`**: swaps its interim rule-based `DocumentClassifier` implementation for one backed by this service, satisfying the same minimal interface — no changes to the Document Workspace's calling code.
 - **CPA/TWK**: migrates `classify-source.ts`'s existing logic into this service's rule/prompt format, with a side-by-side verification pass against real TWK data before cutover (the same diligence any change to TWK's live classification behavior would require, regardless of mechanism).
 
-## 4. Explicitly Not Scoped Now
+## 4. Explicitly Not Scoped
 
-- No repo exists yet for this service — creating one is itself a future decision, not implied by writing this spec.
-- No implementation, no task breakdown, no `writing-plans` invocation until this is explicitly prioritized.
 - No requirement that CPA or veteran-claims-app adopt this once built — the minimal-interface pattern means adoption is optional and incremental, not a forced migration.
+- The literal per-domain classification prompts/knowledge-base content for CPA and veteran-claims-app are not authored here — this spec defines the mechanism; each product's actual rule content is that product's own task (per §2.3), same as the interim classifiers.
+- A deeper investigation of vertical-specific compliance SaaS products (§1.1's residual open question) is optional follow-up, not a blocker to starting implementation.
+
+## 5. Repo Setup
+
+No repo exists yet. Creating one — with enough README/AGENTS.md context that a fresh engineer or agent can pick up this spec cold — is the first task of the implementation plan, not a precondition for writing it.
