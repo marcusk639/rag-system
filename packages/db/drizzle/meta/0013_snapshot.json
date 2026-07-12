@@ -1,6 +1,6 @@
 {
-  "id": "bfdd35e5-d344-48aa-8313-42b226a3fcb5",
-  "prevId": "7632a677-9615-4e89-a146-b0140a2297da",
+  "id": "42849800-99df-4aaf-afae-1da070a03226",
+  "prevId": "57f8efbe-ce86-445b-a86a-46a189594c3c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -128,32 +128,6 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.audit_log_shipper_state": {
-      "name": "audit_log_shipper_state",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "last_shipped_at": {
-          "name": "last_shipped_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -1361,8 +1335,7 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom",
-        "git-markdown"
+        "custom"
       ]
     }
   },

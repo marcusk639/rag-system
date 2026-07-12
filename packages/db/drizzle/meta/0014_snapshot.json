@@ -1,6 +1,6 @@
 {
-  "id": "bfdd35e5-d344-48aa-8313-42b226a3fcb5",
-  "prevId": "7632a677-9615-4e89-a146-b0140a2297da",
+  "id": "7632a677-9615-4e89-a146-b0140a2297da",
+  "prevId": "42849800-99df-4aaf-afae-1da070a03226",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1361,8 +1361,7 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom",
-        "git-markdown"
+        "custom"
       ]
     }
   },

@@ -1,6 +1,6 @@
 {
-  "id": "bfdd35e5-d344-48aa-8313-42b226a3fcb5",
-  "prevId": "7632a677-9615-4e89-a146-b0140a2297da",
+  "id": "57f8efbe-ce86-445b-a86a-46a189594c3c",
+  "prevId": "e6b9654d-669f-4386-8a36-5e4dd5f7103b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -128,32 +128,6 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.audit_log_shipper_state": {
-      "name": "audit_log_shipper_state",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "last_shipped_at": {
-          "name": "last_shipped_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -315,65 +289,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.docs_gap_digest_runs": {
-      "name": "docs_gap_digest_runs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "uuid_generate_v4()"
-        },
-        "run_at": {
-          "name": "run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "window_since": {
-          "name": "window_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "window_until": {
-          "name": "window_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_weak_events": {
-          "name": "total_weak_events",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "by_endpoint": {
-          "name": "by_endpoint",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "by_source_group": {
-          "name": "by_source_group",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1361,8 +1276,7 @@
         "gdrive",
         "gmail",
         "outlook",
-        "custom",
-        "git-markdown"
+        "custom"
       ]
     }
   },
