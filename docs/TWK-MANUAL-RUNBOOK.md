@@ -144,18 +144,26 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ### 7. Write real CPA-domain questions for the retrieval-eval gold set, with Doug
 
-**Why:** `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 8 makes the eval harness capable of running against a real embedder at zero cost — but the actual questions in the test corpus are still 17 synthetic, vocabulary-distinctive questions about Postgres tuning and gardening. Building genuine confidence in retrieval quality requires real questions a CPA would actually ask, with real "near-neighbor" distractor documents that are hard to tell apart semantically (not trivially keyword-separable, unlike the current corpus).
+**Why this is more load-bearing than its P2 placement suggests (updated 2026-07-11):** a dedicated LLM-evaluation audit confirmed this isn't just "makes the numbers more meaningful" — it's the literal prerequisite for every retrieval-quality decision the system still needs to make. Specifically:
+
+- **Reranking is built and wired but defaults off** (`config.rerank.provider = "none"`) — the codebase's own tracking (`docs/ISSUES-AND-OPTIMIZATIONS.md`, item H1) marks turning it on as explicitly "blocked on a real-embedder eval baseline." Nobody can respons­ibly decide whether to enable it without this.
+- **`pnpm eval:real` (the real-embedder path) has never been run at all** — `docs/EVAL-BASELINE.md` says so directly. The only numbers that exist (97%+ recall, MRR 1.000) are against a deliberately keyword-trivial 14-document synthetic corpus (Postgres tuning, gardening, sailing) under a bag-of-words `FakeEmbedder` — the doc's own words: "not meaningful evidence of retrieval quality."
+- **There is no answer-faithfulness/groundedness evaluation anywhere in the codebase** — no LLM-as-judge, no human-eval rubric. `ISSUES-AND-OPTIMIZATIONS.md` names this gap explicitly too. This item's real CPA questions are also the natural seed for closing that gap later, not just retrieval scoring.
+
+In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, and any future answer-faithfulness check are ALL currently guesses, not measurements, and stay that way until this item is done. `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 8 already made the harness capable of running against a real embedder at zero cost — but the actual questions in the test corpus are still 17 synthetic, vocabulary-distinctive ones. Building genuine confidence requires real questions a CPA would actually ask, with real "near-neighbor" distractor documents that are hard to tell apart semantically (not trivially keyword-separable, unlike the current corpus).
 
 **Exact steps:**
 
 1. Sit down with Doug for an hour. Ask him to write, from memory, 30-50 questions he's actually asked or been asked at the firm — the kind of thing the KB bot is supposed to answer (BOI filing procedures, time codes, intake checklists, K-1 treatment questions, UPE calculations, whatever comes up naturally).
 2. For each question, identify (or write, redacted) the actual SOP/document that should answer it, plus 1-2 similar-but-wrong documents that a naive keyword search might confuse it with (the "near-neighbor distractor" the current corpus lacks entirely).
 3. Hand this list to whoever is running the automatable plan's Task 8 follow-up — turning this list into the actual eval corpus file (`tests/e2e/src/eval/corpus.ts`) IS a mechanical, automatable step once the questions exist; writing the questions themselves is the part that needed Doug.
-4. Make sure nothing in this list contains real client names, SSNs, EINs, or actual tax positions taken for a real client — keep it to genuinely firm-internal SOP content or clearly fictionalized examples, consistent with the same Class A/B boundary the rest of this project respects.
+4. Once the real corpus exists, run `pnpm eval:real` (with `EMBEDDING_PROVIDER=local` — no API key needed, per `EVAL-BASELINE.md`) and paste the results into that file's "Real-embedder results" section, replacing the current "no real-embedder run has been recorded yet" gap.
+5. Only after step 4 produces real numbers, revisit the reranker on/off decision (`ISSUES-AND-OPTIMIZATIONS.md` H1) with actual evidence instead of a guess.
+6. Make sure nothing in this list contains real client names, SSNs, EINs, or actual tax positions taken for a real client — keep it to genuinely firm-internal SOP content or clearly fictionalized examples, consistent with the same Class A/B boundary the rest of this project respects.
 
-**Done when:** a 30-50 item question list with matched correct/distractor documents exists and has been handed off.
+**Done when:** a 30-50 item question list with matched correct/distractor documents exists, has been turned into the real corpus, and `pnpm eval:real` has produced recorded, real-embedder numbers in `docs/EVAL-BASELINE.md`.
 
-**Depends on / blocks:** Feeds into (but doesn't block) the automatable plan's Task 8 — the harness already works without this; this just makes its numbers actually meaningful.
+**Depends on / blocks:** Feeds into (but doesn't strictly block) a tightly-scoped internal pilot — the harness already works without this. But it DOES block making the reranker decision, any RRF-weight tuning, and any future answer-faithfulness evaluation on real evidence rather than a guess. Treat as effectively P1 in practice, even though it's filed under P2 here for document-structure continuity.
 
 ---
 
