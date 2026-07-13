@@ -114,3 +114,72 @@ describe("drizzle migration guard — journal timestamp ordering", () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * Regression guard for the 0007_audit_log incident (2026-07-13, see
+ * docs/MIGRATION-TRACKING-INCIDENT-2026-07-13.md): drizzle-orm's migrator
+ * matches by a single highest-applied-timestamp threshold, never by content
+ * hash (verified directly against node_modules/drizzle-orm/pg-core/dialect.js).
+ * Changing an already-applied migration's `when` — even for a good reason
+ * like fixing local monotonicity — can silently shift that threshold and
+ * cause the migrator to either skip a genuinely-pending migration or try to
+ * re-run one that's already live, exactly what happened to 0007.
+ *
+ * `_applied-baseline.json` is a checked-in, DELIBERATELY-maintained snapshot
+ * of every migration confirmed applied to the real production database — not
+ * auto-generated, not derived from the journal itself (that would make this
+ * guard tautological). Update it by hand, in its own commit, only after
+ * confirming (via `railway ssh -s rag-postgres`, per the incident doc and
+ * Task 1 of docs/superpowers/plans/2026-07-13-rag-system-launch-readiness.md)
+ * that a migration is genuinely live in production.
+ */
+describe("drizzle migration guard — no retimestamping an already-applied migration", () => {
+  it("every baseline entry's 'when' still matches the current journal", async () => {
+    const baselinePath = join(MIGRATIONS_DIR, "meta", "_applied-baseline.json");
+    const baseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      entries: { tag: string; when: number }[];
+    };
+    const journalPath = join(MIGRATIONS_DIR, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: { idx: number; tag: string; when: number }[];
+    };
+
+    const violations: string[] = [];
+    for (const baselineEntry of baseline.entries) {
+      const journalEntry = journal.entries.find(
+        (e) => e.tag === baselineEntry.tag,
+      );
+      if (!journalEntry) {
+        violations.push(
+          `baseline entry "${baselineEntry.tag}" no longer exists in the journal — ` +
+            `a migration confirmed applied to production was renamed or deleted`,
+        );
+        continue;
+      }
+      if (journalEntry.when !== baselineEntry.when) {
+        violations.push(
+          `"${baselineEntry.tag}" is confirmed applied to production with when=${baselineEntry.when}, ` +
+            `but the current journal has when=${journalEntry.when}. Changing an already-applied ` +
+            `migration's timestamp can cause drizzle-orm's migrator to silently skip or re-run ` +
+            `migrations (see docs/MIGRATION-TRACKING-INCIDENT-2026-07-13.md). If this migration ` +
+            `genuinely needs a new timestamp, first confirm via a real production database query ` +
+            `whether that's safe — do not just restore the baseline value blindly.`,
+        );
+      }
+    }
+
+    expect(
+      violations,
+      `One or more migrations confirmed applied to production have had their ` +
+        `journal timestamp changed. Violations:\n${violations.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("the baseline itself is non-empty (guard is actually wired)", async () => {
+    const baselinePath = join(MIGRATIONS_DIR, "meta", "_applied-baseline.json");
+    const baseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      entries: { tag: string; when: number }[];
+    };
+    expect(baseline.entries.length).toBeGreaterThan(0);
+  });
+});

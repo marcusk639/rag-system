@@ -1,0 +1,22 @@
+{
+  "note": "Checked-in snapshot of every migration confirmed applied to the REAL production database (not derived from the journal — that would make the migration-guard.test.ts check tautological). Update by hand, in its own commit, ONLY after confirming via `railway ssh -s rag-postgres` (see docs/MIGRATION-TRACKING-INCIDENT-2026-07-13.md) that a new migration is genuinely live in production. Never edit an existing entry's `when` here to 'fix' a guard failure without first confirming, against the real database, that doing so is safe.",
+  "entries": [
+    { "tag": "0001_documents_metadata_gin", "when": 1779667200000 },
+    { "tag": "0002_documents_original_storage", "when": 1780500000000 },
+    { "tag": "0003_pending_uploads", "when": 1781333333000 },
+    { "tag": "0004_data_class", "when": 1782166666000 },
+    { "tag": "0005_ingest_log", "when": 1783000000000 },
+    { "tag": "0006_client_assignments", "when": 1783833333000 },
+    { "tag": "0007_audit_log", "when": 1783900000000 },
+    { "tag": "0008_document_governance", "when": 1785500000000 },
+    { "tag": "0009_search_audit_parity", "when": 1787000000000 },
+    { "tag": "0010_client_assignments_unique", "when": 1788000000000 },
+    { "tag": "0011_audit_log_principal_subject", "when": 1789000000000 },
+    { "tag": "0012_staff_source_assignments", "when": 1790000000000 },
+    { "tag": "0013_docs_gap_digest_runs", "when": 1791000000000 },
+    { "tag": "0014_audit_log_shipper_state", "when": 1792000000000 },
+    { "tag": "0015_add_git_markdown_source_kind", "when": 1793000000000 },
+    { "tag": "0016_add_ecfr_part4_source_kind", "when": 1793000000001 },
+    { "tag": "0017_add_audit_log_provider_disclosure", "when": 1794000000000 }
+  ]
+}
