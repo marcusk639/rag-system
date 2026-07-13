@@ -38,7 +38,4 @@ USER appuser
 
 EXPOSE 8000
 
-# Bind IPv6 (::) so the service is reachable over Railway's IPv6-only private
-# network (PARSER_URL=http://rag-parser.railway.internal:8000). On dual-stack
-# Linux, :: also accepts IPv4, so local docker-compose port mapping still works.
-CMD ["uvicorn", "app.main:app", "--host", "::", "--port", "8000", "--workers", "2"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
