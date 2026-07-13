@@ -101,6 +101,82 @@ The HNSW index on `chunks.embedding` is created with `m=16, ef_construction=64`.
 SET hnsw.ef_search = 100;  -- default 40
 ```
 
+### Backup & restore (P0 for any deployment holding real client data)
+
+Postgres is the **sole** store for chunks, embeddings, sources, and the compliance
+`audit_log` — there is no secondary copy of any of this data anywhere else in the
+system. An unrecoverable Postgres loss means total, permanent data loss including
+the audit trail itself.
+
+**Status as of 2026-07-12: restore mechanism verified end-to-end; automated
+backup does NOT exist yet — this is the open half of the gate.**
+
+**Step 1 result — which Postgres this deployment actually has:** confirmed via
+`railway variables --service rag-postgres` (raw `POSTGRES_USER`/`POSTGRES_PASSWORD`/
+`POSTGRES_DB`/`PGDATA` env vars, no `DATABASE_PUBLIC_URL`) — this is a
+**self-hosted `pgvector/pgvector:pg16` container on a Railway volume**
+(`rag-postgres-volume`, 368MB/5000MB used), not Railway's managed Postgres
+plugin. `railway volume list` exposes no backup/snapshot metadata for this
+volume. **Conclusion: nothing is currently taking automated backups of this
+data.** A volume-loss event today would be unrecoverable.
+
+**Step 3 result — manual restore drill, run 2026-07-12 via `railway ssh -s rag-postgres`:**
+
+1. `pg_dump -F c` streamed from the live container over `railway ssh` to a local
+   file (36MB, 130 TOC entries, including the `vector`/`pg_trgm`/`uuid-ossp`
+   extensions and the `data_class`/`source_kind`/`ingestion_status` enum types) —
+   read-only against production, no writes.
+2. Restored into a throwaway local `pgvector/pgvector:pg16` Docker container
+   (never touched the live database) via `pg_restore --no-owner --no-privileges` —
+   clean restore, zero errors in the log.
+3. Verified row counts match production exactly: `chunks`=6175, `documents`=858,
+   `sources`=3, `audit_log`=3. Spot-checked zero `chunks` rows with a null
+   `embedding` or `text` post-restore. Confirmed all six `chunks` indexes
+   (including `chunks_embedding_hnsw_idx`) and all five `documents` indexes
+   (including the GIN metadata index) rebuilt correctly from the dump.
+4. Torn down the scratch container and deleted the local dump file immediately
+   after verification — no copy of production data was retained beyond the drill.
+
+**What this proves:** if a `pg_dump` is taken, it restores cleanly and completely
+— the mechanics work, including the vector index and extensions that are the
+parts most likely to silently fail on restore.
+
+**What this does NOT prove, and what's still open:** there is no scheduled job
+producing that `pg_dump` today. This drill required manually pulling one on
+demand via `railway ssh`. **The remaining P0 work is Step 2 below — standing up
+an actual recurring backup job** — not re-verifying the restore path, which is
+now done.
+
+**Step 2 — still open — build the actual backup job.** Since this is a
+self-hosted container (confirmed above, not the managed plugin), a recurring
+`pg_dump` is needed. Lowest-effort option that fits this stack: a scheduled
+job to an S3-compatible bucket (the object-store infra for uploads already
+exists — see `STORAGE_*` env vars in `env.example` — a backup bucket can reuse
+the same credentials/provider). Options, roughly in order of effort:
+
+- A pg-boss recurring job (mirrors the pattern already shipped for
+  `docsGapDigest`/`shipAuditLog` — see `packages/ingestion/src/queue.ts`) that
+  shells out to `pg_dump` and uploads the result. Reuses infra already in the
+  codebase; no new scheduler to operate.
+- A Railway cron service running `pg_dump | gzip | upload` on a schedule,
+  external to the app.
+- `pg_basebackup` + WAL archiving if point-in-time recovery (not just
+  daily-snapshot recovery) is required — more operational surface, only worth
+  it if the RPO target demands it.
+
+Re-run the restore drill above (same `railway ssh -s rag-postgres` → scratch
+Docker container → row-count/index verification procedure) periodically once
+the recurring job exists, so "the backup job runs" and "the backup job
+produces something restorable" are both continuously verified, not just
+proven once on 2026-07-12.
+
+Record the date, who ran it, and the verification results in this file once
+done — that record is itself the P0 evidence, not just the backup existing.
+
+**Status as of this writing: not yet done.** This step needs live Railway
+dashboard/CLI access this session does not have — it's the one P0 backup/restore
+action that requires a human with production credentials, not more code.
+
 ## Local embedding provider setup (CPA / §7216 compliance)
 
 When `EMBEDDING_PROVIDER=local`, embeddings run on-process via `@huggingface/transformers` (ONNX runtime) with zero network egress. This is required for any environment where real taxpayer documents may enter the pipeline.
@@ -133,11 +209,11 @@ Subsequent container restarts read from the cache volume — no network egress, 
 
 ### Disk and memory
 
-| Resource | Estimate |
-| -------- | -------- |
-| Model size on disk | ~430 MB |
-| Peak RSS during batch embed | +200–400 MB above baseline |
-| Throughput | ~50–100 chunks/s on a 2-core VM |
+| Resource                    | Estimate                        |
+| --------------------------- | ------------------------------- |
+| Model size on disk          | ~430 MB                         |
+| Peak RSS during batch embed | +200–400 MB above baseline      |
+| Throughput                  | ~50–100 chunks/s on a 2-core VM |
 
 ### Compliance checklist
 
