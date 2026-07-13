@@ -83,22 +83,21 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 **Why this item changed (2026-07-11):** this item originally framed "how does Doug reach the system" as a forced choice between two bad MCP options (a shared admin credential on his laptop, or per-user token/client setup). That framing predates a fact a fresh audit just surfaced: **`apps/web` — a full web chat app with Microsoft Entra ID (Office 365) SSO, already merged to `main`, already reviewed, working tree clean — already solves this.** Doug signs in with the same Microsoft account he already uses for Outlook/Teams, lands on a page with a document list and a chat box, asks a question in plain English, and gets a streamed answer with clickable citations and a non-dismissible "AI-generated draft, requires review" disclaimer. Access is properly per-user-scoped server-side (a fresh 60-second JWT re-derived from his real grants on every request) — this is the good, narrow-scope option, not the credentials-on-a-laptop one, and it's not hypothetical: the code exists and passed review.
 
-**The actual remaining gap is deployment, not architecture.** `apps/web` has:
+**✅ The code/deploy-config gap closed 2026-07-12 (commit `e285d89`).** `apps/web` now has a `Dockerfile` (Next.js standalone build), `railway.json`, a `docker/compose.prod.yml` entry, and a corrected `env.example` documenting `AUTH_SECRET` alongside the Entra vars — verified by an actual `docker build` + running container (`/api/health` returned 200), not just written and assumed correct. Building this also surfaced and fixed a real, repo-wide latent bug: `.dockerignore` never excluded TypeScript's `*.tsbuildinfo` incremental-build cache, which silently made `tsc` skip real compilation inside ANY app's Docker build (not just `apps/web`'s) whenever a developer's local build state was present — now fixed for all apps.
 
-- No `railway.json` (unlike `apps/api`/`apps/mcp`/`apps/worker`, which each have one).
-- No `Dockerfile` at all — the sibling apps' Dockerfiles aren't a drop-in copy; this needs either a Next.js-appropriate Dockerfile (standalone build output) authored from scratch, or a different Railway builder (Nixpacks) for this one app specifically.
-- No entry in `docker/compose.prod.yml`.
-- An `env.example` that documents the Entra SSO variables (`AUTH_ENTRA_CLIENT_ID`/`AUTH_ENTRA_CLIENT_SECRET`/`AUTH_ENTRA_TENANT_ID`, `RAG_ADMINS_GROUP_ID`) but never mentions NextAuth's own required session-signing secret (`AUTH_SECRET`) — a real, separate value to generate.
+**What's left is 100% human/infra action, not code:**
+
 - No Azure AD app registration yet, and no `RAG-Admins` security group in the firm's tenant (both needed for Entra SSO + the admin gate to work at all).
+- The actual `AUTH_SECRET`/`INTERNAL_SCOPE_JWT_SECRET` production values still need generating (the code enforces the length requirement, it doesn't generate the secret for you).
+- Actually running the deploy and confirming it works against real infrastructure.
 
 **Exact steps:**
 
 1. Register an Azure AD (Entra ID) application in the firm's tenant for this app — redirect URI, client secret, tenant ID. This is a ~15-30 minute task in the Azure/Microsoft 365 admin portal, not a code task; Chris or whoever manages the firm's M365 tenant may need to do this or grant you access.
 2. Create a `RAG-Admins` security group in the same tenant, add yourself (and later Chris/Doug as appropriate) to it, and note its object ID for `RAG_ADMINS_GROUP_ID`.
 3. Generate a real `AUTH_SECRET` (NextAuth's session-signing key — `openssl rand -base64 32` is the standard way) and the existing `INTERNAL_SCOPE_JWT_SECRET` per Task 3's now-enforced 64-character minimum (see `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 3).
-4. This is where code work picks back up — flag to whoever's driving the automatable-plan work next: author `apps/web/Dockerfile` (Next.js standalone output mode), `apps/web/railway.json` (mirroring the sibling apps' pattern once a working builder choice is confirmed), and add `apps/web` to `docker/compose.prod.yml`. Update `apps/web/env.example` to document `AUTH_SECRET` alongside the Entra vars it's missing today.
-5. Deploy, confirm you personally can sign in and ask a real question against the firm-SOP index.
-6. Write the 2-minute "how do I ask a question" doc for staff — a screenshot-driven one-pager is enough. This is the single highest-leverage artifact currently missing: the code that makes this feel like a real tool instead of an engineering project already exists, unused.
+4. Deploy using the now-existing `apps/web/Dockerfile`/`railway.json` (or the `docker/compose.prod.yml` `web` service if self-hosting), confirm you personally can sign in and ask a real question against the firm-SOP index.
+5. Write the 2-minute "how do I ask a question" doc for staff — a screenshot-driven one-pager is enough. This is the single highest-leverage artifact currently missing: the code that makes this feel like a real tool instead of an engineering project already exists.
 
 **Done when:** you've personally signed into the deployed app with your Microsoft account and gotten a real answer to a real question, and the one-pager exists for handing to Doug.
 
