@@ -311,4 +311,35 @@ describe("E2E: hybrid retrieval", () => {
     expect(errorHit).toBeDefined();
     expect(errorHit!.sparseScore).toBeGreaterThan(0);
   });
+
+  it("excludes archived documents from hybrid search by default", async () => {
+    const { documents } = await import("@rag/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "current-sop",
+        title: "Current Engagement SOP",
+        text: "This engagement SOP covers current firm procedures for client onboarding and billing.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    await db
+      .update(documents)
+      .set({ lifecycleStatus: "archived" })
+      .where(eq(documents.title, "Current Engagement SOP"));
+
+    const results = await retriever.search(
+      {
+        query: "engagement SOP client onboarding billing procedures",
+        topK: 5,
+      },
+      ADMIN_SCOPE,
+    );
+
+    expect(
+      results.find((r) => r.document.title === "Current Engagement SOP"),
+    ).toBeUndefined();
+  });
 });

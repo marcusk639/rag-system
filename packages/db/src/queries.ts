@@ -642,6 +642,7 @@ export async function hybridSearch(
       JOIN documents doc ON doc.id = c.document_id
       JOIN sources src ON src.id = doc.source_id
       WHERE TRUE
+        AND doc.lifecycle_status != 'archived'
       ${enforcedSourceFilter}
       ${sourceFilter}
       ${sql.join(metadataConditions, sql` `)}
