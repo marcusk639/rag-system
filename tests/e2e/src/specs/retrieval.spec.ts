@@ -325,6 +325,20 @@ describe("E2E: hybrid retrieval", () => {
     ]);
     await runOneIngestion(db, sourceId, connector);
 
+    // Verify document is found before archiving
+    const resultsBeforeArchive = await retriever.search(
+      {
+        query: "engagement SOP client onboarding billing procedures",
+        topK: 5,
+      },
+      ADMIN_SCOPE,
+    );
+    expect(
+      resultsBeforeArchive.find(
+        (r) => r.document.title === "Current Engagement SOP",
+      ),
+    ).toBeDefined();
+
     await db
       .update(documents)
       .set({ lifecycleStatus: "archived" })
