@@ -525,7 +525,7 @@ export async function hybridSearch(
     }>(sql`
       WITH params AS (
         SELECT ${embedLiteral}::vector AS q_embedding,
-               plainto_tsquery('english', ${opts.query}) AS q_tsquery
+               websearch_to_tsquery('english', ${opts.query}) AS q_tsquery
       ),
       dense_hits AS (
         -- Pure ANN over the HNSW index, restricted to the active embedding

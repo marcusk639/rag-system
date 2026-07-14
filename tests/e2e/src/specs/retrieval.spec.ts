@@ -233,4 +233,37 @@ describe("E2E: hybrid retrieval", () => {
     // permissive we want to confirm we never crash on a zero-sparse query.
     expect(Array.isArray(results)).toBe(true);
   });
+
+  it("sparse side still matches a verbose multi-word query (websearch_to_tsquery OR-ish semantics)", async () => {
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "backup-runbook",
+        title: "Postgres Backup Runbook",
+        text: "This runbook explains how to configure automated nightly backups for the production Postgres database using pg_dump, verify restore integrity, and rotate old backup files safely.",
+      }),
+      plainTextDoc({
+        externalId: "unrelated",
+        title: "Espresso Notes",
+        text: "Espresso pulling requires fine-ground coffee and nine bars of pressure for proper extraction.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    // A verbose, real-world-shaped question. Under plainto_tsquery (AND
+    // semantics), requiring every one of these 10+ words to co-occur in one
+    // chunk would collapse the sparse side to zero hits; websearch_to_tsquery
+    // (OR-ish, phrase-aware) should still surface the relevant document.
+    const results = await retriever.search(
+      {
+        query:
+          "how do I configure automated nightly backups and verify restore integrity for the production database",
+        topK: 3,
+      },
+      ADMIN_SCOPE,
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.document.title).toBe("Postgres Backup Runbook");
+    expect(results[0]!.sparseScore).toBeGreaterThan(0);
+  });
 });
