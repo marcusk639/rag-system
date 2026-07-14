@@ -309,7 +309,22 @@ function hardSplitTable(
   // `bufferTokens` is an additive UPPER BOUND on the assembled piece's real
   // token count (concatenation only ever merges tokens at boundaries, never
   // adds), so keeping it ≤ effectiveMax keeps the real assembled count ≤
-  // effectiveMax ≤ MAX_EMBEDDING_TOKENS by construction.
+  // effectiveMax ≤ MAX_EMBEDDING_TOKENS at the point this function returns.
+  //
+  // KNOWN LIMITATION: `chunk()` still applies `applyOverlap()` AFTER this
+  // function returns, prepending up to `chunkOverlap` chars of the previous
+  // chunk's tail to every chunk but the first. On dense (e.g. CJK-heavy)
+  // content that prepend can push a chunk sized right up against
+  // effectiveMax back over MAX_EMBEDDING_TOKENS, where the generic
+  // clampToTokenLimit() safety net (table-unaware) can cut a table row
+  // mid-string again. This only bites when `chunkSize` is configured high
+  // enough (~1600+) that effectiveMax is bound by MAX_EMBEDDING_TOKENS
+  // rather than chunkSize itself, combined with chunkOverlap > 0 — the
+  // shipped default (chunkSize 800, chunkOverlap 120) has enough headroom
+  // that this does not trigger. See docs/superpowers/plans/
+  // 2026-07-14-table-truncation-final-stage-fix.md for the proper fix
+  // (verify post-overlap, not another upstream prediction) if chunkSize is
+  // ever raised.
   let bufferTokens = baseOverheadTokens;
 
   const flush = () => {
@@ -330,7 +345,9 @@ function hardSplitTable(
     // awareness and cuts the row mid-string, dropping its closing "|". We
     // truncate the row's TEXT here instead, verifying the FULLY ASSEMBLED
     // chunk (heading prefix + header + separator + row) against the real
-    // tokenizer, so the row-boundary guarantee holds by construction.
+    // tokenizer at the point this returns. See the KNOWN LIMITATION note on
+    // `bufferTokens` above — `applyOverlap()` runs after this and can still
+    // reopen the gap at high `chunkSize`.
     if (baseOverheadTokens + rowTokens > effectiveMax) {
       flush();
       const safeRow = truncateTableRow(
