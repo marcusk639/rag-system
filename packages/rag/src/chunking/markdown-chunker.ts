@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { encode } from "gpt-tokenizer";
 import type { Chunk, Chunker, ParsedDocument } from "@rag/core";
-import { clampToTokenLimit } from "./token-clamp.js";
+import { clampToTokenLimit, MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 /**
  * Markdown-aware recursive chunker.
@@ -302,7 +302,14 @@ function hardSplitTable(text: string, maxTokens: number): string[] {
       // holds even in this pathological case, rather than widening the
       // shared clamp's behavior for every non-table caller.
       flush();
-      const safeRow = truncateTableRow(row, maxTokens);
+      // `bufferTokens` was just reset by the flush() above to exactly the
+      // header + separator token count (flush() is a no-op when buffer is
+      // already empty, and bufferTokens is only ever mutated by flush()'s
+      // reset or in lockstep with buffer.push(), so this invariant holds
+      // whenever buffer.length === 0). Pass it through so the row's
+      // truncation ceiling is sized against the real overhead it will be
+      // bundled with, not a guess.
+      const safeRow = truncateTableRow(row, maxTokens, bufferTokens);
       buffer.push(safeRow);
       bufferTokens += countTokens(safeRow);
       flush();
@@ -321,15 +328,71 @@ function hardSplitTable(text: string, maxTokens: number): string[] {
 }
 
 /**
- * Truncate a single table row's text to roughly fit `maxTokens`, while
- * guaranteeing the result still ends with a closing `|` — i.e. it still
+ * Fixed token buffer subtracted (on top of the caller's measured
+ * header+separator overhead) when computing a table row's truncation
+ * ceiling. Covers the outer section-heading prefix (`# Heading › Sub\n\n`)
+ * `chunkSection` prepends to every hard-split piece — which `hardSplitTable`
+ * never sees — plus the trailing `|` `finalizeTableRow` may append.
+ */
+const ROW_TRUNCATION_SAFETY_MARGIN_TOKENS = 40;
+
+/**
+ * Truncate a single table row's text so the result is genuinely,
+ * tokenizer-verified under the ceiling this row (plus its table's header and
+ * separator) must fit in — not just a `CHARS_PER_TOKEN` char-ratio guess.
+ *
+ * Why this matters: on dense content (CJK text, heavy digit/punctuation
+ * runs) the real token/char ratio can be far worse than `CHARS_PER_TOKEN`.
+ * A char-budget-only truncation can produce a row that LOOKS safe (short
+ * enough in characters) but whose real token count still exceeds
+ * `MAX_EMBEDDING_TOKENS`. When that happens, the generic
+ * `clampToTokenLimit()` safety net in `chunk()` fires a second time on this
+ * "safe-looking" row and re-cuts it with a table-unaware raw token-boundary
+ * decode — reproducing the exact "cuts mid-row, drops the closing `|`"
+ * defect this function exists to prevent.
+ *
+ * `headerOverheadTokens` is the caller's already-computed token count of the
+ * table's header + separator rows (the text this row is bundled with in the
+ * final chunk) — passed in so the ceiling reflects the real overhead the
+ * row will share a chunk with, rather than guessing.
+ *
+ * Strategy: do a fast char-budget first pass (cheap, and correct for the
+ * common case of low-density text), then VERIFY the real token count via
+ * `countTokens` — the same tokenizer used everywhere else in this file —
+ * and shrink the character window further in a loop until the real count is
+ * safely under the ceiling. The verify+shrink loop only needs to iterate on
+ * dense content; ordinary text satisfies the ceiling on the first pass.
+ */
+function truncateTableRow(
+  row: string,
+  maxTokens: number,
+  headerOverheadTokens: number,
+): string {
+  const ceiling =
+    Math.min(maxTokens, MAX_EMBEDDING_TOKENS) -
+    headerOverheadTokens -
+    ROW_TRUNCATION_SAFETY_MARGIN_TOKENS;
+  const targetTokens = Math.max(1, ceiling);
+
+  let charBudget = Math.max(1, targetTokens * CHARS_PER_TOKEN);
+  let candidate = finalizeTableRow(row.slice(0, charBudget));
+
+  while (countTokens(candidate) > targetTokens && charBudget > 1) {
+    charBudget = Math.max(1, Math.floor(charBudget * 0.75));
+    candidate = finalizeTableRow(row.slice(0, charBudget));
+  }
+
+  return candidate;
+}
+
+/**
+ * Ensure truncated row text still ends with a closing `|` — i.e. it still
  * looks like a syntactically valid table row, even though the truncated
  * cell's content is now incomplete.
  */
-function truncateTableRow(row: string, maxTokens: number): string {
-  const charBudget = maxTokens * CHARS_PER_TOKEN;
-  const truncated = row.slice(0, charBudget).trimEnd();
-  return truncated.endsWith("|") ? truncated : `${truncated} |`;
+function finalizeTableRow(text: string): string {
+  const trimmed = text.trimEnd();
+  return trimmed.endsWith("|") ? trimmed : `${trimmed} |`;
 }
 
 function applyOverlap(chunks: string[], overlapTokens: number): string[] {

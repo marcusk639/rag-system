@@ -1,5 +1,7 @@
+import { encode } from "gpt-tokenizer";
 import { describe, expect, it } from "vitest";
 import { MarkdownChunker } from "./markdown-chunker.js";
+import { MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 describe("MarkdownChunker — oversized inline table", () => {
   it("splits an oversized markdown table on row boundaries, never mid-row", async () => {
@@ -93,6 +95,57 @@ describe("MarkdownChunker — oversized single table row", () => {
         // never get cut mid-string by the downstream generic token clamp.
         expect(line.trim().endsWith("|")).toBe(true);
       }
+    }
+  });
+});
+
+describe("MarkdownChunker — oversized single table row with dense (CJK) content", () => {
+  it("truncates a token-dense row to a REAL token count under MAX_EMBEDDING_TOKENS, keeping the closing pipe", async () => {
+    const header = "| Client | Notes |\n| --- | --- |\n";
+    // Dense CJK filler: unlike "word ".repeat(...) (English, ~4 chars/token,
+    // matching CHARS_PER_TOKEN), common CJK characters tokenize far closer to
+    // 1 token/char with the o200k_base tokenizer. A char-budget-only
+    // truncation (the old approach) sized off CHARS_PER_TOKEN=4 therefore
+    // keeps ~4x too many real tokens for this kind of content.
+    const denseUnit =
+      "测试内容用于验证令牌截断的正确性并确保它不会被下游裁剪逻辑二次截断";
+    const hugeNote = denseUnit.repeat(400); // ~28,000 CJK characters
+    const row = `| Client 0 | ${hugeNote} |\n`;
+    const chunkSize = 800; // default-ish chunkSize per the reviewer's repro
+    const chunker = new MarkdownChunker({ chunkSize, chunkOverlap: 0 });
+
+    // Sanity-check the premise: the OLD char-budget-only approach
+    // (CHARS_PER_TOKEN=4, no real-tokenizer verification) would slice
+    // chunkSize * 4 characters off this row and call it done. Confirm that
+    // naive slice's REAL token count exceeds MAX_EMBEDDING_TOKENS — i.e.
+    // this specific input reproduces the reviewer's failure mode
+    // mathematically, independent of any particular chunker's behavior.
+    const CHARS_PER_TOKEN = 4;
+    const oldApproachSlice = row.slice(0, chunkSize * CHARS_PER_TOKEN);
+    const oldApproachTokens = encode(oldApproachSlice).length;
+    expect(oldApproachTokens).toBeGreaterThan(MAX_EMBEDDING_TOKENS);
+
+    const chunks = await chunker.chunk({
+      title: "Oversized Dense Row",
+      markdown: `# Oversized Dense Row\n\n${header}${row}`,
+      tables: [],
+      metadata: {},
+    });
+
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const c of chunks) {
+      const lines = c.text.split("\n").filter((l) => l.trim().startsWith("|"));
+      for (const line of lines) {
+        // (a) The row-boundary guarantee must hold even for dense content:
+        // still ends with a closing "|", never cut mid-string by the
+        // downstream generic clampToTokenLimit() re-cutting a "safe-looking"
+        // but actually-oversized row.
+        expect(line.trim().endsWith("|")).toBe(true);
+      }
+      // (b) The REAL token count (not char length) of every chunk must be
+      // safely under MAX_EMBEDDING_TOKENS — this is what the char-budget
+      // approximation could not guarantee for dense content.
+      expect(encode(c.text).length).toBeLessThan(MAX_EMBEDDING_TOKENS);
     }
   });
 });
