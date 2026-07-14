@@ -108,22 +108,93 @@ describe("handleBackupPostgres", () => {
     );
   });
 
-  it("propagates a pg_dump failure unswallowed (so pg-boss retries)", async () => {
+  it("passes the DB password via PGPASSWORD env, never in argv", async () => {
+    execFileMock.mockImplementation(
+      (
+        _cmd: string,
+        _args: string[],
+        _opts: { env?: NodeJS.ProcessEnv },
+        cb: (
+          err: Error | null,
+          result: { stdout: Buffer; stderr: string },
+        ) => void,
+      ) => {
+        cb(null, { stdout: Buffer.from("x"), stderr: "" });
+      },
+    );
+    const deps = makeDeps();
+
+    await handleBackupPostgres(makeJob(), deps);
+
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    const [cmd, args, opts] = execFileMock.mock.calls[0] as [
+      string,
+      string[],
+      { env?: NodeJS.ProcessEnv },
+      unknown,
+    ];
+    expect(cmd).toBe("pg_dump");
+
+    // The password must never appear as a positional argv element — argv is
+    // visible to co-resident processes via `ps aux` / `/proc/<pid>/cmdline`.
+    for (const arg of args) {
+      expect(arg).not.toContain("pass");
+      expect(arg).not.toContain("postgres://user:pass");
+    }
+
+    // It must instead be supplied via the subprocess env.
+    expect(opts.env?.PGPASSWORD).toBe("pass");
+  });
+
+  it("wraps a pg_dump failure in a safe error that omits cmd/argv and any connection-string-shaped substring, while still propagating (so pg-boss retries)", async () => {
+    class FakeExecFileError extends Error {
+      cmd: string;
+      stderr: string;
+      code: number;
+      constructor() {
+        super(
+          'Command failed: pg_dump --dbname postgres://user:pass@host:5432/db -F c\nFATAL: password authentication failed for user "user"',
+        );
+        this.name = "FakeExecFileError";
+        // execFile's real error carries the full command line (including
+        // any credential-bearing argv) as an own enumerable `cmd` property.
+        // serialize-error would persist this into pgboss.job.output verbatim.
+        this.cmd = "pg_dump --dbname postgres://user:pass@host:5432/db -F c";
+        this.stderr = 'FATAL: password authentication failed for user "user"';
+        this.code = 1;
+      }
+    }
+
     execFileMock.mockImplementation(
       (
         _cmd: string,
         _args: string[],
         _opts: unknown,
-        cb: (err: Error | null) => void,
+        cb: (err: Error) => void,
       ) => {
-        cb(new Error("pg_dump: connection refused"));
+        cb(new FakeExecFileError());
       },
     );
     const deps = makeDeps();
 
-    await expect(handleBackupPostgres(makeJob(), deps)).rejects.toThrow(
-      "pg_dump: connection refused",
+    const error: unknown = await handleBackupPostgres(makeJob(), deps).catch(
+      (e: unknown) => e,
     );
+
+    expect(error).toBeInstanceOf(Error);
+    const err = error as Error;
+
+    // Still propagates unswallowed — pg-boss must see a rejection to retry.
+    expect(err.message).toMatch(/pg_dump failed/i);
+
+    // No credential/connection-string leakage anywhere on the thrown error.
+    expect("cmd" in err).toBe(false);
+    expect(err.message).not.toContain("postgres://user:pass");
+    expect(err.message).not.toContain("pass@host");
+    expect(JSON.stringify(err, Object.getOwnPropertyNames(err))).not.toContain(
+      "pass@host",
+    );
+
     expect(insertBackupRunMock).not.toHaveBeenCalled();
   });
 });
