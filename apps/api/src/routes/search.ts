@@ -68,6 +68,7 @@ export async function registerSearchRoute(
       request.body,
       config.retrieval.defaultTopK,
       scopeFromRequest(request),
+      config.retrieval.maxChunksPerDocument,
     );
     auditSearch(deps, request, request.body.query, results);
     return { results };
