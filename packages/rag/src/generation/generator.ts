@@ -78,6 +78,32 @@ export function buildPrompt(
 }
 
 /**
+ * Upper bound on how many indices a single `[...]` bracket may expand to via
+ * a range like `[a-b]`. The HTTP API and MCP tool schemas both cap `topK` at
+ * 100 (`apps/api/src/routes/{ask,search}.ts`, `apps/mcp/src/tools/*.ts`), so
+ * no real citation list from this system can ever need a wider span. A range
+ * exceeding this is either a model formatting error (e.g. hyphenated prose
+ * that happens to land inside brackets) or, in the worst case, an
+ * adversarial/malformed generation output; either way we bail out to "no
+ * match" rather than allocate a huge `Set` (which throws `RangeError: Set
+ * maximum size exceeded` well before this bound, but even sub-throwing sizes
+ * in the millions cost real CPU/memory for zero benefit).
+ */
+const MAX_CITATION_RANGE_SPAN = 1000;
+
+/** A trimmed numeric token: non-empty, digits only (with optional leading
+ * `-` handled by the caller, since `-` is also the range delimiter here). */
+function parseStrictInt(token: string): number | null {
+  const trimmed = token.trim();
+  // Reject "" (Number("") === 0, NOT NaN — the footgun this guards against)
+  // and anything that isn't a plain non-negative integer literal. Citation
+  // indices are always positive, so this deliberately does not accept a
+  // leading `-` or decimals.
+  if (!/^\d+$/.test(trimmed)) return null;
+  return Number(trimmed);
+}
+
+/**
  * Filter a citations array down to only the indices the answer text actually
  * references via `[N]` notation. `buildCitations` returns one entry per
  * retrieved chunk regardless of what the model cited — for a system whose
@@ -91,9 +117,18 @@ export function buildPrompt(
  *   - Single: `[3]`
  *   - Comma-separated group: `[1, 2]` or `[1,2]`
  *   - Range: `[1-3]` (inclusive, expands to 1, 2, 3)
- * A malformed range (e.g. a non-numeric bound, or start > end) is treated as
- * no match for that bracket rather than throwing — a citation-audit filter
- * failing loud would take down an entire answer over a formatting quirk.
+ *   - Mixed range + group: `[1-3, 5]` — the range is expanded AND the
+ *     comma-separated singles are included (1, 2, 3, 5). Handling this
+ *     explicitly (rather than treating any bracket with both `-` and `,` as
+ *     "no match") avoids silently dropping citations the answer visibly
+ *     references, which would defeat the audit-filter's own purpose.
+ *
+ * A malformed bracket — a non-numeric bound, an empty/whitespace-only
+ * segment, start > end, or a range wider than `MAX_CITATION_RANGE_SPAN` — is
+ * treated as no match for that segment rather than throwing. A citation-audit
+ * filter failing loud would take down an entire answer over a formatting
+ * quirk, and answer text is model-generated, so it must be treated as
+ * untrusted input here.
  */
 export function filterCitationsToAnswer(
   answer: string,
@@ -102,18 +137,21 @@ export function filterCitationsToAnswer(
   const referenced = new Set<number>();
   for (const match of answer.matchAll(/\[([\d,\s-]+)\]/g)) {
     const body = match[1]!.trim();
-    if (body.includes("-") && !body.includes(",")) {
-      const [startStr, endStr] = body.split("-").map((s) => s.trim());
-      const start = Number(startStr);
-      const end = Number(endStr);
-      if (Number.isInteger(start) && Number.isInteger(end) && start <= end) {
+    // Split on commas first so `[1-3, 5]` is handled as segments `1-3` and
+    // `5` — each segment is either a single number or a range.
+    for (const segment of body.split(",")) {
+      const trimmedSegment = segment.trim();
+      if (trimmedSegment.includes("-")) {
+        const [startStr, endStr] = trimmedSegment.split("-");
+        const start = parseStrictInt(startStr ?? "");
+        const end = parseStrictInt(endStr ?? "");
+        if (start === null || end === null || start > end) continue;
+        if (end - start + 1 > MAX_CITATION_RANGE_SPAN) continue;
         for (let n = start; n <= end; n++) referenced.add(n);
+        continue;
       }
-      continue;
-    }
-    for (const part of body.split(",")) {
-      const n = Number(part.trim());
-      if (Number.isInteger(n)) referenced.add(n);
+      const n = parseStrictInt(trimmedSegment);
+      if (n !== null) referenced.add(n);
     }
   }
   return citations.filter((c) => referenced.has(c.index));
