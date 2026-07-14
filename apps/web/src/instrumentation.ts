@@ -22,9 +22,21 @@ export function checkStaticFallbackMode(
 }
 
 /**
- * Next.js instrumentation hook — runs once when the server starts, before any
- * request is served. See https://nextjs.org/docs/app/guides/instrumentation.
+ * Next.js instrumentation hook — runs once per runtime context when the
+ * server starts, before any request is served. See
+ * https://nextjs.org/docs/app/guides/instrumentation.
+ *
+ * This app has an Edge-runtime `middleware.ts` (Task 3) with no `runtime`
+ * override in its `config`, so Next.js instantiates both a Node.js and an
+ * Edge runtime context at startup — `register()` fires once per context. Per
+ * Next.js's own documented recommendation
+ * (https://nextjs.org/docs/app/guides/instrumentation#importing-runtime-specific-code),
+ * `process.env.NEXT_RUNTIME` identifies which context is currently running
+ * ("nodejs" or "edge"). Gate the check to the Node.js runtime only, so the
+ * startup warning fires exactly once per boot instead of twice.
  */
 export function register(): void {
-  checkStaticFallbackMode(process.env);
+  if (process.env.NEXT_RUNTIME !== "edge") {
+    checkStaticFallbackMode(process.env);
+  }
 }
