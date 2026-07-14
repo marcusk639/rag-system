@@ -66,11 +66,53 @@ This is idempotent — safe to re-run on every deploy.
 ### Migrations on deploy (Railway)
 
 Migrations run **automatically** via the `rag-worker` service's `preDeployCommand`
-(`pnpm --filter @rag/db migrate`, see `apps/worker/railway.json`). Railway runs a
-pre-deploy command between build and release, on the private network with the
-service's env vars; if it exits non-zero the deployment is aborted. Because it
-runs against the **new** image, any migration committed alongside code ships and
-applies before that code serves traffic.
+(`node /app/node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json`).
+Railway runs a pre-deploy command between build and release, on the private
+network with the service's env vars; if it exits non-zero the deployment is
+aborted. Because it runs against the **new** image, any migration committed
+alongside code ships and applies before that code serves traffic.
+
+The command deliberately does **not** use `pnpm --filter @rag/db migrate` —
+`pnpm` isn't present in the runtime image (`apps/worker/Dockerfile`'s final
+stage only copies the pruned `pnpm deploy --prod` output, no package
+manager), so that form fails outright once `preDeployCommand` actually runs.
+
+**Two prerequisites for this to actually fire, both confirmed working as of
+2026-07-14 (see `docs/MIGRATION-TRACKING-INCIDENT-2026-07-13.md` for the
+full incident that found and fixed both):**
+
+- Each Node service's Railway dashboard **Config-as-code** path must be set
+  to that service's `railway.json` (`apps/worker/railway.json`,
+  `apps/api/railway.json`, `apps/mcp/railway.json`) — until this is set,
+  Railway silently ignores the checked-in `railway.json` entirely (no error,
+  the deploy just uses whatever the dashboard's own settings were, which for
+  a long time meant `preDeployCommand` never ran and migrations required
+  manual intervention). Double-check for typos in the path (a stray leading
+  space silently breaks it with a `configErrors` entry visible only via
+  `railway deployment list --json`, not in the dashboard UI).
+- `packages/db/src/migrate.ts`'s "only auto-run when invoked directly" guard
+  must correctly detect direct invocation through a **symlinked** path —
+  pnpm's `node_modules` layout (and `pnpm deploy --prod`'s output) is built
+  on symlinks, and Node resolves `import.meta.url` to the real
+  (symlink-resolved) path while `process.argv[1]` stays as typed, so a naive
+  string comparison silently no-ops instead of running. Already fixed
+  (`realpath` + `pathToFileURL`, with a regression test in
+  `packages/db/src/migrate.cli.test.ts`) — flagging here so nobody
+  "simplifies" that guard back to the naive form without knowing why it's
+  written the way it is.
+
+**None of the four Node/Python services (`rag-parser`, `rag-api`, `rag-mcp`,
+plus the Python parser sidecar) run an HTTP deploy-gate healthcheck.**
+Railway's healthcheck prober cannot reach a newly-deploying replica on this
+project — confirmed independently for all three Node HTTP services on
+2026-07-13/14: each app starts and listens correctly (confirmed in deploy
+logs) and is reachable over the private network (confirmed via a direct
+fetch from a peer service), but the healthcheck prober times out regardless.
+Each service's `railway.json` relies on `restartPolicyType: ON_FAILURE`
+(process liveness) instead. If you're tempted to re-add `healthcheckPath` to
+any of these, be aware it will very likely break that service's deploys the
+same way, and Railway support may need to be involved to identify why the
+prober can't reach new replicas on this specific project.
 
 **The worker is the single migration owner** — it boots without the index-assert
 guard that makes `rag-api`/`rag-mcp` crash-loop on a not-yet-migrated DB. Do NOT
