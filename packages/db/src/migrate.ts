@@ -23,8 +23,8 @@
  *
  * Run with: pnpm db:migrate
  */
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { readFile, realpath } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -89,10 +89,36 @@ async function main(): Promise<void> {
   await applyMigrations(url);
 }
 
-// Only auto-run when executed directly (`tsx src/migrate.ts`) — importing
-// this module as a library (e.g. from `tests/e2e`) must not also trigger a
-// CLI run against `process.env.DATABASE_URL`.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Only auto-run when executed directly (`tsx src/migrate.ts`, or
+// `node dist/migrate.js` from a production bundle) — importing this module
+// as a library (e.g. from `tests/e2e`) must not also trigger a CLI run
+// against `process.env.DATABASE_URL`.
+//
+// Both `realpath` AND `pathToFileURL` are load-bearing, not just the latter.
+// A naive `import.meta.url === \`file://${process.argv[1]}\`` comparison (the
+// original code) silently fails whenever the entry script is reached through
+// a symlink — exactly pnpm's `node_modules` layout, and exactly what
+// `pnpm deploy --prod` produces for Railway's runtime image. Node resolves
+// `import.meta.url` to the module's REAL (symlink-resolved) path, but
+// `process.argv[1]` stays as whatever literal path was typed on the command
+// line — `pathToFileURL(process.argv[1])` alone still doesn't match, because
+// it only reformats the string, it doesn't resolve symlinks.
+//
+// Confirmed both the failure and this fix via direct reproduction (not just
+// against the real `rag-worker` container, which is why the first attempt
+// at this fix — pathToFileURL alone — looked plausible but didn't actually
+// work): symlinking a copy of this package's directory and invoking
+// `node <symlink>/dist/migrate.js` reproduces the exact silent exit-0
+// no-op with the naive comparison, and confirms `realpath` first is what
+// actually closes the gap. A database migration that silently no-ops
+// instead of running, or instead of erroring, is worse than either
+// alternative — this is why the guard gets this much scrutiny.
+const invokedPath = process.argv[1];
+const isDirectRun = invokedPath
+  ? pathToFileURL(await realpath(invokedPath).catch(() => invokedPath)).href ===
+    import.meta.url
+  : false;
+if (isDirectRun) {
   main().catch((err: unknown) => {
     process.stderr.write(
       `Migration failed: ${(err as Error).stack ?? String(err)}\n`,
