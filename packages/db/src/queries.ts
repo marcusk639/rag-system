@@ -4,6 +4,7 @@ import type { Db } from "./client.js";
 import {
   auditLog,
   auditLogShipperState,
+  backupRuns,
   chunks,
   docsGapDigestRuns,
   documents,
@@ -15,6 +16,7 @@ import {
   type DocsGapDigestRun,
   type DocsGapDigestSourceGroup,
   type NewAuditLog,
+  type NewBackupRun,
   type NewChunk,
   type NewDocsGapDigestRun,
   type NewDocument,
@@ -892,6 +894,31 @@ export async function insertDocsGapDigestRun(
     bySourceGroup: row.bySourceGroup,
   };
   await db.insert(docsGapDigestRuns).values(values);
+}
+
+export interface BackupRunRow {
+  ranAt: Date;
+  sizeBytes: number;
+  objectKey: string;
+  durationMs: number;
+}
+
+/**
+ * Persists one row per completed Postgres backup (see
+ * apps/worker/src/handlers/backup-postgres.ts), mirroring
+ * `insertDocsGapDigestRun`'s append-only run-history shape.
+ */
+export async function insertBackupRun(
+  db: Db,
+  row: BackupRunRow,
+): Promise<void> {
+  const values: NewBackupRun = {
+    ranAt: row.ranAt,
+    sizeBytes: row.sizeBytes,
+    objectKey: row.objectKey,
+    durationMs: row.durationMs,
+  };
+  await db.insert(backupRuns).values(values);
 }
 
 /**
