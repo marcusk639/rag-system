@@ -178,6 +178,8 @@ describe("E2E: pg-boss recurring schedule for shipAuditLog", () => {
       docsGapDigestTz: "UTC",
       shipAuditLogCron: CRON,
       shipAuditLogTz: TZ,
+      backupPostgresCron: "0 3 * * *",
+      backupPostgresTz: "UTC",
     });
   });
 

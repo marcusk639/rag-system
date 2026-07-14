@@ -170,6 +170,8 @@ describe("E2E: pg-boss recurring schedule spike (Phase 4, first use of boss.sche
       docsGapDigestTz: TZ,
       shipAuditLogCron: "0 * * * *",
       shipAuditLogTz: "UTC",
+      backupPostgresCron: "0 3 * * *",
+      backupPostgresTz: "UTC",
     });
   });
 
@@ -209,6 +211,8 @@ describe("E2E: pg-boss recurring schedule spike (Phase 4, first use of boss.sche
       docsGapDigestTz: "UTC", // changed tz — proves the upsert updates in place
       shipAuditLogCron: "0 * * * *",
       shipAuditLogTz: "UTC",
+      backupPostgresCron: "0 3 * * *",
+      backupPostgresTz: "UTC",
     });
     try {
       const res = await db.execute<{ name: string; timezone: string | null }>(

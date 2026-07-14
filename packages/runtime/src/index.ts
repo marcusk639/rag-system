@@ -172,6 +172,8 @@ export async function buildCoreDeps(
     docsGapDigestTz: config.docsGapDigest.tz,
     shipAuditLogCron: config.auditSink.cron,
     shipAuditLogTz: config.auditSink.tz,
+    backupPostgresCron: config.backup.cron,
+    backupPostgresTz: config.backup.tz,
   });
 
   // Generation reuses the embedding provider's API key — same vendor in

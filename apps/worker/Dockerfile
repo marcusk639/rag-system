@@ -39,6 +39,13 @@ COPY --from=pruner --chown=node:node /deploy .
 # pruned output doesn't include it, so copy it separately from installer.
 COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compliance
 
+# pg_dump for the recurring Postgres backup job (handlers/backup-postgres.ts).
+# postgresql-client's version doesn't need to exactly match the server's for
+# a custom-format dump of this schema's feature set (no exotic extensions
+# beyond vector/pg_trgm/uuid-ossp, all portable across recent PG versions).
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 USER node
 ENV NODE_ENV=production
 

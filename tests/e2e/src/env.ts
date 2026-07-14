@@ -103,5 +103,13 @@ export function makeTestConfig(): Config {
     // Shipping disabled by default in the e2e harness; specs that need a
     // configured sink build their own Config/deps override.
     auditSink: { provider: "none", cron: "0 * * * *", tz: "UTC" },
+    // Backup job never triggered by the e2e harness (no worker cron ticks
+    // during tests) — values only need to satisfy the Config shape.
+    backup: {
+      provider: "none",
+      cron: "0 3 * * *",
+      tz: "UTC",
+      keyPrefix: "backups/",
+    },
   };
 }

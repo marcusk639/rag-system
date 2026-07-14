@@ -8,6 +8,7 @@ import { JOB_NAMES, type SyncSourcePayload } from "@rag/ingestion";
 import { initMonitoring } from "@rag/runtime";
 import pino from "pino";
 import { buildDeps, type WorkerDeps } from "./deps.js";
+import { handleBackupPostgres } from "./handlers/backup-postgres.js";
 import { handleDocsGapDigest } from "./handlers/docs-gap-digest.js";
 import { handleShipAuditLog } from "./handlers/ship-audit-log.js";
 import { handleSyncSource } from "./handlers/sync-source.js";
@@ -111,6 +112,27 @@ async function main(): Promise<void> {
     async (jobs) => {
       for (const job of jobs) {
         await handleShipAuditLog(job, builtDeps);
+      }
+    },
+  );
+
+  // Third recurring job (registered via `boss.schedule()` in `createQueue`,
+  // same as docsGapDigest/shipAuditLog above) — takes a full pg_dump and
+  // uploads it. No-ops per-tick when `BACKUP_PROVIDER=none` or no object
+  // store is configured — see handleBackupPostgres.
+  await builtDeps.queue.work<object>(
+    JOB_NAMES.backupPostgres,
+    {
+      batchSize: 1,
+      pollingIntervalSeconds: Math.max(
+        1,
+        Math.round(config.worker.pollIntervalMs / 1000),
+      ),
+      includeMetadata: true,
+    },
+    async (jobs) => {
+      for (const job of jobs) {
+        await handleBackupPostgres(job, builtDeps);
       }
     },
   );
