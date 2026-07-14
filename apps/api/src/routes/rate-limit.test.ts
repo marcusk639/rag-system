@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import pino from "pino";
 import type { Config, RetrievalQuery, RetrievalResult } from "@rag/core";
+import { signInternalScopeToken } from "@rag/core";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../server.js";
 import type { Deps } from "../deps.js";
@@ -135,5 +136,94 @@ describe("H5 rate limiting", () => {
       },
     });
     expect(fresh.statusCode).not.toBe(429);
+  });
+});
+
+/**
+ * Regression coverage for the keyGenerator bug found during review: a fixed
+ * byte-offset slice of the raw bearer token (`auth.slice(7, 55)`) collapsed
+ * every internal-scope JWT into ONE shared rate-limit bucket, because those
+ * JWTs have a constant HS256 header plus a payload that always starts with
+ * `{"allowedSourceIds":[...` regardless of which user signed it — the first
+ * 48 characters were identical for every user. The fix extracts the JWT's
+ * `sub` claim (unverified — verification happens later in the auth hook;
+ * this is only a rate-limit bucket key) instead of slicing raw bytes.
+ */
+const INTERNAL_SCOPE_SECRET =
+  "rate-limit-test-internal-scope-secret-32bytes+xxxxxxxxxxxxxxxxxx";
+
+const compositeConfig = {
+  api: { tokens: ["unused-static-token-placeholder"], principals: [] },
+  auth: {
+    provider: "composite",
+    internalScopeSecrets: [INTERNAL_SCOPE_SECRET],
+  },
+  retrieval: { defaultTopK: 8, maxChunksPerDocument: 4 },
+} as unknown as Config;
+
+async function buildCompositeApp(): Promise<FastifyInstance> {
+  const app = await buildServer({
+    config: compositeConfig,
+    logger: pino({ level: "silent" }),
+    deps: makeDeps(),
+  });
+  await app.ready();
+  return app;
+}
+
+describe("H5 rate limiting — internal-scope JWT bucket isolation", () => {
+  it("two different users' scope-assertion JWTs get independent buckets, not a shared one", async () => {
+    const app = await buildCompositeApp();
+
+    const tokenAlice = await signInternalScopeToken(
+      { sub: "aad-oid-alice", allowedSourceIds: ["src-a"] },
+      INTERNAL_SCOPE_SECRET,
+    );
+    const tokenBob = await signInternalScopeToken(
+      { sub: "aad-oid-bob", allowedSourceIds: ["src-b"] },
+      INTERNAL_SCOPE_SECRET,
+    );
+
+    // Sanity-check the premise the bug relied on: both tokens really do
+    // share the same first 48 characters (constant header + constant
+    // `{"allowedSourceIds":[` payload prefix), so a slice-based key would
+    // collide them into one bucket.
+    expect(tokenAlice.slice(0, 48)).toBe(tokenBob.slice(0, 48));
+
+    // Exhaust Alice's /ask bucket (10/min).
+    for (let i = 0; i < 10; i++) {
+      await app.inject({
+        method: "POST",
+        url: "/ask",
+        payload: ASK_BODY,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${tokenAlice}`,
+        },
+      });
+    }
+    const aliceExhausted = await app.inject({
+      method: "POST",
+      url: "/ask",
+      payload: ASK_BODY,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${tokenAlice}`,
+      },
+    });
+    expect(aliceExhausted.statusCode).toBe(429);
+
+    // Bob's bucket must still be fresh — this is the assertion that fails
+    // under the old slice(0, 48)-based keyGenerator.
+    const bobFresh = await app.inject({
+      method: "POST",
+      url: "/ask",
+      payload: ASK_BODY,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${tokenBob}`,
+      },
+    });
+    expect(bobFresh.statusCode).not.toBe(429);
   });
 });

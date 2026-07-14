@@ -31,7 +31,6 @@ export async function buildServer(opts: {
   const app = Fastify({
     loggerInstance: logger as unknown as FastifyBaseLogger,
     bodyLimit: 25 * 1024 * 1024,
-    disableRequestLogging: false,
   });
 
   app.setValidatorCompiler(validatorCompiler);
@@ -53,9 +52,46 @@ export async function buildServer(opts: {
     timeWindow: "1 minute",
     keyGenerator: (request) => {
       const auth = request.headers.authorization;
-      // Bearer token is the natural per-principal key. Trim to first 48 chars
-      // (all entropy needed for a bucket key; avoids storing the full token).
-      if (auth?.startsWith("Bearer ")) return auth.slice(7, 55);
+      if (auth?.startsWith("Bearer ")) {
+        const token = auth.slice(7);
+        // Prefer the JWT's `sub` claim as the bucket key so every principal
+        // gets its own independent bucket. Reading this here (before the
+        // auth hook, which runs after rate-limiting) means the claim is
+        // UNVERIFIED — fine for bucketing, not for authorization, since a
+        // forged `sub` only lets an attacker dodge their own rate limit,
+        // not impersonate another user's data access.
+        //
+        // A fixed byte-offset slice of the raw token is NOT a safe
+        // substitute: this app's internal-scope JWTs (signInternalScopeToken)
+        // have a constant HS256 header + a payload that always starts with
+        // `{"allowedSourceIds":[...`, so the first 48 characters of EVERY
+        // such token are identical regardless of user — collapsing all
+        // per-user-auth traffic into one shared bucket. See
+        // packages/core/src/internal-scope-auth.ts.
+        try {
+          const [, payloadB64] = token.split(".");
+          if (payloadB64) {
+            const payload: unknown = JSON.parse(
+              Buffer.from(payloadB64, "base64url").toString("utf8"),
+            );
+            if (
+              typeof payload === "object" &&
+              payload !== null &&
+              "sub" in payload &&
+              typeof (payload as { sub: unknown }).sub === "string"
+            ) {
+              return (payload as { sub: string }).sub;
+            }
+          }
+        } catch {
+          // Malformed/opaque token (e.g. a static API token, which isn't a
+          // JWT at all) — fall through to the raw-prefix key below.
+        }
+        // Non-JWT bearer credentials (static tokens): first 48 chars is
+        // still a reasonable per-credential key, since those tokens are
+        // fixed strings, not freshly-minted-per-request JWTs.
+        return token.slice(0, 48);
+      }
       // Unauthenticated requests fall through to the auth hook and get 401
       // before reaching any handler, but we still assign a bucket to them.
       return request.ip ?? "unknown";
