@@ -24,6 +24,14 @@ export interface MarkdownChunkerOptions {
   chunkOverlap: number; // overlap tokens between adjacent chunks
 }
 
+/**
+ * Rough chars-per-token ratio used whenever we need to convert a token
+ * budget into a character slice length without re-encoding on every byte
+ * (e.g. hard character chunking, oversized-row truncation). Not exact, but
+ * consistent across this file's fallback splitters.
+ */
+const CHARS_PER_TOKEN = 4;
+
 export class MarkdownChunker implements Chunker {
   constructor(private readonly opts: MarkdownChunkerOptions) {}
 
@@ -207,8 +215,7 @@ function hardSplit(text: string, maxTokens: number): string[] {
         buffer = "";
         bufferTokens = 0;
       }
-      const charPerToken = 4;
-      const charBudget = maxTokens * charPerToken;
+      const charBudget = maxTokens * CHARS_PER_TOKEN;
       for (let i = 0; i < s.length; i += charBudget) {
         out.push(s.slice(i, i + charBudget));
       }
@@ -226,10 +233,35 @@ function hardSplit(text: string, maxTokens: number): string[] {
   return out;
 }
 
-/** True when every non-blank line of `text` is a GFM pipe-table row (`| ... |`). */
+/**
+ * True when every non-blank line of `text` is a GFM pipe-table row (`| ... |`)
+ * AND the second line is an actual GFM separator row (`| --- | --- |`).
+ * Checking only the leading `|` is not enough — ordinary prose that happens
+ * to start every line with `|` would otherwise be misclassified as a table
+ * and routed through `hardSplitTable`, which repeats the (bogus) "header"
+ * and "separator" lines at the top of every resulting chunk.
+ */
 function looksLikeMarkdownTable(text: string): boolean {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  return lines.length >= 2 && lines.every((l) => l.trim().startsWith("|"));
+  return (
+    lines.length >= 2 &&
+    lines.every((l) => l.trim().startsWith("|")) &&
+    looksLikeTableSeparatorRow(lines[1]!)
+  );
+}
+
+/**
+ * True when `line` is a GFM table separator row, e.g. `| --- | --- |` or
+ * `|:---:|---|`. After stripping the leading/trailing `|` and whitespace,
+ * every `|`-delimited cell must consist solely of `-` and `:` characters,
+ * with at least one `-`.
+ */
+function looksLikeTableSeparatorRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return false;
+  const stripped = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = stripped.split("|").map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
 }
 
 /**
@@ -256,6 +288,27 @@ function hardSplitTable(text: string, maxTokens: number): string[] {
 
   for (const row of dataRows) {
     const rowTokens = countTokens(row);
+
+    if (rowTokens > maxTokens) {
+      // This single row is oversized even as its own solo chunk. Left
+      // alone, it would flow untouched out of this function and into the
+      // generic clampToTokenLimit() safety net (token-clamp.ts, applied by
+      // the caller in chunk()). That clamp does a raw token-boundary
+      // decode with zero table awareness, so it can (and, per review, did)
+      // cut this row mid-string and drop its closing "|" — silently
+      // breaking the "no chunk ever cuts a table row mid-way" guarantee
+      // this function's docstring makes. We truncate the row's TEXT here,
+      // inside the table-aware splitter, so the row-boundary guarantee
+      // holds even in this pathological case, rather than widening the
+      // shared clamp's behavior for every non-table caller.
+      flush();
+      const safeRow = truncateTableRow(row, maxTokens);
+      buffer.push(safeRow);
+      bufferTokens += countTokens(safeRow);
+      flush();
+      continue;
+    }
+
     if (bufferTokens + rowTokens > maxTokens && buffer.length > 0) {
       flush();
     }
@@ -265,6 +318,18 @@ function hardSplitTable(text: string, maxTokens: number): string[] {
   flush();
 
   return out.length > 0 ? out : [text];
+}
+
+/**
+ * Truncate a single table row's text to roughly fit `maxTokens`, while
+ * guaranteeing the result still ends with a closing `|` — i.e. it still
+ * looks like a syntactically valid table row, even though the truncated
+ * cell's content is now incomplete.
+ */
+function truncateTableRow(row: string, maxTokens: number): string {
+  const charBudget = maxTokens * CHARS_PER_TOKEN;
+  const truncated = row.slice(0, charBudget).trimEnd();
+  return truncated.endsWith("|") ? truncated : `${truncated} |`;
 }
 
 function applyOverlap(chunks: string[], overlapTokens: number): string[] {
