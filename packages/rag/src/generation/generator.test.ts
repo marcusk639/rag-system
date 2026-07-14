@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RetrievalResult } from "@rag/core";
-import { buildPrompt } from "./generator.js";
+import { buildPrompt, filterCitationsToAnswer } from "./generator.js";
 
 function rr(overrides: {
   text?: string;
@@ -77,5 +77,74 @@ describe("buildPrompt — document-tag injection resistance", () => {
     expect(prompt).toContain('title="Q3 Financial Summary"');
     expect(prompt).toContain("Overview › Revenue");
     expect(prompt).toContain("Revenue grew 12% year over year.");
+  });
+});
+
+describe("filterCitationsToAnswer — grouped/ranged citations", () => {
+  const citations = [
+    {
+      index: 1,
+      documentId: "d1",
+      title: "Doc 1",
+      url: null,
+      downloadable: false,
+      chunkId: "c1",
+      score: 0.9,
+    },
+    {
+      index: 2,
+      documentId: "d2",
+      title: "Doc 2",
+      url: null,
+      downloadable: false,
+      chunkId: "c2",
+      score: 0.8,
+    },
+    {
+      index: 3,
+      documentId: "d3",
+      title: "Doc 3",
+      url: null,
+      downloadable: false,
+      chunkId: "c3",
+      score: 0.7,
+    },
+  ];
+
+  it("recognizes a comma-space group like [1, 2]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1, 2] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("recognizes a comma-no-space group like [1,2]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1,2] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("recognizes a range like [1-3]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1-3] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2, 3]);
+  });
+
+  it("still recognizes plain single citations like [3]", () => {
+    const result = filterCitationsToAnswer("See source [3].", citations);
+    expect(result.map((c) => c.index)).toEqual([3]);
+  });
+
+  it("de-duplicates across mixed single and grouped forms", () => {
+    const result = filterCitationsToAnswer(
+      "See [1] and also [1, 2].",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
   });
 });

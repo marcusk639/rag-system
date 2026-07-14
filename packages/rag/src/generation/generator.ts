@@ -85,15 +85,36 @@ export function buildPrompt(
  * referenced is misleading (a reader can't tell "cited" from "merely
  * retrieved"). Applied by callers (ask.ts) AFTER the full answer text is
  * known, since it depends on generation output, not just retrieval.
+ *
+ * Recognizes three bracket forms the model has been observed to emit despite
+ * the system prompt instructing singular `[N]` notation:
+ *   - Single: `[3]`
+ *   - Comma-separated group: `[1, 2]` or `[1,2]`
+ *   - Range: `[1-3]` (inclusive, expands to 1, 2, 3)
+ * A malformed range (e.g. a non-numeric bound, or start > end) is treated as
+ * no match for that bracket rather than throwing — a citation-audit filter
+ * failing loud would take down an entire answer over a formatting quirk.
  */
 export function filterCitationsToAnswer(
   answer: string,
   citations: GenerationResult["citations"],
 ): GenerationResult["citations"] {
   const referenced = new Set<number>();
-  for (const match of answer.matchAll(/\[(\d+)\]/g)) {
-    const n = Number(match[1]);
-    if (Number.isInteger(n)) referenced.add(n);
+  for (const match of answer.matchAll(/\[([\d,\s-]+)\]/g)) {
+    const body = match[1]!.trim();
+    if (body.includes("-") && !body.includes(",")) {
+      const [startStr, endStr] = body.split("-").map((s) => s.trim());
+      const start = Number(startStr);
+      const end = Number(endStr);
+      if (Number.isInteger(start) && Number.isInteger(end) && start <= end) {
+        for (let n = start; n <= end; n++) referenced.add(n);
+      }
+      continue;
+    }
+    for (const part of body.split(",")) {
+      const n = Number(part.trim());
+      if (Number.isInteger(n)) referenced.add(n);
+    }
   }
   return citations.filter((c) => referenced.has(c.index));
 }
