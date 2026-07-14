@@ -107,6 +107,91 @@ describe("middleware", () => {
   });
 });
 
+function extractNonce(csp: string | null | undefined): string | null {
+  const match = csp?.match(/nonce-([A-Za-z0-9+/=]+)/);
+  return match ? match[1] : null;
+}
+
+describe("middleware CSP nonce", () => {
+  // Task 3 (commit 50d8ec3) shipped a static `script-src 'self'` CSP via
+  // next.config.ts's headers(), with no 'unsafe-inline'/nonce/hash. Next.js
+  // 15's App Router injects un-nonce'd inline <script> tags to deliver the
+  // RSC/flight payload needed for hydration; browsers refuse to run those
+  // under that CSP, so the app renders SSR HTML and then goes dead (no
+  // hydration, no client interactivity). This suite covers the fix: a
+  // per-request nonce, generated once in middleware and threaded through to
+  // both the CSP response header and the forwarded `x-nonce` request header
+  // that app/layout.tsx reads via next/headers.
+
+  it("sets a Content-Security-Policy header with a nonce on the auth-redirect path", async () => {
+    const req = makeRequest("http://localhost:3000/");
+    const res = await invoke(req);
+    expect(res?.status).toBe(307);
+
+    const csp = res?.headers.get("Content-Security-Policy");
+    expect(csp).toBeTruthy();
+    expect(csp).toContain("nonce-");
+    expect(csp).toMatch(/script-src 'self' 'nonce-[^']+'/);
+    expect(csp).toMatch(/style-src 'self' 'nonce-[^']+'/);
+    expect(csp).not.toContain("unsafe-inline");
+  });
+
+  it("sets a Content-Security-Policy header on the /api/auth exemption path", async () => {
+    const req = makeRequest("http://localhost:3000/api/auth/signin");
+    const res = await invoke(req);
+    expect(res?.status).toBe(200);
+    expect(res?.headers.get("Content-Security-Policy")).toContain("nonce-");
+  });
+
+  it("forwards the SAME nonce used in the CSP response header to the x-nonce request header on the authenticated pass-through path", async () => {
+    const cookie = await mintSessionCookie("test-oid-123");
+    const req = makeRequest(
+      "http://localhost:3000/",
+      `${SESSION_COOKIE_NAME}=${cookie}`,
+    );
+    const res = await invoke(req);
+    expect(res?.status).toBe(200);
+
+    const csp = res?.headers.get("Content-Security-Policy");
+    const nonceFromCsp = extractNonce(csp);
+    expect(nonceFromCsp).toBeTruthy();
+
+    // NextResponse.next({ request: { headers } }) encodes forwarded
+    // request-header overrides as x-middleware-request-<header> on the
+    // returned response — this is how Next.js threads the modified request
+    // (carrying x-nonce) to the actual page render. Asserting this equals
+    // the CSP's nonce guards against the two-separately-generated-nonces bug
+    // class (request header and response header must be the SAME value).
+    const forwardedNonce = res?.headers.get("x-middleware-request-x-nonce");
+    expect(forwardedNonce).toBe(nonceFromCsp);
+  });
+
+  it("does not include unsafe-inline or unsafe-eval on script-src", async () => {
+    const req = makeRequest("http://localhost:3000/");
+    const res = await invoke(req);
+    const csp = res?.headers.get("Content-Security-Policy");
+    const scriptSrc = csp
+      ?.split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("script-src"));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).not.toContain("unsafe-inline");
+    expect(scriptSrc).not.toContain("unsafe-eval");
+  });
+
+  it("still carries the other Task-3-established directives", async () => {
+    const req = makeRequest("http://localhost:3000/");
+    const res = await invoke(req);
+    const csp = res?.headers.get("Content-Security-Policy");
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("img-src 'self' data:");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("base-uri 'self'");
+    expect(csp).toContain("form-action 'self'");
+  });
+});
+
 describe("auth.ts jwt callback", () => {
   // Driving this through a real Entra ID sign-in would require a full OAuth
   // authorization-code exchange (PKCE/state cookies plus a mocked token
