@@ -182,9 +182,17 @@ function splitParagraphs(text: string): string[] {
 
 /**
  * Last-resort splitter for a single unit (paragraph or code block) larger than
- * chunkSize. Splits by sentence first, then by character if a sentence is itself huge.
+ * chunkSize. If the unit looks like a GFM pipe table (every non-blank line
+ * starts with `|`), split on row boundaries so no chunk ever cuts a table row
+ * mid-way — the header + separator row is repeated at the top of every piece
+ * so each chunk stays self-contained. Otherwise splits by sentence first, then
+ * by character if a sentence is itself huge.
  */
 function hardSplit(text: string, maxTokens: number): string[] {
+  if (looksLikeMarkdownTable(text)) {
+    return hardSplitTable(text, maxTokens);
+  }
+
   const sentences = text.match(/[^.!?]+[.!?]?\s*/g) ?? [text];
   const out: string[] = [];
   let buffer = "";
@@ -216,6 +224,47 @@ function hardSplit(text: string, maxTokens: number): string[] {
   }
   if (buffer) out.push(buffer);
   return out;
+}
+
+/** True when every non-blank line of `text` is a GFM pipe-table row (`| ... |`). */
+function looksLikeMarkdownTable(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  return lines.length >= 2 && lines.every((l) => l.trim().startsWith("|"));
+}
+
+/**
+ * Split a markdown table into row-boundary-respecting pieces. The header row
+ * and its `| --- | --- |` separator are repeated at the top of every piece
+ * past the first so each chunk stays a valid, self-contained table.
+ */
+function hardSplitTable(text: string, maxTokens: number): string[] {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  const headerLine = lines[0]!;
+  const separatorLine = lines[1]!;
+  const dataRows = lines.slice(2);
+
+  const out: string[] = [];
+  let buffer: string[] = [];
+  let bufferTokens = countTokens(`${headerLine}\n${separatorLine}\n`);
+
+  const flush = () => {
+    if (buffer.length === 0) return;
+    out.push(`${headerLine}\n${separatorLine}\n${buffer.join("\n")}`);
+    buffer = [];
+    bufferTokens = countTokens(`${headerLine}\n${separatorLine}\n`);
+  };
+
+  for (const row of dataRows) {
+    const rowTokens = countTokens(row);
+    if (bufferTokens + rowTokens > maxTokens && buffer.length > 0) {
+      flush();
+    }
+    buffer.push(row);
+    bufferTokens += rowTokens;
+  }
+  flush();
+
+  return out.length > 0 ? out : [text];
 }
 
 function applyOverlap(chunks: string[], overlapTokens: number): string[] {
