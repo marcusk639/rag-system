@@ -149,3 +149,105 @@ describe("MarkdownChunker — oversized single table row with dense (CJK) conten
     }
   });
 });
+
+describe("MarkdownChunker — oversized row under a long, deep heading path", () => {
+  it("keeps the row's closing pipe and stays under MAX_EMBEDDING_TOKENS once the heading prefix is assembled", async () => {
+    // The reviewer's specific repro. A 3-level heading path whose joined
+    // prefix (`# H1 › H2 › H3\n\n`) is worth several HUNDRED tokens, plus a
+    // dense-CJK oversized row, at a chunkSize LARGER than MAX_EMBEDDING_TOKENS
+    // (so the effective ceiling is bound by MAX_EMBEDDING_TOKENS, not
+    // chunkSize). The bug: `hardSplitTable` sized the row against just the
+    // table header/separator and never saw the outer heading prefix, so the
+    // final assembled chunk (heading prefix + header + separator + row)
+    // overflowed MAX_EMBEDDING_TOKENS and the generic, table-unaware
+    // clampToTokenLimit() re-cut the row mid-string, dropping its closing "|".
+    const wordyHeading = (label: string): string =>
+      `${label} ${"comprehensive detailed longwinded verbose explanatory ".repeat(32)}`.trim();
+    const h1 = wordyHeading("Alpha Section");
+    const h2 = wordyHeading("Beta Subsection");
+    const h3 = wordyHeading("Gamma Deep Heading");
+
+    // Confirm the heading prefix really is a large, materially-relevant share
+    // of the budget (the whole point of this repro) — many hundreds of tokens,
+    // far more than any small fixed "safety margin" could have absorbed.
+    const headingPrefix = `# ${[h1, h2, h3].join(" › ")}\n\n`;
+    expect(encode(headingPrefix).length).toBeGreaterThan(500);
+
+    const header = "| Client | Notes |\n| --- | --- |\n";
+    const denseUnit =
+      "测试内容用于验证令牌截断的正确性并确保它不会被下游裁剪逻辑二次截断";
+    const hugeNote = denseUnit.repeat(400); // ~28,000 dense CJK characters
+    const row = `| Client 0 | ${hugeNote} |\n`;
+
+    // chunkSize deliberately > MAX_EMBEDDING_TOKENS so the ceiling is bound by
+    // the hard embedding cap, exactly as in the reviewer's demonstration.
+    const chunker = new MarkdownChunker({ chunkSize: 5000, chunkOverlap: 0 });
+
+    const chunks = await chunker.chunk({
+      title: "Deep Heading Oversized Row",
+      markdown: `# ${h1}\n\n## ${h2}\n\n### ${h3}\n\n${header}${row}`,
+      tables: [],
+      metadata: {},
+    });
+
+    expect(chunks.length).toBeGreaterThan(0);
+    // The table row lives under the full 3-level path — confirm the structure
+    // that induces the large heading prefix is actually exercised end-to-end.
+    const tableChunks = chunks.filter((c) => c.text.includes("| Client 0 |"));
+    expect(tableChunks.length).toBeGreaterThan(0);
+    for (const c of tableChunks) {
+      expect(c.headingPath.length).toBe(3);
+    }
+
+    for (const c of chunks) {
+      const lines = c.text.split("\n").filter((l) => l.trim().startsWith("|"));
+      for (const line of lines) {
+        // Row-boundary integrity holds even with a long heading prefix eating
+        // into the budget: still ends with "|", never cut mid-string.
+        expect(line.trim().endsWith("|")).toBe(true);
+      }
+      // The REAL token count of the FULLY ASSEMBLED chunk (heading prefix +
+      // table) is under the hard cap — verified against the same tokenizer
+      // used by the final clampToTokenLimit() pass, so that clamp is a no-op.
+      expect(encode(c.text).length).toBeLessThan(MAX_EMBEDDING_TOKENS);
+    }
+  });
+});
+
+describe("MarkdownChunker — degenerate heading path leaving no room for row content", () => {
+  it("fails safely (no crash, output still produced) when the heading prefix alone exceeds the embedding cap", async () => {
+    // Pathological extreme: a heading so long that its prefix ALONE exceeds
+    // MAX_EMBEDDING_TOKENS, leaving literally no token budget for any table
+    // row content. This does not arise from real documents (it needs a ~1700+
+    // token heading), but the chunker must degrade gracefully rather than
+    // crash or loop forever. Documented behavior: the row is shrunk to its
+    // minimal structurally-valid form and the assembled chunk, being
+    // unrepresentable under the cap, is left to the generic clamp — no
+    // exception, deterministic output.
+    const monsterHeading =
+      `Overlong ${"exceedingly verbose ".repeat(1000)}`.trim();
+    expect(encode(`# ${monsterHeading}\n\n`).length).toBeGreaterThan(
+      MAX_EMBEDDING_TOKENS,
+    );
+
+    const header = "| Client | Notes |\n| --- | --- |\n";
+    const row = `| Client 0 | ${"payload ".repeat(2000).trim()} |\n`;
+    const chunker = new MarkdownChunker({ chunkSize: 5000, chunkOverlap: 0 });
+
+    // The contract for this degenerate input is simply: it returns without
+    // throwing and still produces at least one chunk.
+    const chunks = await chunker.chunk({
+      title: "Degenerate Heading",
+      markdown: `# ${monsterHeading}\n\n${header}${row}`,
+      tables: [],
+      metadata: {},
+    });
+
+    expect(chunks.length).toBeGreaterThan(0);
+    // Every chunk is still hard-capped by the final safety net — no chunk can
+    // reach the embedder over the limit, even in this unrepresentable case.
+    for (const c of chunks) {
+      expect(encode(c.text).length).toBeLessThanOrEqual(MAX_EMBEDDING_TOKENS);
+    }
+  });
+});

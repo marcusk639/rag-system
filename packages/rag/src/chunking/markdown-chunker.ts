@@ -61,13 +61,20 @@ export class MarkdownChunker implements Chunker {
   }
 
   private chunkSection(section: Section): string[] {
+    // The heading-path prefix `chunk()` will ultimately prepend to EVERY piece
+    // produced from this section. Computed once here and threaded into the
+    // hard-splitters so the row-truncation ceiling is measured against the
+    // REAL prefix cost — not a guessed constant. `chunk()` re-derives the exact
+    // same string when assembling the final chunk (`headingPrefix + piece`), so
+    // what we measure here is exactly what gets embedded.
+    const headingPrefix = section.headingPath.length
+      ? `# ${section.headingPath.join(" › ")}\n\n`
+      : "";
+
     const tokens = countTokens(section.body);
     if (tokens <= this.opts.chunkSize) {
       // Whole section fits; prepend the heading line so the chunk is self-contained.
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
-      return [header + section.body];
+      return [headingPrefix + section.body];
     }
 
     // Split by blank lines (paragraphs / code blocks treated as one unit).
@@ -79,10 +86,7 @@ export class MarkdownChunker implements Chunker {
     const flush = () => {
       if (buffer.length === 0) return;
       const text = buffer.join("\n\n");
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
-      chunks.push(header + text);
+      chunks.push(headingPrefix + text);
       buffer = [];
       bufferTokens = 0;
     };
@@ -92,11 +96,12 @@ export class MarkdownChunker implements Chunker {
       if (unitTokens > this.opts.chunkSize) {
         // Single paragraph too big — flush what we have, then hard-split.
         flush();
-        for (const piece of hardSplit(unit, this.opts.chunkSize)) {
-          const header = section.headingPath.length
-            ? `# ${section.headingPath.join(" › ")}\n\n`
-            : "";
-          chunks.push(header + piece);
+        for (const piece of hardSplit(
+          unit,
+          this.opts.chunkSize,
+          headingPrefix,
+        )) {
+          chunks.push(headingPrefix + piece);
         }
         continue;
       }
@@ -196,9 +201,13 @@ function splitParagraphs(text: string): string[] {
  * so each chunk stays self-contained. Otherwise splits by sentence first, then
  * by character if a sentence is itself huge.
  */
-function hardSplit(text: string, maxTokens: number): string[] {
+function hardSplit(
+  text: string,
+  maxTokens: number,
+  headingPrefix: string,
+): string[] {
   if (looksLikeMarkdownTable(text)) {
-    return hardSplitTable(text, maxTokens);
+    return hardSplitTable(text, maxTokens, headingPrefix);
   }
 
   const sentences = text.match(/[^.!?]+[.!?]?\s*/g) ?? [text];
@@ -268,55 +277,74 @@ function looksLikeTableSeparatorRow(line: string): boolean {
  * Split a markdown table into row-boundary-respecting pieces. The header row
  * and its `| --- | --- |` separator are repeated at the top of every piece
  * past the first so each chunk stays a valid, self-contained table.
+ *
+ * `headingPrefix` is the outer section-heading prefix (`# Heading › Sub\n\n`)
+ * that `chunk()` prepends to every emitted piece. `hardSplitTable` itself never
+ * emits that prefix, but it MUST budget for it: the effective per-piece ceiling
+ * is measured against `headingPrefix + header + separator + rows`, so no
+ * assembled chunk can overflow `MAX_EMBEDDING_TOKENS` and get re-cut mid-row by
+ * the generic `clampToTokenLimit()` net in `chunk()`.
  */
-function hardSplitTable(text: string, maxTokens: number): string[] {
+function hardSplitTable(
+  text: string,
+  maxTokens: number,
+  headingPrefix: string,
+): string[] {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
   const headerLine = lines[0]!;
   const separatorLine = lines[1]!;
   const dataRows = lines.slice(2);
 
+  // The real, tokenizer-measured overhead every emitted piece carries once
+  // `chunk()` re-assembles it as `headingPrefix + piece`. No guessed constant.
+  const structurePrefix = `${headingPrefix}${headerLine}\n${separatorLine}\n`;
+  const baseOverheadTokens = countTokens(structurePrefix);
+  // A single piece must fit under the smaller of the requested chunk size and
+  // the hard embedding cap — the cap is what `clampToTokenLimit()` enforces and
+  // what breaks table rows when exceeded, so it always binds here.
+  const effectiveMax = Math.max(1, Math.min(maxTokens, MAX_EMBEDDING_TOKENS));
+
   const out: string[] = [];
   let buffer: string[] = [];
-  let bufferTokens = countTokens(`${headerLine}\n${separatorLine}\n`);
+  // `bufferTokens` is an additive UPPER BOUND on the assembled piece's real
+  // token count (concatenation only ever merges tokens at boundaries, never
+  // adds), so keeping it ≤ effectiveMax keeps the real assembled count ≤
+  // effectiveMax ≤ MAX_EMBEDDING_TOKENS by construction.
+  let bufferTokens = baseOverheadTokens;
 
   const flush = () => {
     if (buffer.length === 0) return;
     out.push(`${headerLine}\n${separatorLine}\n${buffer.join("\n")}`);
     buffer = [];
-    bufferTokens = countTokens(`${headerLine}\n${separatorLine}\n`);
+    bufferTokens = baseOverheadTokens;
   };
 
   for (const row of dataRows) {
     const rowTokens = countTokens(row);
 
-    if (rowTokens > maxTokens) {
-      // This single row is oversized even as its own solo chunk. Left
-      // alone, it would flow untouched out of this function and into the
-      // generic clampToTokenLimit() safety net (token-clamp.ts, applied by
-      // the caller in chunk()). That clamp does a raw token-boundary
-      // decode with zero table awareness, so it can (and, per review, did)
-      // cut this row mid-string and drop its closing "|" — silently
-      // breaking the "no chunk ever cuts a table row mid-way" guarantee
-      // this function's docstring makes. We truncate the row's TEXT here,
-      // inside the table-aware splitter, so the row-boundary guarantee
-      // holds even in this pathological case, rather than widening the
-      // shared clamp's behavior for every non-table caller.
+    // A row that can't fit even as the SOLE row of its own chunk — i.e. the
+    // heading prefix + table header/separator + this one row already exceeds
+    // the effective ceiling. Left alone it would flow untouched into the
+    // generic clampToTokenLimit() safety net (token-clamp.ts, applied by the
+    // caller in chunk()), whose raw token-boundary decode has zero table
+    // awareness and cuts the row mid-string, dropping its closing "|". We
+    // truncate the row's TEXT here instead, verifying the FULLY ASSEMBLED
+    // chunk (heading prefix + header + separator + row) against the real
+    // tokenizer, so the row-boundary guarantee holds by construction.
+    if (baseOverheadTokens + rowTokens > effectiveMax) {
       flush();
-      // `bufferTokens` was just reset by the flush() above to exactly the
-      // header + separator token count (flush() is a no-op when buffer is
-      // already empty, and bufferTokens is only ever mutated by flush()'s
-      // reset or in lockstep with buffer.push(), so this invariant holds
-      // whenever buffer.length === 0). Pass it through so the row's
-      // truncation ceiling is sized against the real overhead it will be
-      // bundled with, not a guess.
-      const safeRow = truncateTableRow(row, maxTokens, bufferTokens);
-      buffer.push(safeRow);
-      bufferTokens += countTokens(safeRow);
-      flush();
+      const safeRow = truncateTableRow(
+        row,
+        effectiveMax,
+        headerLine,
+        separatorLine,
+        headingPrefix,
+      );
+      out.push(`${headerLine}\n${separatorLine}\n${safeRow}`);
       continue;
     }
 
-    if (bufferTokens + rowTokens > maxTokens && buffer.length > 0) {
+    if (bufferTokens + rowTokens > effectiveMax && buffer.length > 0) {
       flush();
     }
     buffer.push(row);
@@ -328,56 +356,58 @@ function hardSplitTable(text: string, maxTokens: number): string[] {
 }
 
 /**
- * Fixed token buffer subtracted (on top of the caller's measured
- * header+separator overhead) when computing a table row's truncation
- * ceiling. Covers the outer section-heading prefix (`# Heading › Sub\n\n`)
- * `chunkSection` prepends to every hard-split piece — which `hardSplitTable`
- * never sees — plus the trailing `|` `finalizeTableRow` may append.
- */
-const ROW_TRUNCATION_SAFETY_MARGIN_TOKENS = 40;
-
-/**
- * Truncate a single table row's text so the result is genuinely,
- * tokenizer-verified under the ceiling this row (plus its table's header and
- * separator) must fit in — not just a `CHARS_PER_TOKEN` char-ratio guess.
+ * Truncate a single oversized table row's text so that the FULLY ASSEMBLED
+ * chunk it will end up in — exactly `headingPrefix + header + separator + row`,
+ * the same string `chunk()` builds and then measures — is genuinely,
+ * tokenizer-verified under `effectiveMax`. This replaces the old approach of
+ * subtracting a pile of separately-estimated overhead pieces (char-ratio,
+ * header/separator tokens, a guessed heading-prefix margin) from a ceiling
+ * computed in isolation: instead of enumerating every overhead source and
+ * hoping none is missed, we build the real output and check it, so nothing can
+ * be left unaccounted-for by construction.
  *
- * Why this matters: on dense content (CJK text, heavy digit/punctuation
- * runs) the real token/char ratio can be far worse than `CHARS_PER_TOKEN`.
- * A char-budget-only truncation can produce a row that LOOKS safe (short
- * enough in characters) but whose real token count still exceeds
- * `MAX_EMBEDDING_TOKENS`. When that happens, the generic
- * `clampToTokenLimit()` safety net in `chunk()` fires a second time on this
- * "safe-looking" row and re-cuts it with a table-unaware raw token-boundary
- * decode — reproducing the exact "cuts mid-row, drops the closing `|`"
- * defect this function exists to prevent.
+ * Why it matters: on dense content (CJK text, heavy digit/punctuation runs) the
+ * real token/char ratio is far worse than `CHARS_PER_TOKEN`, and the outer
+ * heading prefix `hardSplitTable` never emits still counts toward the final
+ * chunk. A ceiling that mis-estimates either produces a row that LOOKS safe but
+ * whose assembled token count still exceeds `MAX_EMBEDDING_TOKENS`; the generic
+ * `clampToTokenLimit()` net in `chunk()` then re-cuts it table-unaware and drops
+ * the closing "|" — the exact defect this function exists to prevent.
  *
- * `headerOverheadTokens` is the caller's already-computed token count of the
- * table's header + separator rows (the text this row is bundled with in the
- * final chunk) — passed in so the ceiling reflects the real overhead the
- * row will share a chunk with, rather than guessing.
+ * Strategy: a fast char-budget first pass (cheap, correct for low-density text),
+ * then VERIFY the assembled string's real token count via `countTokens` and
+ * shrink the character window in a loop until it is under `effectiveMax`. The
+ * loop only iterates on dense content; ordinary text passes on the first try.
  *
- * Strategy: do a fast char-budget first pass (cheap, and correct for the
- * common case of low-density text), then VERIFY the real token count via
- * `countTokens` — the same tokenizer used everywhere else in this file —
- * and shrink the character window further in a loop until the real count is
- * safely under the ceiling. The verify+shrink loop only needs to iterate on
- * dense content; ordinary text satisfies the ceiling on the first pass.
+ * Degenerate case: if the heading prefix + table header/separator ALONE already
+ * meet or exceed `effectiveMax`, there is no token budget left for any row
+ * content. The loop shrinks the row to its minimal structurally-valid form
+ * (still ending in "|") and returns it rather than crashing or looping forever;
+ * the assembled chunk may then still exceed the cap and be clamped by the
+ * generic net. This requires a heading path on the order of ~1700 tokens, which
+ * does not arise from real documents — see the degenerate test.
  */
 function truncateTableRow(
   row: string,
-  maxTokens: number,
-  headerOverheadTokens: number,
+  effectiveMax: number,
+  headerLine: string,
+  separatorLine: string,
+  headingPrefix: string,
 ): string {
-  const ceiling =
-    Math.min(maxTokens, MAX_EMBEDDING_TOKENS) -
-    headerOverheadTokens -
-    ROW_TRUNCATION_SAFETY_MARGIN_TOKENS;
-  const targetTokens = Math.max(1, ceiling);
+  // Assemble the row into EXACTLY the chunk text chunk() will embed, so the
+  // token check below measures the real output, not a proxy.
+  const assemble = (candidateRow: string): string =>
+    `${headingPrefix}${headerLine}\n${separatorLine}\n${candidateRow}`;
 
-  let charBudget = Math.max(1, targetTokens * CHARS_PER_TOKEN);
+  // Size the first char window off the token budget left after the measured
+  // fixed overhead (heading + header + separator). This is only a starting
+  // estimate — the verify+shrink loop makes it exact.
+  const fixedOverheadTokens = countTokens(assemble(""));
+  const rowBudgetTokens = Math.max(1, effectiveMax - fixedOverheadTokens);
+  let charBudget = Math.max(1, rowBudgetTokens * CHARS_PER_TOKEN);
   let candidate = finalizeTableRow(row.slice(0, charBudget));
 
-  while (countTokens(candidate) > targetTokens && charBudget > 1) {
+  while (countTokens(assemble(candidate)) > effectiveMax && charBudget > 1) {
     charBudget = Math.max(1, Math.floor(charBudget * 0.75));
     candidate = finalizeTableRow(row.slice(0, charBudget));
   }
