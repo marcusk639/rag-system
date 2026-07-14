@@ -525,7 +525,58 @@ export async function hybridSearch(
     }>(sql`
       WITH params AS (
         SELECT ${embedLiteral}::vector AS q_embedding,
-               websearch_to_tsquery('english', ${opts.query}) AS q_tsquery
+               -- Genuine OR-based sparse query. websearch_to_tsquery was
+               -- tried first (commit 92e21f4) but verified against live
+               -- Postgres to be a no-op for ordinary prose: for input with no
+               -- explicit operators it produces a byte-identical AND-only
+               -- tree to plainto_tsquery, so a verbose query with several
+               -- required terms could still fail to match any chunk missing
+               -- just one of them. Worse, opts.query is fully
+               -- user-controlled (only length-bounded, see
+               -- apps/api/src/routes/search.ts /
+               -- apps/mcp/src/tools/search-documents.ts) and
+               -- websearch_to_tsquery treats a leading "-" as NOT and hyphens
+               -- as phrase-adjacency, so e.g. "-1 database error code" was
+               -- silently inverted into an exclusion search with no error —
+               -- confirmed to wrongly exclude an otherwise-relevant chunk
+               -- that merely contains the token "1".
+               --
+               -- This builds a real OR tree from the SAME tokenizer/stemmer
+               -- pipeline that populates chunks.tsv (to_tsvector('english',
+               -- text) — see the chunks_tsv_trigger() function in
+               -- drizzle/0000_init.sql), so query-side and index-side lexemes
+               -- always agree. The lexeme list is rejoined via the 'simple'
+               -- (non-stemming) config, NOT 'english': to_tsquery re-runs its
+               -- config's dictionary over its input even on already-quoted
+               -- lexemes, and English stemming is not idempotent (e.g.
+               -- 'databas' re-stems to 'databa' on a second pass) — reparsing
+               -- with 'english' silently corrupts some OR terms, verified
+               -- against live Postgres.
+               --
+               -- A hyphenated lexeme like 'well-known' still gets re-expanded
+               -- by to_tsquery's own parser into a redundant
+               -- 'well-known' <-> 'well' <-> 'known' phrase clause, even
+               -- under 'simple' — that's inherent tsquery parsing (happens
+               -- for any quoted lexeme containing a hyphen, regardless of
+               -- config), not something this query introduces. It's harmless:
+               -- OR'd alongside the flat 'well' | 'known' terms already
+               -- present, it can only add an unreachable extra disjunct,
+               -- never remove or corrupt a real one.
+               --
+               -- Empty/all-stopword input makes the array_agg subquery
+               -- return NULL, so q_tsquery is NULL; tsv @@ NULL is NULL
+               -- (falsy), so sparse_hits below just returns zero rows for
+               -- that query — no crash, dense-only results still flow
+               -- through the FULL OUTER JOIN in fused.
+               to_tsquery(
+                 'simple',
+                 array_to_string(
+                   (SELECT array_agg(DISTINCT quote_literal(lexeme))
+                    FROM unnest(to_tsvector('english', ${opts.query}))
+                      AS t(lexeme, positions, weights)),
+                   ' | '
+                 )
+               ) AS q_tsquery
       ),
       dense_hits AS (
         -- Pure ANN over the HNSW index, restricted to the active embedding
