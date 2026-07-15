@@ -3,8 +3,6 @@
 // API-key/token/private-key material. Zero dependencies.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 const PATTERNS = [
   { regex: /sk-or-[\w-]{3,}/, description: "OpenRouter API key" },
@@ -40,15 +38,22 @@ function stagedFiles() {
   return out.trim().split("\n").filter(Boolean);
 }
 
+function stagedContent(file) {
+  try {
+    return execFileSync("git", ["show", `:${file}`], {
+      encoding: "utf-8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return null; // binary, deleted, or unreadable — skip
+  }
+}
+
 let blocked = false;
 for (const file of stagedFiles()) {
   if (ALLOWLIST.some((re) => re.test(file))) continue;
-  let content;
-  try {
-    content = readFileSync(resolve(file), "utf-8");
-  } catch {
-    continue; // binary or deleted-in-worktree
-  }
+  const content = stagedContent(file);
+  if (content === null) continue;
   const lines = content.split("\n");
   for (const { regex, description } of PATTERNS) {
     lines.forEach((line, i) => {

@@ -3,8 +3,6 @@
 // the repo's 800-line ceiling (see .claude/rules/quality-gates.md).
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 const MAX_LINES = 800;
 const INCLUDE = [
@@ -29,16 +27,23 @@ function stagedFiles() {
   return out.trim().split("\n").filter(Boolean);
 }
 
+function stagedContent(file) {
+  try {
+    return execFileSync("git", ["show", `:${file}`], {
+      encoding: "utf-8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return null; // binary, deleted, or unreadable — skip
+  }
+}
+
 const violations = [];
 for (const file of stagedFiles()) {
   if (!INCLUDE.some((re) => re.test(file))) continue;
   if (EXCLUDE.some((re) => re.test(file))) continue;
-  let content;
-  try {
-    content = readFileSync(resolve(file), "utf-8");
-  } catch {
-    continue;
-  }
+  const content = stagedContent(file);
+  if (content === null) continue;
   const lines = content.endsWith("\n")
     ? content.split("\n").length - 1
     : content.split("\n").length;
