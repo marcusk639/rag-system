@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+.next
+.turbo
+coverage
+pnpm-lock.yaml
+postgres-data
+*.generated.ts
+packages/db/drizzle
+services/parser-py
+.test-passed
