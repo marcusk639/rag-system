@@ -10,3 +10,4 @@ postgres-data
 packages/db/drizzle
 services/parser-py
 .test-passed
+.superpowers

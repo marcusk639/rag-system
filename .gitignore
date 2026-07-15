@@ -55,3 +55,6 @@ scripts/API_PRINCIPALS.json
 
 # VS Code workspace files
 *.code-workspace
+
+# SDD scratch (progress ledger, task briefs)
+.superpowers/
