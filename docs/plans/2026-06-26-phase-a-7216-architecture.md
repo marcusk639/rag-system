@@ -169,15 +169,16 @@ A-1 is the sole blocker — it unblocks A-2 and A-3 in parallel. A-4 and A-5 run
 
 ## Phase A completion record
 
-| Check                                        | Result | Date       | Notes |
-| -------------------------------------------- | ------ | ---------- | ----- |
-| Local embedder: 768-d vectors, no HTTP       | PASS   | 2026-06-27 | 15 unit tests; `local.test.ts`; ONNX pipeline mocked, no real network |
-| Egress block: non-allow-listed host rejected | PASS   | 2026-06-27 | 13 unit tests; `egress-policy.test.ts` |
-| TRI scanner: synthetic SSN blocked           | PASS   | 2026-06-27 | 13 unit tests; `tri-scanner.test.ts`; SSN, EIN, form+amount patterns |
+| Check                                        | Result  | Date       | Notes                                                                                                                                                                                                  |
+| -------------------------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Local embedder: 768-d vectors, no HTTP       | PASS    | 2026-06-27 | 15 unit tests; `local.test.ts`; ONNX pipeline mocked, no real network                                                                                                                                  |
+| Egress block: non-allow-listed host rejected | PASS    | 2026-06-27 | 13 unit tests; `egress-policy.test.ts`                                                                                                                                                                 |
+| TRI scanner: synthetic SSN blocked           | PASS    | 2026-06-27 | 13 unit tests; `tri-scanner.test.ts`; SSN, EIN, form+amount patterns                                                                                                                                   |
 | DPA on file + startup validation             | PARTIAL | 2026-06-27 | `COMPLIANCE_MODE=client-data` gate implemented + tested (4 unit tests). DPA file is a placeholder (`docs/compliance/README.md`). Actual signed DPA + **[COUNSEL]** sign-off pending Sept build window. |
-| Full test suite: no regressions              | PASS   | 2026-06-27 | 121 unit + 35 e2e = 156 total, 0 failures |
+| Full test suite: no regressions              | PASS    | 2026-06-27 | 121 unit + 35 e2e = 156 total, 0 failures                                                                                                                                                              |
 
 **Phase A technical gate: GREEN.** Firm documents may not enter the pipeline until the Sept build window when:
+
 1. A real signed DPA is filed as `docs/compliance/vendor-dpa-<vendor>.md`
 2. `COMPLIANCE_MODE=client-data` is set in the production `.env`
 3. **[COUNSEL]** confirms §7216 + GLBA adequacy

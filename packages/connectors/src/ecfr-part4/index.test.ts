@@ -55,8 +55,7 @@ function mockFetchOnce(response: {
       ok: status < 300,
       text: async () => response.body,
       headers: {
-        get: (name: string) =>
-          response.headers?.[name.toLowerCase()] ?? null,
+        get: (name: string) => response.headers?.[name.toLowerCase()] ?? null,
       },
     } as unknown as Response;
   });

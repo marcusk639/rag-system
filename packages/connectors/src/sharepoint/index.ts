@@ -164,7 +164,10 @@ export class SharePointConnector implements Connector {
       if (item.folder !== undefined || !item.file) continue;
       // Oversize files are skipped but COUNTED so the skip is observable
       // (surfaced in the ingestion run summary) rather than silent.
-      if (typeof item.size === "number" && item.size > this.config.maxFileBytes) {
+      if (
+        typeof item.size === "number" &&
+        item.size > this.config.maxFileBytes
+      ) {
         skippedOversize++;
         this.logger.warn(
           {

@@ -10,23 +10,24 @@ per-request rate limit to manage). Otherwise use **rest**
 
 **Observed result:**
 
-| label | status | ms | retryAfter |
-|-------|--------|-----|-----------|
-| titles.json | 200 | 253 | null |
-| full-title-38-req-0 | 503 | 6197 | null |
-| full-title-38-req-1 | 503 | 13158 | null |
-| full-title-38-req-2 | 503 | 19584 | null |
-| full-title-38-req-3 | 503 | 3160 | null |
-| full-title-38-req-4 | 503 | 30044 | null |
-| full-title-38-req-5 | 503 | 14492 | null |
-| full-title-38-req-6 | 503 | 3272 | null |
-| full-title-38-req-7 | 503 | 11408 | null |
-| full-title-38-req-8 | 503 | 11240 | null |
-| full-title-38-req-9 | 503 | 40164 | null |
+| label               | status | ms    | retryAfter |
+| ------------------- | ------ | ----- | ---------- |
+| titles.json         | 200    | 253   | null       |
+| full-title-38-req-0 | 503    | 6197  | null       |
+| full-title-38-req-1 | 503    | 13158 | null       |
+| full-title-38-req-2 | 503    | 19584 | null       |
+| full-title-38-req-3 | 503    | 3160  | null       |
+| full-title-38-req-4 | 503    | 30044 | null       |
+| full-title-38-req-5 | 503    | 14492 | null       |
+| full-title-38-req-6 | 503    | 3272  | null       |
+| full-title-38-req-7 | 503    | 11408 | null       |
+| full-title-38-req-8 | 503    | 11240 | null       |
+| full-title-38-req-9 | 503    | 40164 | null       |
 
 Summary: any 429: false, any retry-after header: false, slowest request: 40164ms
 
 **Follow-up verification** (after discovering script's hardcoded date was stale):
+
 - Date: 2026-06-15 (actual eCFR latest_issue_date)
 - Single request to full-title-38 endpoint: status 503, 3381ms
 - No retry-after header observed

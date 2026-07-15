@@ -46,7 +46,13 @@ services:
       # must be started with the same value. Empty by default (loopback-only).
       PARSER_SECRET: ${PARSER_SECRET:-}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5

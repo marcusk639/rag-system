@@ -133,11 +133,11 @@ Subsequent container restarts read from the cache volume — no network egress, 
 
 ### Disk and memory
 
-| Resource | Estimate |
-| -------- | -------- |
-| Model size on disk | ~430 MB |
-| Peak RSS during batch embed | +200–400 MB above baseline |
-| Throughput | ~50–100 chunks/s on a 2-core VM |
+| Resource                    | Estimate                        |
+| --------------------------- | ------------------------------- |
+| Model size on disk          | ~430 MB                         |
+| Peak RSS during batch embed | +200–400 MB above baseline      |
+| Throughput                  | ~50–100 chunks/s on a 2-core VM |
 
 ### Compliance checklist
 

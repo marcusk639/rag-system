@@ -37,7 +37,6 @@ export async function getDocumentById(
   };
 }
 
-
 /** The original bytes + headers needed to serve a document download. */
 export interface DocumentDownload {
   body: Readable;

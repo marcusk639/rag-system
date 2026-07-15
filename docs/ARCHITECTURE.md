@@ -150,7 +150,7 @@ Default for CPA/§7216 deployments. All embedding computation runs on-process wi
 - Batch processing via `pipeline("feature-extraction")` — mean-pool + L2-normalise per chunk.
 
 **`gemini` — Gemini Embedding API**
-`gemini-embedding-001`, 768-d, US-region API. Requires `GEMINI_API_KEY`. *(Note: `text-embedding-004` is retired — always use `gemini-embedding-001`.)*
+`gemini-embedding-001`, 768-d, US-region API. Requires `GEMINI_API_KEY`. _(Note: `text-embedding-004` is retired — always use `gemini-embedding-001`.)_
 
 **`openai` — OpenAI text-embedding-3-small**
 1536-d. Requires `OPENAI_API_KEY` and a column/index migration if switching from the 768-d default.

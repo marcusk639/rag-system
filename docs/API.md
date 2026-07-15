@@ -244,9 +244,7 @@ Same `topK` / `sourceIds` / `filter` semantics as `/search`.
       "score": 0.83
     }
   ],
-  "retrieved": [
-    /* same shape as /search results */
-  ]
+  "retrieved": [/* same shape as /search results */]
 }
 ```
 

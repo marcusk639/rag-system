@@ -15,7 +15,6 @@ export interface GraphCredentials {
   clientSecret: string;
 }
 
-
 /**
  * The read surface the SharePoint connector depends on. Declared as an
  * interface (which `GraphClient` implements) so the connector can be unit
