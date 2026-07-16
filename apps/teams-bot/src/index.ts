@@ -4,6 +4,8 @@ import {
   CloudAdapter,
   ConfigurationBotFrameworkAuthentication,
   ConfigurationServiceClientCredentialFactory,
+  MemoryStorage,
+  TeamsSSOTokenExchangeMiddleware,
 } from "botbuilder";
 import { loadBotConfig } from "./config.js";
 import { KbBot, createProductionBotDeps } from "./bot.js";
@@ -44,6 +46,21 @@ const botFrameworkAuthentication = new ConfigurationBotFrameworkAuthentication(
 
 const adapter = new CloudAdapter(botFrameworkAuthentication);
 
+// Shared between the SSO dedupe middleware and the bot's pending-question
+// stash. MemoryStorage is correct for this single-instance Railway service;
+// a multi-instance deployment would need distributed storage here (see the
+// TeamsSSOTokenExchangeMiddleware doc comment in the installed botbuilder).
+const storage = new MemoryStorage();
+
+// Deduplicates concurrent signin/tokenExchange invokes (a user signed into
+// multiple Teams clients posts one per client; only one may proceed) and
+// performs the exchange once before KbBot's handleTeamsSigninTokenExchange
+// runs. Constructor (storage, oAuthConnectionName) confirmed against the
+// installed botbuilder@4.23.3 (lib/teams/teamsSSOTokenExchangeMiddleware.d.ts).
+adapter.use(
+  new TeamsSSOTokenExchangeMiddleware(storage, config.botOauthConnectionName),
+);
+
 // Catches anything that escapes KbBot's own try/catch in bot.ts (e.g. an
 // error thrown by botbuilder's own turn pipeline before/after the handler
 // runs). Never leak the raw error to the user — always the generic card.
@@ -58,7 +75,7 @@ adapter.onTurnError = async (context, error) => {
   }
 };
 
-const bot = new KbBot(createProductionBotDeps(config));
+const bot = new KbBot(createProductionBotDeps(config, storage));
 
 const app = express();
 // Required by CloudAdapter.process: it expects `req.body` to already be a

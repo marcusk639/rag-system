@@ -60,6 +60,40 @@ describe("askKb", () => {
       ),
     ).rejects.toBeInstanceOf(KbUnavailableError);
   });
+  it("passes an abort signal to fetch (upstream hangs are bounded)", async () => {
+    const fetchMock = fakeFetch(200, {
+      answer: "a",
+      citations: [],
+      disclaimer: "d",
+    });
+    await askKb(
+      { question: "q", scopeToken: "t" },
+      { ragApiUrl: "http://api", fetch: fetchMock as any },
+    );
+    const [, init] = fetchMock.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+  it("maps a timed-out fetch to KbUnavailableError (never leaks the abort)", async () => {
+    // A fetch that never resolves on its own but honors the abort signal —
+    // exactly how a hung upstream behaves under AbortSignal.timeout.
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    );
+    await expect(
+      askKb(
+        { question: "q", scopeToken: "t" },
+        { ragApiUrl: "http://api", fetch: fetchMock as any, timeoutMs: 10 },
+      ),
+    ).rejects.toBeInstanceOf(KbUnavailableError);
+  });
   it("throws KbUnavailableError when fetch rejects", async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("ECONNREFUSED");

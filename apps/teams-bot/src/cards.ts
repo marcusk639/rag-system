@@ -106,6 +106,29 @@ export function emptyScopeCard(kind: "dm" | "channel"): Attachment {
   return CardFactory.adaptiveCard(card);
 }
 
+/**
+ * Shown when a message reaches the bot with no usable question text (e.g. an
+ * @mention with nothing after it, or an attachment-only message). Sent
+ * before any auth/scope/API work happens — an empty question must never
+ * cost a token exchange, a DB roundtrip, or an API call.
+ */
+export function usageCard(): Attachment {
+  const card: AdaptiveCard = {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard",
+    version: "1.4",
+    body: [
+      {
+        type: "TextBlock",
+        text: 'Ask me a question about the knowledge base — for example: "What is the client intake SOP?" In a channel, @mention me followed by your question.',
+        wrap: true,
+      },
+    ],
+  };
+
+  return CardFactory.adaptiveCard(card);
+}
+
 export function errorCard(message: string): Attachment {
   const card: AdaptiveCard = {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",

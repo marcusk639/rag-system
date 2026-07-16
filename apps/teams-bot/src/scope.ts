@@ -101,7 +101,7 @@ export function createProductionScopeDeps(
   config: BotConfig,
 ): MintScopeTokenDeps {
   return {
-    db: getBotDb(),
+    db: getBotDb(config.databaseUrl, config.databaseSsl),
     secret: config.internalScopeJwtSecret,
     resolveForUser: resolveSourceIdsForUser,
     resolveShared: resolveSharedSourceIdsForUsers,

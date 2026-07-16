@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { TestAdapter } from "botbuilder";
-import { KbBot } from "./bot.js";
+import { MemoryStorage, TestAdapter } from "botbuilder";
+import { KbBot, createTeamsGetMemberOids } from "./bot.js";
+import { SsoRequiredError } from "./auth.js";
+
+const SIGN_IN_CARD = {
+  contentType: "application/vnd.microsoft.card.oauth",
+  content: { connectionName: "conn" },
+};
 
 /**
  * `Partial<any>` mirrors the shape used across this app's other test files
@@ -12,6 +18,8 @@ import { KbBot } from "./bot.js";
 function makeDeps(over: Partial<any> = {}) {
   return {
     resolveUserOid: vi.fn(async () => "oid-A"),
+    getSignInCard: vi.fn(async () => SIGN_IN_CARD),
+    exchangeSsoTokenForOid: vi.fn(async () => "oid-A"),
     getMemberOids: vi.fn(async () => ["oid-A", "oid-B"]),
     // Returns BOTH the signed token AND the resolved allowedSourceIds — see
     // bot.ts's `BotDeps.resolveScope` doc comment for why the handler needs
@@ -26,18 +34,34 @@ function makeDeps(over: Partial<any> = {}) {
       citations: [],
       disclaimer: "AI draft",
     })),
+    storage: new MemoryStorage(),
     ...over,
   };
 }
 
 describe("KbBot", () => {
-  it("DM: resolves personal scope and replies with an answer card containing the disclaimer", async () => {
+  it("DM: sends a typing indicator, resolves personal scope, and replies with an answer card containing the disclaimer", async () => {
     const deps = makeDeps();
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
-    await adapter.send("what is the intake SOP?").assertReply((activity) => {
-      expect(JSON.stringify(activity.attachments)).toContain("AI draft");
-    });
+    // Only an EXPLICIT "personal" conversation gets DM (personal-scope)
+    // treatment — see the fail-safe inversion test below.
+    const dmActivity = {
+      type: "message",
+      text: "what is the intake SOP?",
+      conversation: { conversationType: "personal", id: "dm1" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override; TestAdapter fills in the rest
+    } as any;
+
+    await adapter
+      .send(dmActivity)
+      // Spec §4 / finding #7: a typing activity precedes the API call.
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(JSON.stringify(activity.attachments)).toContain("AI draft");
+      });
 
     expect(deps.resolveScope).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -54,18 +78,90 @@ describe("KbBot", () => {
     expect(deps.getMemberOids).not.toHaveBeenCalled();
   });
 
-  it("fail-closed: a SsoRequiredError yields a sign-in/error card, never an answer", async () => {
+  it("fail-closed: SSO not complete → an OAuthCard/sign-in attachment is sent and askKb is NEVER called", async () => {
     const deps = makeDeps({
       resolveUserOid: vi.fn(async () => {
-        throw new (await import("./auth.js")).SsoRequiredError("sso");
+        throw new SsoRequiredError("sso");
       }),
     });
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
     await adapter.send("q?").assertReply((activity) => {
-      expect(deps.askKb).not.toHaveBeenCalled();
-      expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
+      expect(deps.getSignInCard).toHaveBeenCalledTimes(1);
+      expect(activity.attachments?.[0]?.contentType).toBe(
+        "application/vnd.microsoft.card.oauth",
+      );
     });
+    expect(deps.askKb).not.toHaveBeenCalled();
+    expect(deps.resolveScope).not.toHaveBeenCalled();
+  });
+
+  it("signin/tokenExchange invoke: completes the exchange and answers the pending question", async () => {
+    const deps = makeDeps({
+      resolveUserOid: vi.fn(async () => {
+        throw new SsoRequiredError("sso");
+      }),
+    });
+    const bot = new KbBot(deps);
+    const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
+
+    // Turn 1: the question can't be answered yet — sign-in card + stash.
+    await adapter.send("what is the intake SOP?").assertReply((activity) => {
+      expect(activity.attachments?.[0]?.contentType).toBe(
+        "application/vnd.microsoft.card.oauth",
+      );
+    });
+    expect(deps.askKb).not.toHaveBeenCalled();
+
+    // Turn 2: Teams posts the silent-SSO token-exchange invoke.
+    const invoke = {
+      type: "invoke",
+      name: "signin/tokenExchange",
+      value: { id: "exchange-1", token: "sso-token" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity; TestAdapter fills in conversation/from/recipient
+    } as any;
+
+    await adapter
+      .send(invoke)
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(JSON.stringify(activity.attachments)).toContain("AI draft");
+      });
+
+    // The context argument is a revoked botbuilder proxy after the turn
+    // ends (BotAdapter.runMiddleware), so assert on the token arg directly
+    // rather than deep-comparing the whole call.
+    expect(deps.exchangeSsoTokenForOid).toHaveBeenCalledTimes(1);
+    expect((deps.exchangeSsoTokenForOid.mock.calls[0] as unknown[])[1]).toBe(
+      "sso-token",
+    );
+    // The pending question — not something re-derived — is what gets asked.
+    expect(deps.askKb).toHaveBeenCalledWith(
+      expect.objectContaining({ question: "what is the intake SOP?" }),
+    );
+  });
+
+  it("signin/tokenExchange invoke: a failed exchange re-sends the sign-in card and never answers", async () => {
+    const deps = makeDeps({
+      exchangeSsoTokenForOid: vi.fn(async () => null),
+    });
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+
+    const invoke = {
+      type: "invoke",
+      name: "signin/tokenExchange",
+      value: { id: "exchange-1", token: "bad-token" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity
+    } as any;
+
+    await adapter.send(invoke).assertReply((activity) => {
+      expect(activity.attachments?.[0]?.contentType).toBe(
+        "application/vnd.microsoft.card.oauth",
+      );
+    });
+    expect(deps.askKb).not.toHaveBeenCalled();
     expect(deps.resolveScope).not.toHaveBeenCalled();
   });
 
@@ -80,9 +176,14 @@ describe("KbBot", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override; TestAdapter fills in the rest (from/recipient/etc.)
     } as any;
 
-    await adapter.send(channelActivity).assertReply((activity) => {
-      expect(JSON.stringify(activity.attachments)).toContain("AI draft");
-    });
+    await adapter
+      .send(channelActivity)
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(JSON.stringify(activity.attachments)).toContain("AI draft");
+      });
 
     expect(deps.getMemberOids).toHaveBeenCalledTimes(1);
     expect(deps.resolveScope).toHaveBeenCalledWith(
@@ -91,6 +192,72 @@ describe("KbBot", () => {
         memberOids: ["oid-A", "oid-B"],
       }),
     );
+  });
+
+  it("fail-safe (#3): an UNKNOWN conversationType is treated as channel (intersection scope), never dm", async () => {
+    const deps = makeDeps();
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+
+    const oddActivity = {
+      type: "message",
+      text: "q",
+      conversation: { conversationType: "someFutureSurface", id: "c9" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override
+    } as any;
+
+    await adapter.send(oddActivity).assertReply(() => undefined);
+
+    expect(deps.getMemberOids).toHaveBeenCalledTimes(1);
+    expect(deps.resolveScope).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationKind: "channel" }),
+    );
+  });
+
+  it("fail-closed (#2): an empty member roster yields the empty-scope card without minting any scope", async () => {
+    const deps = makeDeps({ getMemberOids: vi.fn(async () => []) });
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+
+    const channelActivity = {
+      type: "message",
+      text: "q",
+      conversation: { conversationType: "channel", id: "c1" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override
+    } as any;
+
+    await adapter
+      .send(channelActivity)
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
+      });
+
+    expect(deps.resolveScope).not.toHaveBeenCalled();
+    expect(deps.askKb).not.toHaveBeenCalled();
+  });
+
+  it("empty question (#6): a bare/whitespace message gets the usage card before any auth/scope/API work", async () => {
+    const deps = makeDeps();
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+
+    await adapter.send("   ").assertReply((activity) => {
+      expect(JSON.stringify(activity.attachments)).toContain("Ask me");
+    });
+
+    // A message with NO text at all (attachment-only) must not crash on
+    // .trim() and must get the same usage card.
+    const noTextActivity = {
+      type: "message",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity with undefined text
+    } as any;
+    await adapter.send(noTextActivity).assertReply((activity) => {
+      expect(JSON.stringify(activity.attachments)).toContain("Ask me");
+    });
+
+    expect(deps.resolveUserOid).not.toHaveBeenCalled();
+    expect(deps.resolveScope).not.toHaveBeenCalled();
+    expect(deps.askKb).not.toHaveBeenCalled();
   });
 
   it("empty scope: replies with the empty-scope card and never calls askKb", async () => {
@@ -102,10 +269,15 @@ describe("KbBot", () => {
     });
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
-    await adapter.send("what is the intake SOP?").assertReply((activity) => {
-      expect(deps.askKb).not.toHaveBeenCalled();
-      expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
-    });
+    await adapter
+      .send("what is the intake SOP?")
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(deps.askKb).not.toHaveBeenCalled();
+        expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
+      });
   });
 
   it("KbUnavailableError from askKb yields an error card, not a crash", async () => {
@@ -116,9 +288,14 @@ describe("KbBot", () => {
     });
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
-    await adapter.send("q?").assertReply((activity) => {
-      expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
-    });
+    await adapter
+      .send("q?")
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        expect(activity.attachments?.length ?? 0).toBeGreaterThan(0);
+      });
   });
 
   it("an unexpected error is swallowed into a generic error card, never leaked", async () => {
@@ -129,11 +306,66 @@ describe("KbBot", () => {
     });
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
-    await adapter.send("q?").assertReply((activity) => {
-      const rendered = JSON.stringify(activity.attachments);
-      expect(rendered.length).toBeGreaterThan(0);
-      expect(rendered).not.toContain("10.0.0.5");
-      expect(rendered).not.toContain("db connection reset");
+    await adapter
+      .send("q?")
+      .assertReply((activity) => {
+        expect(activity.type).toBe("typing");
+      })
+      .assertReply((activity) => {
+        const rendered = JSON.stringify(activity.attachments);
+        expect(rendered.length).toBeGreaterThan(0);
+        expect(rendered).not.toContain("10.0.0.5");
+        expect(rendered).not.toContain("db connection reset");
+      });
+  });
+});
+
+describe("createTeamsGetMemberOids", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal context; only recipient.id is consulted
+  const ctx = { activity: { recipient: { id: "bot-id" } } } as any;
+
+  it("accumulates ALL pages before returning (never a partial roster)", async () => {
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        continuationToken: "next",
+        members: [{ id: "m1", aadObjectId: "oid-1" }],
+      })
+      .mockResolvedValueOnce({
+        continuationToken: "",
+        members: [{ id: "m2", aadObjectId: "oid-2" }],
+      });
+
+    const oids = await createTeamsGetMemberOids(fetchPage)(ctx);
+    expect(oids).toEqual(["oid-1", "oid-2"]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(fetchPage).toHaveBeenNthCalledWith(2, ctx, "next");
+  });
+
+  it("fail-closed (#2): ANY member without an aadObjectId collapses the result to [] (on any page)", async () => {
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        continuationToken: "next",
+        members: [{ id: "m1", aadObjectId: "oid-1" }],
+      })
+      .mockResolvedValueOnce({
+        continuationToken: "",
+        members: [{ id: "guest-1", aadObjectId: undefined }],
+      });
+
+    expect(await createTeamsGetMemberOids(fetchPage)(ctx)).toEqual([]);
+  });
+
+  it("excludes the bot itself from the roster without failing closed", async () => {
+    const fetchPage = vi.fn().mockResolvedValueOnce({
+      continuationToken: "",
+      members: [
+        { id: "bot-id", aadObjectId: undefined },
+        { id: "m1", aadObjectId: "oid-1" },
+      ],
     });
+
+    expect(await createTeamsGetMemberOids(fetchPage)(ctx)).toEqual(["oid-1"]);
   });
 });

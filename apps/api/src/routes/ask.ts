@@ -27,6 +27,9 @@ const AskBody = z.object({
 // client-supplied header on this HTTP route. Allowing it here would let an
 // external caller spoof X-RAG-Channel: mcp and corrupt the compliance audit
 // log's transport attribution.
+// Note: `channel` is caller-asserted for api/teams — both surfaces present
+// the same shared-secret-minted scope token, so the API cannot distinguish
+// one BFF from another; the header is audit attribution, not authentication.
 const KNOWN_CHANNELS = new Set(["api", "teams"]);
 function channelFromRequest(request: FastifyRequest): "api" | "teams" {
   const raw = request.headers["x-rag-channel"];

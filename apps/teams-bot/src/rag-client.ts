@@ -30,9 +30,17 @@ interface AskKbInput {
   scopeToken: string;
 }
 
+/** Upper bound on how long a single /ask call may take before the bot gives
+ * up and shows the "temporarily unavailable" card. Generation latency is
+ * real (LLM round-trip), so this is generous — but a hung upstream must
+ * never hang the Teams turn forever. */
+const DEFAULT_ASK_TIMEOUT_MS = 20_000;
+
 interface AskKbDeps {
   ragApiUrl: string;
   fetch: typeof fetch;
+  /** Overridable for tests; defaults to {@link DEFAULT_ASK_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
 
 export async function askKb(
@@ -51,6 +59,9 @@ export async function askKb(
         "X-RAG-Channel": "teams",
       },
       body: JSON.stringify({ question }),
+      // A timeout abort surfaces as a rejection and is mapped to
+      // KbUnavailableError by the catch below — never leaked verbatim.
+      signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_ASK_TIMEOUT_MS),
     });
 
     if (!res.ok) {
