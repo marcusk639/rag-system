@@ -247,6 +247,77 @@ describe("audit_log parity — POST /ask", () => {
       await app.close();
     }
   });
+
+  it("records channel 'teams' when X-RAG-Channel: teams header is present", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildApp(makeDeps(db, makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/ask",
+        headers: {
+          authorization: `Bearer ${ADMIN_TOKEN}`,
+          "x-rag-channel": "teams",
+        },
+        payload: { question: "what is the intake SOP?" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        channel: "teams",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("defaults channel to 'api' when no X-RAG-Channel header is present", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildApp(makeDeps(db, makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/ask",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { question: "what is the intake SOP?" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        channel: "api",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  // Fix 1 regression test: "mcp" is intentionally NOT in the HTTP route's
+  // allowlist (apps/api/src/routes/ask.ts KNOWN_CHANNELS). That value is
+  // written only by the MCP app's own hard-coded code, never via a header on
+  // this route — allowing it here would let an external caller spoof the
+  // compliance audit log's transport attribution.
+  it("rejects an X-RAG-Channel: mcp spoof attempt, falling back to 'api'", async () => {
+    const { db, rows } = makeAuditDb();
+    const app = await buildApp(makeDeps(db, makeRetriever(), makeGenerator()));
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/ask",
+        headers: {
+          authorization: `Bearer ${ADMIN_TOKEN}`,
+          "x-rag-channel": "mcp",
+        },
+        payload: { question: "what is the intake SOP?" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        channel: "api",
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 /**

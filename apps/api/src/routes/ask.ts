@@ -22,6 +22,22 @@ const AskBody = z.object({
   filter: filterSchema.optional(),
 });
 
+// "mcp" is intentionally excluded: that channel value is written only by the
+// MCP app's own hard-coded code (apps/mcp/src/tools/ask.ts), never via a
+// client-supplied header on this HTTP route. Allowing it here would let an
+// external caller spoof X-RAG-Channel: mcp and corrupt the compliance audit
+// log's transport attribution.
+// Note: `channel` is caller-asserted for api/teams — both surfaces present
+// the same shared-secret-minted scope token, so the API cannot distinguish
+// one BFF from another; the header is audit attribution, not authentication.
+const KNOWN_CHANNELS = new Set(["api", "teams"]);
+function channelFromRequest(request: FastifyRequest): "api" | "teams" {
+  const raw = request.headers["x-rag-channel"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return (value && KNOWN_CHANNELS.has(value) ? value : "api") as
+    "api" | "teams";
+}
+
 /**
  * Fire-and-forget audit record for every successful /ask call.
  * Failures are logged but must not block the response.
@@ -39,7 +55,7 @@ function auditAsk(
     principalSources: p?.kind === "scoped" ? p.allowedSourceIds : null,
     principalSubject: p?.kind === "scoped" ? (p.subject ?? null) : null,
     questionHash: createHash("sha256").update(question).digest("hex"),
-    channel: "api",
+    channel: channelFromRequest(request),
     model: model ?? null,
     embeddingProvider: deps.embedder.name,
     embeddingModel: deps.embedder.model,

@@ -764,7 +764,7 @@ export interface AskEventRow {
    */
   principalSubject: string | null;
   questionHash: string;
-  channel: "api" | "mcp";
+  channel: "api" | "mcp" | "teams";
   model: string | null;
   /**
    * §7216/Circular 230 §10.22 disclosure recordkeeping — which embedding
@@ -1000,6 +1000,58 @@ export async function resolveSourceIdsForUser(
       WHERE user_id = ${userId}
         AND revoked_at IS NULL
     ) combined
+  `);
+  return rows.rows.map((r) => r.source_id);
+}
+
+/**
+ * Source-ids that EVERY user in `userIds` has an active grant to, excluding
+ * client-confidential sources. Used to compute a channel-safe scope for the
+ * Teams bot: a source appears only if all channel members can already see it,
+ * so a channel answer can never expose content a member lacks access to.
+ *
+ * Reuses the SAME grant UNION as resolveSourceIdsForUser (client-routed +
+ * direct grants) so channel scope and per-user scope never diverge on what a
+ * grant is. Intersection = HAVING count(DISTINCT user_id) = number of members.
+ * Empty `userIds` returns [] (no shared scope over an empty member set).
+ *
+ * Uses `IN (${sql.join(...)})` rather than `= ANY(${distinct})` for the
+ * userId filter — this driver's tagged-template `sql` expands a JS array as
+ * individual scalar params, not a single Postgres array bind, so
+ * `ANY(${array})` throws 42809 ("op ANY/ALL (array) requires array on right
+ * side"). Same parameterization already used for source-id IN-lists above
+ * (see the `sourceFilter`/`enforcedSourceFilter` comment) and the same
+ * scalar-array pitfall already documented for staff_client_assignments in
+ * `tests/e2e/src/specs/access-grants.spec.ts`'s afterEach cleanup comment.
+ */
+export async function resolveSharedSourceIdsForUsers(
+  db: Db,
+  userIds: string[],
+): Promise<string[]> {
+  const distinct = [...new Set(userIds)];
+  if (distinct.length === 0) return [];
+  const userIdList = sql.join(
+    distinct.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  const rows = await db.execute<{ source_id: string }>(sql`
+    SELECT grants.source_id
+    FROM (
+      SELECT sta.user_id, sca.source_id
+      FROM staff_client_assignments sta
+      JOIN source_client_assignments sca ON sca.client_id = sta.client_id
+      WHERE sta.user_id IN (${userIdList})
+        AND sta.revoked_at IS NULL
+      UNION
+      SELECT user_id, source_id
+      FROM staff_source_assignments
+      WHERE user_id IN (${userIdList})
+        AND revoked_at IS NULL
+    ) grants
+    JOIN sources ON sources.id = grants.source_id
+    WHERE sources.data_class <> 'client_confidential'
+    GROUP BY grants.source_id
+    HAVING count(DISTINCT grants.user_id) = ${distinct.length}
   `);
   return rows.rows.map((r) => r.source_id);
 }
