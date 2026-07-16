@@ -46,11 +46,16 @@ export function answerCard(a: AskAnswer): Attachment {
         wrap: true,
       };
 
-      // Add OpenUrl action if downloadable
-      if (citation.downloadable) {
+      // Add OpenUrl action only when we have a real, absolute http(s) source url.
+      // Do NOT derive a link from documentId/downloadable — that endpoint is
+      // auth-gated and unreachable from a Teams card.
+      if (
+        typeof citation.url === "string" &&
+        /^https?:\/\//.test(citation.url)
+      ) {
         citationItem.selectAction = {
           type: "Action.OpenUrl",
-          url: `https://example.com/documents/${citation.documentId}`,
+          url: citation.url,
         };
       }
 

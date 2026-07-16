@@ -3,6 +3,13 @@ export interface Citation {
   title: string;
   documentId: string;
   downloadable: boolean;
+  /**
+   * The source document's canonical URL (e.g. a SharePoint/Drive link),
+   * browser-clickable under the user's own M365 access. Not derived from
+   * `documentId`/`downloadable` — those describe the auth-gated
+   * `/documents/:id/download` endpoint, which a Teams card link cannot reach.
+   */
+  url?: string;
 }
 
 export interface AskAnswer {

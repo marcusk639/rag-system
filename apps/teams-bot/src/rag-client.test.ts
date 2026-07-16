@@ -17,7 +17,13 @@ describe("askKb", () => {
     const fetchMock = fakeFetch(200, {
       answer: "Per SOP-1...",
       citations: [
-        { index: 1, title: "SOP", documentId: "d1", downloadable: false },
+        {
+          index: 1,
+          title: "SOP",
+          documentId: "d1",
+          downloadable: false,
+          url: "https://contoso.sharepoint.com/sites/kb/SOP.docx",
+        },
       ],
       disclaimer: "AI draft",
     });
@@ -39,6 +45,9 @@ describe("askKb", () => {
     );
     expect(out.answer).toBe("Per SOP-1...");
     expect(out.disclaimer).toBe("AI draft");
+    expect(out.citations[0]?.url).toBe(
+      "https://contoso.sharepoint.com/sites/kb/SOP.docx",
+    );
   });
   it("throws KbUnavailableError on non-2xx without leaking the body", async () => {
     const fetchMock = fakeFetch(500, {
