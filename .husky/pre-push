@@ -1,0 +1,15 @@
+# Full local unit suite before push, skipped when HEAD already passed.
+# e2e (tests/e2e) needs Docker and runs via `pnpm e2e` / CI e2e.yml instead.
+HEAD_SHA=$(git rev-parse HEAD)
+CACHED_SHA=""
+if [ -f .test-passed ]; then
+  CACHED_SHA=$(tr -d '[:space:]' < .test-passed)
+fi
+
+if [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" = "$CACHED_SHA" ]; then
+  echo "pre-push: tests already passed for $HEAD_SHA — skipping."
+  exit 0
+fi
+
+echo "pre-push: running build + unit tests (e2e excluded)..."
+pnpm -r build && pnpm -r --filter '!@rag/e2e' run test && echo "$HEAD_SHA" > .test-passed
