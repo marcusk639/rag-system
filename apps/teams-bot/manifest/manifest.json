@@ -1,0 +1,51 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "${MICROSOFT_APP_ID}",
+  "packageName": "com.ragsystem.teamsbot",
+  "developer": {
+    "name": "${DEVELOPER_NAME}",
+    "websiteUrl": "${DEVELOPER_WEBSITE_URL}",
+    "privacyUrl": "${DEVELOPER_PRIVACY_URL}",
+    "termsOfUseUrl": "${DEVELOPER_TERMS_OF_USE_URL}"
+  },
+  "name": {
+    "short": "KB Bot",
+    "full": "Knowledge Base Bot"
+  },
+  "description": {
+    "short": "Ask the firm's knowledge base a question.",
+    "full": "A Teams bot that answers questions from the firm's knowledge base, scoped to the sources each asker (or, in a channel, every member of that channel) has been granted access to."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#464775",
+  "bots": [
+    {
+      "botId": "${MICROSOFT_APP_ID}",
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupChat"],
+          "commands": [
+            {
+              "title": "Ask a question",
+              "description": "Ask the knowledge base bot a question in plain English."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [],
+  "webApplicationInfo": {
+    "id": "${MICROSOFT_APP_ID}",
+    "resource": "${BOT_ENTRA_SSO_SCOPE}"
+  }
+}

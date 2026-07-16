@@ -172,6 +172,48 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Teams KB bot (Express + botbuilder CloudAdapter) ─────────────────────────
+  teams-bot:
+    image: ${TEAMS_BOT_IMAGE:-rag-teams-bot:latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    # No published host port by default — the Bot Framework Service reaches
+    # this container over the internet, so it belongs behind the same
+    # TLS-terminating reverse proxy/load balancer as the other services, not
+    # exposed directly here. Uncomment if this compose stack IS that proxy's
+    # only entry point:
+    # ports:
+    #   - "${TEAMS_BOT_PORT:-3978}:3978"
+    environment:
+      NODE_ENV: production
+      # Entra app registration backing the Bot Framework channel registration.
+      MICROSOFT_APP_ID: ${MICROSOFT_APP_ID}
+      MICROSOFT_APP_PASSWORD: ${MICROSOFT_APP_PASSWORD}
+      MICROSOFT_APP_TENANT_ID: ${MICROSOFT_APP_TENANT_ID}
+      # Teams SSO on-behalf-of exchange scope, e.g.
+      # api://botid-<MICROSOFT_APP_ID>/access_as_user.
+      BOT_ENTRA_SSO_SCOPE: ${BOT_ENTRA_SSO_SCOPE}
+      # Signs/verifies the per-request scope-assertion JWT — must match the
+      # api/mcp services' INTERNAL_SCOPE_JWT_SECRETS list (see the web service
+      # above for the same requirement).
+      INTERNAL_SCOPE_JWT_SECRET: ${INTERNAL_SCOPE_JWT_SECRET}
+      RAG_API_URL: http://api:3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_SSL: ${DATABASE_SSL:-disable}
+      PORT: "3978"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://localhost:3978/health'', r => process.exit(r.statusCode === 200 ? 0 : 1)).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── MCP server (HTTP transport) ──────────────────────────────────────────────
   mcp:
     image: ${MCP_IMAGE:-rag-mcp:latest}
