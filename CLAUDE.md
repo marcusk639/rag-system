@@ -31,7 +31,7 @@ pnpm build                    # build all packages + apps
 pnpm lint                     # workspace-wide lint
 pnpm typecheck                # workspace-wide tsc --noEmit
 pnpm test                     # workspace-wide vitest
-pnpm test:fresh               # build then test — REQUIRED on a fresh clone (tests resolve workspace deps via dist/)
+pnpm test:fresh               # build then unit-test (e2e excluded) — REQUIRED on a fresh clone (tests resolve workspace deps via dist/)
 pnpm e2e                      # end-to-end tests (@rag/e2e)
 pnpm eval                     # retrieval evaluation harness (@rag/e2e)
 pnpm eval:real                # eval harness against real providers (needs API keys)

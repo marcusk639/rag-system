@@ -23,7 +23,7 @@
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "test:fresh": "pnpm -r build && pnpm -r run test",
+    "test:fresh": "pnpm -r build && pnpm -r --filter '!@rag/e2e' run test",
     "test:coverage": "vitest run --coverage",
     "e2e": "pnpm --filter @rag/e2e test",
     "eval": "pnpm --filter @rag/e2e run eval",
