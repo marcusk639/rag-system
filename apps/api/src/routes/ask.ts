@@ -22,12 +22,17 @@ const AskBody = z.object({
   filter: filterSchema.optional(),
 });
 
-const KNOWN_CHANNELS = new Set(["api", "teams", "mcp"]);
-function channelFromRequest(request: FastifyRequest): "api" | "mcp" | "teams" {
+// "mcp" is intentionally excluded: that channel value is written only by the
+// MCP app's own hard-coded code (apps/mcp/src/tools/ask.ts), never via a
+// client-supplied header on this HTTP route. Allowing it here would let an
+// external caller spoof X-RAG-Channel: mcp and corrupt the compliance audit
+// log's transport attribution.
+const KNOWN_CHANNELS = new Set(["api", "teams"]);
+function channelFromRequest(request: FastifyRequest): "api" | "teams" {
   const raw = request.headers["x-rag-channel"];
   const value = Array.isArray(raw) ? raw[0] : raw;
   return (value && KNOWN_CHANNELS.has(value) ? value : "api") as
-    "api" | "mcp" | "teams";
+    "api" | "teams";
 }
 
 /**
