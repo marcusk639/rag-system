@@ -19,7 +19,19 @@
       "Bash(pnpm dev:worker)",
       "Bash(pnpm docker:up)",
       "Bash(pnpm docker:logs)",
-      "Bash(pnpm --filter:*)"
+      "Bash(pnpm --filter:*)",
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pnpm format)",
+      "Bash(pnpm format:check)",
+      "Bash(node scripts/check-secrets.mjs)",
+      "Bash(node scripts/check-file-sizes.mjs)"
     ],
     "ask": [
       "Bash(git push:*)",
