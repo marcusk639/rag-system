@@ -9,13 +9,17 @@ rag-system/
 ├── apps/
 │   ├── api/                Fastify HTTP API (search, ask, manage sources)
 │   ├── mcp/                MCP server for external agents (stdio + HTTP)
+│   ├── web/                Next.js chat UI (BFF over the HTTP API)
 │   └── worker/             pg-boss worker for async ingestion
 ├── packages/
 │   ├── core/               Shared types, interfaces, errors
 │   ├── db/                 Drizzle schema, migrations, queries (pgvector)
 │   ├── rag/                Embeddings, chunking, hybrid retrieval
 │   ├── ingestion/          Pipeline orchestration (fetch → parse → chunk → embed → store)
-│   └── connectors/         SharePoint, Google Drive, Gmail, Outlook
+│   ├── connectors/         SharePoint, Google Drive, Gmail, Outlook
+│   ├── runtime/            Shared dependency-graph wiring (buildCoreDeps)
+│   ├── services/           Transport-agnostic search/ask/sources/documents logic
+│   └── test-fixtures/      Shared fixtures/helpers for tests across packages
 ├── services/
 │   └── parser-py/          Python sidecar — MarkItDown + Unstructured for any format
 ├── docker/                 Local dev stack (Postgres + parser)

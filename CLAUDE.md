@@ -34,6 +34,7 @@ pnpm test                     # workspace-wide vitest
 pnpm test:fresh               # build then test — REQUIRED on a fresh clone (tests resolve workspace deps via dist/)
 pnpm e2e                      # end-to-end tests (@rag/e2e)
 pnpm eval                     # retrieval evaluation harness (@rag/e2e)
+pnpm eval:real                # eval harness against real providers (needs API keys)
 pnpm gen:parser-types         # regenerate parser TS types from the live parser's OpenAPI schema
 pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 ```
@@ -43,7 +44,7 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 - **TypeScript is primary.** Python lives only in `services/parser-py/` because the document-parsing ecosystem there is materially better. Do not creep Python into other services.
 - **All cross-package contracts live in `@rag/core`.** Connectors, parsers, embedders, and chunkers all implement interfaces defined there. Adding a provider = implement the interface, register it in the factory.
 - **Business logic is transport-agnostic in `@rag/services`.** The five service functions (`searchDocuments`, `askQuestion`, `triggerSync`, `listPublicSources`, `getDocumentById`) take a structural `ServiceDeps` and are shared by both the HTTP API and the MCP server — never duplicate search/ask logic in a route or tool.
-- **The shared dependency graph is built once via `@rag/runtime`.** `buildCoreDeps(config, logger)` wires the DB pool, embedder, retriever, queue, and optional generator (plus a hardened idempotent `close()`). All three apps (api/mcp/worker) build `CoreDeps` from it and layer transport-specific extras on top.
+- **The shared dependency graph is built once via `@rag/runtime`.** `buildCoreDeps(config, logger)` wires the DB pool, embedder, retriever, queue, and optional generator (plus a hardened idempotent `close()`). The three backend apps (api/mcp/worker) build `CoreDeps` from it. The fourth app, `apps/web`, is a Next.js frontend that consumes the HTTP API instead — it never touches `CoreDeps`; see `apps/web/CLAUDE.md`.
 - **Database access goes through `@rag/db`.** Apps and packages never import `pg`/`drizzle-orm` directly — they import typed query functions.
 - **Authentication is a pluggable `AuthProvider` in `@rag/core`.** Apps don't hand-roll token checks — they call `buildAuthProvider(config, logger)` (`@rag/runtime`), which returns an `AuthProvider` (`authenticate(credential) → Principal | null`). Strategies: `static-token`, `oidc`, `composite` (default; static tried first, then OIDC), selected via `AUTH_PROVIDER`. The downstream authorization contract (`Principal` → `AuthorizationScope` → scope-threaded retrieval) is unchanged — this sits in front of `resolvePrincipal`, it does not replace the scope machinery. The core has zero IdP-specific (e.g. Entra) code.
 - **Ingestion is always async via `pg-boss`.** The API enqueues jobs; the worker executes them. Never run a full source sync inside an HTTP request.
@@ -52,23 +53,24 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 
 ## Where to find things
 
-| Concern                   | Location                                                                      |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| Shared types/interfaces   | `packages/core/src/`                                                          |
-| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                       |
-| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                             |
-| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                 |
-| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts` |
-| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                           |
-| Embedding providers       | `packages/rag/src/embeddings/`                                                |
-| Chunking strategies       | `packages/rag/src/chunking/`                                                  |
-| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                 |
-| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook}/`                  |
-| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                          |
-| HTTP routes               | `apps/api/src/routes/`                                                        |
-| MCP tools                 | `apps/mcp/src/tools/`                                                         |
-| Worker job handlers       | `apps/worker/src/handlers/`                                                   |
-| Python parser             | `services/parser-py/app/main.py`                                              |
+| Concern                   | Location                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------- |
+| Shared types/interfaces   | `packages/core/src/`                                                                   |
+| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                                |
+| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                                      |
+| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                          |
+| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`          |
+| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                    |
+| Embedding providers       | `packages/rag/src/embeddings/`                                                         |
+| Chunking strategies       | `packages/rag/src/chunking/`                                                           |
+| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                          |
+| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook}/`                           |
+| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                   |
+| HTTP routes               | `apps/api/src/routes/`                                                                 |
+| MCP tools                 | `apps/mcp/src/tools/`                                                                  |
+| Worker job handlers       | `apps/worker/src/handlers/`                                                            |
+| Python parser             | `services/parser-py/app/main.py`                                                       |
+| Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules |
 
 ## Adding a new connector
 
@@ -102,11 +104,14 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 - **Parser shared-secret auth is opt-in.** Set `PARSER_SECRET` (in `env.example`) to require the `X-Parser-Token` header on the parser sidecar's `/parse` endpoint. Empty/unset = auth disabled. If set, the worker's `HttpParserClient` and the parser service must agree, or every parse 401s.
 - **Client auth config fails loud by design.** `AUTH_PROVIDER=oidc` with no `OIDC_ISSUER`/`OIDC_AUDIENCE` throws at startup. `composite` (the default) tries static tokens first, then OIDC; with no `OIDC_*` set it behaves exactly like the legacy static-token setup. An empty token allow-list throws at construction — a misconfigured deployment never silently accepts everything.
 
-## Conventions enforced by hooks (parent repo)
+## Conventions enforced mechanically
 
-- Prettier auto-formats `.ts/.tsx/.js/.json/.md` on every Edit/Write.
-- Do not edit `.env` files — they're blocked at the hook layer. The template lives at `env.example`.
-- Do not edit `pnpm-lock.yaml` — it's blocked. Run `pnpm install` to update.
+Repo-committed (every contributor gets these via `pnpm install` → husky):
+
+- Pre-commit: prettier + eslint on staged files (lint-staged), secret scan (`scripts/check-secrets.mjs`), 800-line file cap (`scripts/check-file-sizes.mjs`).
+- Pre-push: `pnpm -r build && pnpm -r --filter '!@rag/e2e' run test` (e2e is excluded — it needs Docker and runs via `pnpm e2e` / CI instead), skipped when `.test-passed` matches HEAD.
+- Do not edit `.env` files — the template lives at `env.example`.
+- Do not edit `pnpm-lock.yaml` by hand — run `pnpm install` to update.
 
 ---
 
