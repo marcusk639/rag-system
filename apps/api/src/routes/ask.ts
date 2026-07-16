@@ -22,6 +22,14 @@ const AskBody = z.object({
   filter: filterSchema.optional(),
 });
 
+const KNOWN_CHANNELS = new Set(["api", "teams", "mcp"]);
+function channelFromRequest(request: FastifyRequest): "api" | "mcp" | "teams" {
+  const raw = request.headers["x-rag-channel"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return (value && KNOWN_CHANNELS.has(value) ? value : "api") as
+    "api" | "mcp" | "teams";
+}
+
 /**
  * Fire-and-forget audit record for every successful /ask call.
  * Failures are logged but must not block the response.
@@ -39,7 +47,7 @@ function auditAsk(
     principalSources: p?.kind === "scoped" ? p.allowedSourceIds : null,
     principalSubject: p?.kind === "scoped" ? (p.subject ?? null) : null,
     questionHash: createHash("sha256").update(question).digest("hex"),
-    channel: "api",
+    channel: channelFromRequest(request),
     model: model ?? null,
     embeddingProvider: deps.embedder.name,
     embeddingModel: deps.embedder.model,

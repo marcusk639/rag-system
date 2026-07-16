@@ -764,7 +764,7 @@ export interface AskEventRow {
    */
   principalSubject: string | null;
   questionHash: string;
-  channel: "api" | "mcp";
+  channel: "api" | "mcp" | "teams";
   model: string | null;
   /**
    * §7216/Circular 230 §10.22 disclosure recordkeeping — which embedding
