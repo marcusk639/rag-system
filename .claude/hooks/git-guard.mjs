@@ -20,8 +20,8 @@ process.stdin.on("end", () => {
       msg: "--output on git log/diff/show writes files; the allowlist treats these commands as read-only.",
     },
     {
-      re: new RegExp(`\\bgit\\b${seg}\\bcommit\\b${seg}--no-verify`),
-      msg: "--no-verify skips the pre-commit secret/size guards.",
+      re: new RegExp(`\\bgit\\b${seg}\\bcommit\\b${seg}(\\s--no-verify|\\s-[a-zA-Z]*n\\b)`),
+      msg: "commit with --no-verify/-n skips the pre-commit secret/size guards.",
     },
     {
       re: new RegExp(`\\bgit\\b${seg}\\badd\\b${seg}(\\s-[a-zA-Z]*f|\\s--force)`),

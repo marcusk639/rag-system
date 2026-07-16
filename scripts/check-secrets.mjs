@@ -9,9 +9,12 @@ const PATTERNS = [
   { regex: /\bsk-(proj-)?[A-Za-z0-9_-]{20,}/, description: "OpenAI API key" },
   // localhost is excluded: env.example, apps/web/env.example, and
   // packages/db/drizzle.config.ts legitimately contain dummy
-  // rag:rag@localhost URLs for local development.
+  // rag:rag@localhost URLs for local development. The exclusion requires a
+  // host boundary (`:` or `/`) right after localhost/127.0.0.1 so lookalike
+  // hosts (e.g. localhost-tunnel.ngrok.io, 127.0.0.1.xip.io) still match.
   {
-    regex: /postgres(ql)?:\/\/\w+:[^@\s"']+@(?!localhost|127\.0\.0\.1)/,
+    regex:
+      /postgres(ql)?:\/\/[\w.-]+:[^@\s"']+@(?!localhost[:/]|127\.0\.0\.1[:/])/,
     description: "Database URL with embedded credentials (non-local host)",
   },
   { regex: /sk-ant-[\w-]{3,}/, description: "Anthropic API key" },
