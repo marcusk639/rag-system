@@ -14,9 +14,9 @@ function makeDeps(over: Partial<any> = {}) {
     resolveUserOid: vi.fn(async () => "oid-A"),
     getMemberOids: vi.fn(async () => ["oid-A", "oid-B"]),
     // Returns BOTH the signed token AND the resolved allowedSourceIds — see
-    // bot.ts's `BotDeps.resolveScope` doc comment for why the token alone
-    // (scope.ts's `mintScopeToken` contract) isn't enough for the handler to
-    // decide "empty scope" without calling the API.
+    // bot.ts's `BotDeps.resolveScope` doc comment for why the handler needs
+    // allowedSourceIds (from scope.ts's `mintScope`) to decide "empty scope"
+    // without calling the API.
     resolveScope: vi.fn(async () => ({
       token: "scope-tok",
       allowedSourceIds: ["src-1"],

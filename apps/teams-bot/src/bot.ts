@@ -8,7 +8,7 @@ import {
 import { KbUnavailableError, askKb } from "./rag-client.js";
 import type { AskAnswer } from "./rag-client.js";
 import { answerCard, emptyScopeCard, errorCard } from "./cards.js";
-import { createProductionScopeDeps } from "./scope.js";
+import { createProductionScopeDeps, mintScope } from "./scope.js";
 import type { BotConfig } from "./config.js";
 
 /** Which flavor of Teams conversation the asker is in. Drives both the
@@ -24,15 +24,12 @@ export interface ResolveScopeInput {
 }
 
 /**
- * The signed scope token PLUS the source-ids it grants. `scope.ts`'s tested
- * `mintScopeToken` only returns the opaque signed token (by design — the bot
- * has no business decoding a token it didn't verify to make authorization
- * decisions). But the handler below has a separate, non-authorization need:
- * deciding "empty scope" purely to avoid an API call, before any token
- * leaves the process. `resolveScope` is that thin BotDeps-level wrapper —
- * production wiring composes it from `mintScopeToken`'s own resolver
- * functions (`resolveForUser`/`resolveShared`) and signer, so scope.ts's
- * contract is untouched. See `createProductionBotDeps` below.
+ * The signed scope token PLUS the source-ids it grants — exactly what
+ * `scope.ts`'s `mintScope` returns. The handler needs `allowedSourceIds`
+ * (not just the opaque token) so it can decide "empty scope" purely to
+ * avoid an API call, before any token leaves the process. Production
+ * wiring (`createProductionBotDeps` below) delegates straight to
+ * `mintScope` — there is no separate resolution logic here.
  */
 export interface ResolvedScope {
   token: string;
@@ -70,7 +67,7 @@ const GENERIC_ERROR_MESSAGE =
  * `TeamsActivityHandler` orchestrating auth → scope → ask → card for every
  * incoming message, routing DM vs channel conversations differently (a
  * channel answer is restricted to what every member shares access to; see
- * `scope.ts`'s compliance-critical doc comment on `mintScopeToken`).
+ * `scope.ts`'s compliance-critical doc comment on `mintScope`).
  */
 export class KbBot extends TeamsActivityHandler {
   private readonly deps: BotDeps;
@@ -175,12 +172,11 @@ export function createTeamsGetMemberOids(): (
  * the real RAG API client (`rag-client.ts`), and the real Teams member
  * roster lookup above.
  *
- * `resolveScope` intentionally does NOT call `scope.ts`'s `mintScopeToken`
- * itself — that would resolve the source-ids twice (once here to check for
- * "empty", once again inside `mintScopeToken`). Instead it reuses the same
- * `resolveForUser`/`resolveShared`/`sign` primitives `mintScopeToken` calls
- * internally, producing an identical token with a single DB round trip.
- * `scope.ts`'s own `mintScopeToken` export is untouched.
+ * `resolveScope` delegates directly to `scope.ts`'s `mintScope` — the
+ * dm/channel resolver-selection branch lives ONLY there. This file must
+ * never re-implement that branch: a copy here that isn't kept in sync with
+ * `scope.ts` is exactly how a channel answer could leak the asker's
+ * personal grants.
  */
 export function createProductionBotDeps(config: BotConfig): BotDeps {
   const authDeps = createProductionAuthDeps(config.botSsoScope);
@@ -189,19 +185,7 @@ export function createProductionBotDeps(config: BotConfig): BotDeps {
   return {
     resolveUserOid: (context) => resolveUserOid(context, authDeps),
     getMemberOids: createTeamsGetMemberOids(),
-    resolveScope: async (input) => {
-      const allowedSourceIds =
-        input.conversationKind === "dm"
-          ? await scopeDeps.resolveForUser(scopeDeps.db, input.askerOid)
-          : await scopeDeps.resolveShared(scopeDeps.db, input.memberOids);
-
-      const token = await scopeDeps.sign({
-        sub: input.askerOid,
-        allowedSourceIds,
-      });
-
-      return { token, allowedSourceIds };
-    },
+    resolveScope: (input) => mintScope(input, scopeDeps),
     askKb: (input) => askKb(input, { ragApiUrl: config.ragApiUrl, fetch }),
   };
 }
