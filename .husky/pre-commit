@@ -1,0 +1,3 @@
+npx --no-install lint-staged
+node scripts/check-secrets.mjs
+node scripts/check-file-sizes.mjs

@@ -28,16 +28,23 @@
     "eval:real": "pnpm --filter @rag/e2e run eval:real",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
-    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
+    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "eslint": "^9.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.3.0",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.0.0",
     "vitest": "^2.1.8"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md,css,yml,yaml}": "prettier --write",
+    "*.{ts,tsx}": "eslint --fix --no-warn-ignored"
   }
 }
