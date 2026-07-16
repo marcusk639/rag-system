@@ -53,5 +53,18 @@
       "Bash(docker compose down -v:*)",
       "Bash(docker-compose down -v:*)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-git-output-redirect.mjs\""
+          }
+        ]
+      }
+    ]
   }
 }
