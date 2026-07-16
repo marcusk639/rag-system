@@ -4,7 +4,7 @@ globs:
     "apps/**/*.ts",
     "apps/**/*.tsx",
     "packages/**/*.ts",
-    "services/parser-py/**/*.py",
+    "services/parser-py/app/**/*.py",
   ]
 ---
 

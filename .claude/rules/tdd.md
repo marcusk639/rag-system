@@ -7,7 +7,7 @@ globs:
 
 New features and bug fixes in this repo are test-first:
 
-1. Write the failing test next to the source file (`foo.ts` → `foo.test.ts` in the same directory — colocation is the repo convention, 73 existing examples).
+1. Write the failing test next to the source file (`foo.ts` → `foo.test.ts` in the same directory — colocation is the repo convention).
 2. Run it and confirm it fails for the right reason: `pnpm --filter @rag/<pkg> test -- <name>`.
 3. Implement the minimal change to pass. Refactor after green.
 
