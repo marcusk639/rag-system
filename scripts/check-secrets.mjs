@@ -6,6 +6,14 @@ import { execFileSync } from "node:child_process";
 
 const PATTERNS = [
   { regex: /sk-or-[\w-]{3,}/, description: "OpenRouter API key" },
+  { regex: /\bsk-(proj-)?[A-Za-z0-9_-]{20,}/, description: "OpenAI API key" },
+  // localhost is excluded: env.example, apps/web/env.example, and
+  // packages/db/drizzle.config.ts legitimately contain dummy
+  // rag:rag@localhost URLs for local development.
+  {
+    regex: /postgres(ql)?:\/\/\w+:[^@\s"']+@(?!localhost|127\.0\.0\.1)/,
+    description: "Database URL with embedded credentials (non-local host)",
+  },
   { regex: /sk-ant-[\w-]{3,}/, description: "Anthropic API key" },
   { regex: /AKIA[0-9A-Z]{16}/, description: "AWS access key" },
   {
