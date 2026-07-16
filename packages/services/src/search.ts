@@ -1,5 +1,6 @@
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
+import { capChunksPerDocument } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 
 export interface SearchInput {
@@ -19,6 +20,11 @@ export interface SearchInput {
  * deny all). It is passed to the retriever, which intersects it with any caller
  * `sourceIds` so the optional caller filter can only narrow WITHIN the scope.
  *
+ * `maxChunksPerDocument` mirrors `askQuestion`'s diversity cap
+ * (`capChunksPerDocument`, ask.ts) — previously only the generation path had
+ * this, so a single long document could dominate plain /search results too.
+ * `0` (default) disables the cap, matching `askQuestion`'s default.
+ *
  * Results pass through the metadata allowlist (P2) before returning, so
  * non-exposable metadata (author/from/to/subject/connector `extra`) never
  * leaves the service regardless of transport.
@@ -28,15 +34,19 @@ export async function searchDocuments(
   input: SearchInput,
   defaultTopK: number,
   scope: AuthorizationScope,
+  maxChunksPerDocument = 0,
 ): Promise<SanitizedRetrievalResult[]> {
-  const results = await deps.retriever.search(
-    {
-      query: input.query,
-      topK: input.topK ?? defaultTopK,
-      ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
-      ...(input.filter ? { filter: input.filter } : {}),
-    },
-    scope,
+  const results = capChunksPerDocument(
+    await deps.retriever.search(
+      {
+        query: input.query,
+        topK: input.topK ?? defaultTopK,
+        ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+        ...(input.filter ? { filter: input.filter } : {}),
+      },
+      scope,
+    ),
+    maxChunksPerDocument,
   );
   return sanitizeRetrievalResults(results);
 }

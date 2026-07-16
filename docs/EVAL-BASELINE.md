@@ -57,6 +57,12 @@ MRR: 1.000. Weight sweep (dense=1→0, sparse=0→1) is flat across all five con
 
 **Why these numbers are not meaningful evidence of retrieval quality:** the corpus (`tests/e2e/src/eval/corpus.ts`) is 14 documents / 17 questions, deliberately built around vocabulary-distinctive topics (Postgres tuning, Docker, espresso, sailing, gardening) specifically so keyword overlap trivially determines relevance. Under `FakeEmbedder`'s deterministic bag-of-words hash, the "dense" vector is essentially a keyword-overlap proxy — there is no semantic-similarity difficulty in this test set at all, which is exactly why the weight sweep shows zero variation regardless of dense/sparse mix. The file's own comment calls this a "STARTER set" and names the real target: 30–50 real CPA-knowledge-base questions with genuine near-neighbor distractors. Treat the numbers in this section as a **regression trip-wire** (did a change tank retrieval on trivial cases?), not a measurement of real-world quality.
 
-## Corpus growth (stretch follow-up, not yet done)
+## Corpus growth (deferred — decision recorded 2026-07-12)
 
-Per the corpus file's own "STARTER set" comment: grow toward 30–50 real CPA-domain questions with genuine near-neighbor distractors (e.g. two similar-sounding tax topics that only a real embedding model could distinguish). This is what would make both `pnpm eval:real`'s numbers and any future reranking evaluation ([reranking](./ISSUES-AND-OPTIMIZATIONS.md#4-reranking-exists-but-has-never-been-evaluated-let-alone-enabled)) actually trustworthy.
+Per the corpus file's own "STARTER set" comment, the original plan was to hand-author 30–50 real CPA-domain questions with genuine near-neighbor distractors. **Decision: not now — deferred, and rescoped.**
+
+**Why not now:** the real-Gemini baseline above is already at a ceiling (recall@5=100%, nDCG@5=99.1%, MRR=1.000, flat across the entire dense/sparse weight sweep). There's no headroom left in this corpus for a reranker to show a measurable lift — any A/B run against it today would be noise on a 14-doc/17-question sample, not signal, and could wrongly "prove" H1 ([reranking](./ISSUES-AND-OPTIMIZATIONS.md)) doesn't help.
+
+**Why hand-authoring more synthetic near-neighbor pairs is also the wrong fix:** whoever curates "genuine near-neighbor distractors" is grading their own test (labeler bias), and a synthetic corpus doesn't represent real TWK query patterns anyway — it'd be thrown away once real usage exists.
+
+**Better source, already built:** `getWeakResultAuditEvents` (`packages/db/src/queries.ts:843`) plus the docs-gap-digest pipeline (Phase 4) capture real `ask`/`search` queries with low `topScore` once the KB is live. That's an organic near-neighbor-difficulty query set sourced from actual TWK usage — the right place to harvest a real eval corpus from, once there's enough live traffic to draw from. Revisit corpus growth then, not before.

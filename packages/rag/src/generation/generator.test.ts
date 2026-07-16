@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RetrievalResult } from "@rag/core";
-import { buildPrompt } from "./generator.js";
+import { buildPrompt, filterCitationsToAnswer } from "./generator.js";
 
 function rr(overrides: {
   text?: string;
@@ -77,5 +77,111 @@ describe("buildPrompt — document-tag injection resistance", () => {
     expect(prompt).toContain('title="Q3 Financial Summary"');
     expect(prompt).toContain("Overview › Revenue");
     expect(prompt).toContain("Revenue grew 12% year over year.");
+  });
+});
+
+describe("filterCitationsToAnswer — grouped/ranged citations", () => {
+  const citations = [
+    {
+      index: 1,
+      documentId: "d1",
+      title: "Doc 1",
+      url: null,
+      downloadable: false,
+      chunkId: "c1",
+      score: 0.9,
+    },
+    {
+      index: 2,
+      documentId: "d2",
+      title: "Doc 2",
+      url: null,
+      downloadable: false,
+      chunkId: "c2",
+      score: 0.8,
+    },
+    {
+      index: 3,
+      documentId: "d3",
+      title: "Doc 3",
+      url: null,
+      downloadable: false,
+      chunkId: "c3",
+      score: 0.7,
+    },
+  ];
+
+  it("recognizes a comma-space group like [1, 2]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1, 2] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("recognizes a comma-no-space group like [1,2]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1,2] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("recognizes a range like [1-3]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1-3] for details.",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2, 3]);
+  });
+
+  it("still recognizes plain single citations like [3]", () => {
+    const result = filterCitationsToAnswer("See source [3].", citations);
+    expect(result.map((c) => c.index)).toEqual([3]);
+  });
+
+  it("de-duplicates across mixed single and grouped forms", () => {
+    const result = filterCitationsToAnswer(
+      "See [1] and also [1, 2].",
+      citations,
+    );
+    expect(result.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("expands a mixed range+comma bracket like [1-3, 5]", () => {
+    const result = filterCitationsToAnswer(
+      "See sources [1-3, 5] for details.",
+      citations,
+    );
+    // Only indices 1-3 exist in the fixture `citations`, but the referenced
+    // set should still include 5 (filtered out by the citations.filter, not
+    // by the parser) — assert against what actually made it through.
+    expect(result.map((c) => c.index)).toEqual([1, 2, 3]);
+  });
+
+  it("does not throw or hang on an absurdly large range like [1-50000000]", () => {
+    const start = Date.now();
+    const result = filterCitationsToAnswer(
+      "See sources [1-50000000] for details.",
+      citations,
+    );
+    const elapsedMs = Date.now() - start;
+    // Bailed out as "no match" — a range this wide can never correspond to a
+    // real citation list (topK is capped at 100 across the API/MCP schemas).
+    expect(result).toEqual([]);
+    expect(elapsedMs).toBeLessThan(100);
+  });
+
+  it("does not spuriously match index 0 for empty/whitespace bracket content", () => {
+    const result = filterCitationsToAnswer(
+      "Malformed brackets: [ ] and [,] and [-].",
+      citations,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("does not misparse a negative number like [-1] as a 0-1 range", () => {
+    const result = filterCitationsToAnswer("See source [-1].", citations);
+    expect(result).toEqual([]);
   });
 });

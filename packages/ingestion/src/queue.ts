@@ -21,6 +21,13 @@ export const JOB_NAMES = {
    * docsGapDigest.
    */
   shipAuditLog: "rag.ship_audit_log",
+  /**
+   * Third recurring (pg-boss `schedule()`) job in this codebase — takes a
+   * full pg_dump and uploads it to the configured object store (see
+   * apps/worker/src/handlers/backup-postgres.ts). No payload, same as
+   * docsGapDigest/shipAuditLog.
+   */
+  backupPostgres: "rag.backup_postgres",
 } as const;
 
 export interface SyncSourcePayload {
@@ -74,6 +81,10 @@ export interface QueueOptions {
   shipAuditLogCron: string;
   /** IANA timezone the cron expression above is evaluated in. */
   shipAuditLogTz: string;
+  /** Cron schedule for the recurring Postgres backup job. */
+  backupPostgresCron: string;
+  /** IANA timezone the cron expression above is evaluated in. */
+  backupPostgresTz: string;
 }
 
 export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
@@ -141,6 +152,16 @@ export async function createQueue(opts: QueueOptions): Promise<PgBoss> {
     opts.shipAuditLogCron,
     undefined,
     { tz: opts.shipAuditLogTz },
+  );
+
+  // Register the Postgres backup job the same way — upsert-by-name, safe to
+  // call from every process on every boot, must run after the createQueue
+  // loop above (same FK-to-queue constraint as the other two).
+  await boss.schedule(
+    JOB_NAMES.backupPostgres,
+    opts.backupPostgresCron,
+    undefined,
+    { tz: opts.backupPostgresTz },
   );
 
   return boss;

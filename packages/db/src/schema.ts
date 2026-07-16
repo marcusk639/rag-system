@@ -603,6 +603,23 @@ export const auditLogShipperState = pgTable("audit_log_shipper_state", {
 });
 export type AuditLogShipperState = typeof auditLogShipperState.$inferSelect;
 
+// ----------------------------------------------------------------------------
+// backup_runs — one row per completed Postgres backup, so "the backup job ran
+// and produced something" is queryable/admin-visible, not just a log line.
+// Mirrors docsGapDigestRuns' shape (a simple append-only run-history table).
+// ----------------------------------------------------------------------------
+export const backupRuns = pgTable("backup_runs", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`uuid_generate_v4()`),
+  ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  objectKey: text("object_key").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+});
+export type BackupRun = typeof backupRuns.$inferSelect;
+export type NewBackupRun = typeof backupRuns.$inferInsert;
+
 export type StaffClientAssignment = typeof staffClientAssignments.$inferSelect;
 export type NewStaffClientAssignment =
   typeof staffClientAssignments.$inferInsert;

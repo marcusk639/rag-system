@@ -272,6 +272,22 @@ export const Config = z
       /** IANA timezone the cron expression is evaluated in. */
       tz: z.string().min(1).default("UTC"),
     }),
+
+    /**
+     * Recurring Postgres backup job (scheduled, cursor-free — every tick takes
+     * a full pg_dump and uploads it, no incremental state to track). `none`
+     * (default) disables the job's actual work; the schedule still registers
+     * either way so enabling it later doesn't require a deploy of queue.ts.
+     */
+    backup: z.object({
+      provider: z.enum(["none", "objectStore"]).default("none"),
+      /** 5-field crontab expression. Default: daily, 03:00. */
+      cron: z.string().min(1).default("0 3 * * *"),
+      /** IANA timezone the cron expression is evaluated in. */
+      tz: z.string().min(1).default("UTC"),
+      /** Key prefix under the configured objectStore bucket for backup dumps. */
+      keyPrefix: z.string().default("backups/"),
+    }),
   })
   .superRefine((cfg, ctx) => {
     // Production gate: the parser shared secret is mandatory in production so the
@@ -630,6 +646,13 @@ export function loadConfig(
       webhookToken: env.AUDIT_SINK_WEBHOOK_TOKEN || undefined,
       cron: env.AUDIT_SINK_CRON || undefined,
       tz: env.AUDIT_SINK_TZ || undefined,
+    },
+    backup: {
+      provider:
+        (env.BACKUP_PROVIDER as "none" | "objectStore" | undefined) ?? "none",
+      cron: env.BACKUP_CRON ?? "0 3 * * *",
+      tz: env.BACKUP_TZ ?? "UTC",
+      keyPrefix: env.BACKUP_KEY_PREFIX ?? "backups/",
     },
   });
 

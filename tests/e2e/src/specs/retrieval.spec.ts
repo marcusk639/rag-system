@@ -233,4 +233,127 @@ describe("E2E: hybrid retrieval", () => {
     // permissive we want to confirm we never crash on a zero-sparse query.
     expect(Array.isArray(results)).toBe(true);
   });
+
+  it("sparse side matches a verbose multi-word query even when the chunk is missing SOME query terms (genuine OR, not AND)", async () => {
+    const connector = new FakeConnector([
+      // Deliberately missing "configure"/"automated"/"verify"/"restore"/
+      // "integrity" from the query below — only "backups", "nightly",
+      // "production", and "database" overlap. Under strict AND semantics
+      // (plainto_tsquery) this chunk's tsvector does NOT satisfy the query
+      // (verified directly against Postgres: `to_tsvector(...) @@
+      // plainto_tsquery(...)` is false for this exact pair) because 5 of the
+      // 9 required stemmed terms are absent. It should only surface under a
+      // genuine OR match.
+      plainTextDoc({
+        externalId: "backup-partial",
+        title: "Backup Schedule Note",
+        text: "Backups run nightly for the production database.",
+      }),
+      plainTextDoc({
+        externalId: "unrelated",
+        title: "Espresso Notes",
+        text: "Espresso pulling requires fine-ground coffee and nine bars of pressure for proper extraction.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    const results = await retriever.search(
+      {
+        query:
+          "how do I configure automated nightly backups and verify restore integrity for the production database",
+        topK: 3,
+      },
+      ADMIN_SCOPE,
+    );
+
+    const backupHit = results.find(
+      (r) => r.document.title === "Backup Schedule Note",
+    );
+    expect(backupHit).toBeDefined();
+    // A strict AND match would never surface this chunk (5 of 9 required
+    // terms are missing) — a nonzero sparseScore proves the sparse side is
+    // genuinely OR-based, not just tolerating the swap for cosmetic reasons.
+    expect(backupHit!.sparseScore).toBeGreaterThan(0);
+  });
+
+  it("treats a leading '-' and other websearch operator characters as literal text, not query operators", async () => {
+    const connector = new FakeConnector([
+      // `websearch_to_tsquery('english', '-1 database error code')` parses
+      // to `!'1' & 'databas' & 'error' & 'code'` — a NOT clause on the
+      // literal token "1" that this chunk contains, wrongly excluding it
+      // (verified directly against Postgres). The query's leading "-" is
+      // meant as ordinary text (e.g. copy-pasted from an error message), not
+      // an exclusion operator.
+      plainTextDoc({
+        externalId: "error-doc",
+        title: "Error Log Excerpt",
+        text: "This document mentions the number 1 explicitly and also covers common database error codes.",
+      }),
+      plainTextDoc({
+        externalId: "unrelated",
+        title: "Espresso Notes",
+        text: "Espresso pulling requires fine-ground coffee and nine bars of pressure for proper extraction.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    const results = await retriever.search(
+      {
+        query: "-1 database error code",
+        topK: 3,
+      },
+      ADMIN_SCOPE,
+    );
+
+    const errorHit = results.find(
+      (r) => r.document.title === "Error Log Excerpt",
+    );
+    expect(errorHit).toBeDefined();
+    expect(errorHit!.sparseScore).toBeGreaterThan(0);
+  });
+
+  it("excludes archived documents from hybrid search by default", async () => {
+    const { documents } = await import("@rag/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "current-sop",
+        title: "Current Engagement SOP",
+        text: "This engagement SOP covers current firm procedures for client onboarding and billing.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+
+    // Verify document is found before archiving
+    const resultsBeforeArchive = await retriever.search(
+      {
+        query: "engagement SOP client onboarding billing procedures",
+        topK: 5,
+      },
+      ADMIN_SCOPE,
+    );
+    expect(
+      resultsBeforeArchive.find(
+        (r) => r.document.title === "Current Engagement SOP",
+      ),
+    ).toBeDefined();
+
+    await db
+      .update(documents)
+      .set({ lifecycleStatus: "archived" })
+      .where(eq(documents.title, "Current Engagement SOP"));
+
+    const results = await retriever.search(
+      {
+        query: "engagement SOP client onboarding billing procedures",
+        topK: 5,
+      },
+      ADMIN_SCOPE,
+    );
+
+    expect(
+      results.find((r) => r.document.title === "Current Engagement SOP"),
+    ).toBeUndefined();
+  });
 });

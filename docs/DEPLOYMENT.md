@@ -66,11 +66,53 @@ This is idempotent — safe to re-run on every deploy.
 ### Migrations on deploy (Railway)
 
 Migrations run **automatically** via the `rag-worker` service's `preDeployCommand`
-(`pnpm --filter @rag/db migrate`, see `apps/worker/railway.json`). Railway runs a
-pre-deploy command between build and release, on the private network with the
-service's env vars; if it exits non-zero the deployment is aborted. Because it
-runs against the **new** image, any migration committed alongside code ships and
-applies before that code serves traffic.
+(`node /app/node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json`).
+Railway runs a pre-deploy command between build and release, on the private
+network with the service's env vars; if it exits non-zero the deployment is
+aborted. Because it runs against the **new** image, any migration committed
+alongside code ships and applies before that code serves traffic.
+
+The command deliberately does **not** use `pnpm --filter @rag/db migrate` —
+`pnpm` isn't present in the runtime image (`apps/worker/Dockerfile`'s final
+stage only copies the pruned `pnpm deploy --prod` output, no package
+manager), so that form fails outright once `preDeployCommand` actually runs.
+
+**Two prerequisites for this to actually fire, both confirmed working as of
+2026-07-14 (see `docs/MIGRATION-TRACKING-INCIDENT-2026-07-13.md` for the
+full incident that found and fixed both):**
+
+- Each Node service's Railway dashboard **Config-as-code** path must be set
+  to that service's `railway.json` (`apps/worker/railway.json`,
+  `apps/api/railway.json`, `apps/mcp/railway.json`) — until this is set,
+  Railway silently ignores the checked-in `railway.json` entirely (no error,
+  the deploy just uses whatever the dashboard's own settings were, which for
+  a long time meant `preDeployCommand` never ran and migrations required
+  manual intervention). Double-check for typos in the path (a stray leading
+  space silently breaks it with a `configErrors` entry visible only via
+  `railway deployment list --json`, not in the dashboard UI).
+- `packages/db/src/migrate.ts`'s "only auto-run when invoked directly" guard
+  must correctly detect direct invocation through a **symlinked** path —
+  pnpm's `node_modules` layout (and `pnpm deploy --prod`'s output) is built
+  on symlinks, and Node resolves `import.meta.url` to the real
+  (symlink-resolved) path while `process.argv[1]` stays as typed, so a naive
+  string comparison silently no-ops instead of running. Already fixed
+  (`realpath` + `pathToFileURL`, with a regression test in
+  `packages/db/src/migrate.cli.test.ts`) — flagging here so nobody
+  "simplifies" that guard back to the naive form without knowing why it's
+  written the way it is.
+
+**None of the four Node/Python services (`rag-parser`, `rag-api`, `rag-mcp`,
+plus the Python parser sidecar) run an HTTP deploy-gate healthcheck.**
+Railway's healthcheck prober cannot reach a newly-deploying replica on this
+project — confirmed independently for all three Node HTTP services on
+2026-07-13/14: each app starts and listens correctly (confirmed in deploy
+logs) and is reachable over the private network (confirmed via a direct
+fetch from a peer service), but the healthcheck prober times out regardless.
+Each service's `railway.json` relies on `restartPolicyType: ON_FAILURE`
+(process liveness) instead. If you're tempted to re-add `healthcheckPath` to
+any of these, be aware it will very likely break that service's deploys the
+same way, and Railway support may need to be involved to identify why the
+prober can't reach new replicas on this specific project.
 
 **The worker is the single migration owner** — it boots without the index-assert
 guard that makes `rag-api`/`rag-mcp` crash-loop on a not-yet-migrated DB. Do NOT
@@ -100,6 +142,82 @@ The HNSW index on `chunks.embedding` is created with `m=16, ef_construction=64`.
 ```sql
 SET hnsw.ef_search = 100;  -- default 40
 ```
+
+### Backup & restore (P0 for any deployment holding real client data)
+
+Postgres is the **sole** store for chunks, embeddings, sources, and the compliance
+`audit_log` — there is no secondary copy of any of this data anywhere else in the
+system. An unrecoverable Postgres loss means total, permanent data loss including
+the audit trail itself.
+
+**Status as of 2026-07-12: restore mechanism verified end-to-end; automated
+backup does NOT exist yet — this is the open half of the gate.**
+
+**Step 1 result — which Postgres this deployment actually has:** confirmed via
+`railway variables --service rag-postgres` (raw `POSTGRES_USER`/`POSTGRES_PASSWORD`/
+`POSTGRES_DB`/`PGDATA` env vars, no `DATABASE_PUBLIC_URL`) — this is a
+**self-hosted `pgvector/pgvector:pg16` container on a Railway volume**
+(`rag-postgres-volume`, 368MB/5000MB used), not Railway's managed Postgres
+plugin. `railway volume list` exposes no backup/snapshot metadata for this
+volume. **Conclusion: nothing is currently taking automated backups of this
+data.** A volume-loss event today would be unrecoverable.
+
+**Step 3 result — manual restore drill, run 2026-07-12 via `railway ssh -s rag-postgres`:**
+
+1. `pg_dump -F c` streamed from the live container over `railway ssh` to a local
+   file (36MB, 130 TOC entries, including the `vector`/`pg_trgm`/`uuid-ossp`
+   extensions and the `data_class`/`source_kind`/`ingestion_status` enum types) —
+   read-only against production, no writes.
+2. Restored into a throwaway local `pgvector/pgvector:pg16` Docker container
+   (never touched the live database) via `pg_restore --no-owner --no-privileges` —
+   clean restore, zero errors in the log.
+3. Verified row counts match production exactly: `chunks`=6175, `documents`=858,
+   `sources`=3, `audit_log`=3. Spot-checked zero `chunks` rows with a null
+   `embedding` or `text` post-restore. Confirmed all six `chunks` indexes
+   (including `chunks_embedding_hnsw_idx`) and all five `documents` indexes
+   (including the GIN metadata index) rebuilt correctly from the dump.
+4. Torn down the scratch container and deleted the local dump file immediately
+   after verification — no copy of production data was retained beyond the drill.
+
+**What this proves:** if a `pg_dump` is taken, it restores cleanly and completely
+— the mechanics work, including the vector index and extensions that are the
+parts most likely to silently fail on restore.
+
+**What this does NOT prove, and what's still open:** there is no scheduled job
+producing that `pg_dump` today. This drill required manually pulling one on
+demand via `railway ssh`. **The remaining P0 work is Step 2 below — standing up
+an actual recurring backup job** — not re-verifying the restore path, which is
+now done.
+
+**Step 2 — still open — build the actual backup job.** Since this is a
+self-hosted container (confirmed above, not the managed plugin), a recurring
+`pg_dump` is needed. Lowest-effort option that fits this stack: a scheduled
+job to an S3-compatible bucket (the object-store infra for uploads already
+exists — see `STORAGE_*` env vars in `env.example` — a backup bucket can reuse
+the same credentials/provider). Options, roughly in order of effort:
+
+- A pg-boss recurring job (mirrors the pattern already shipped for
+  `docsGapDigest`/`shipAuditLog` — see `packages/ingestion/src/queue.ts`) that
+  shells out to `pg_dump` and uploads the result. Reuses infra already in the
+  codebase; no new scheduler to operate.
+- A Railway cron service running `pg_dump | gzip | upload` on a schedule,
+  external to the app.
+- `pg_basebackup` + WAL archiving if point-in-time recovery (not just
+  daily-snapshot recovery) is required — more operational surface, only worth
+  it if the RPO target demands it.
+
+Re-run the restore drill above (same `railway ssh -s rag-postgres` → scratch
+Docker container → row-count/index verification procedure) periodically once
+the recurring job exists, so "the backup job runs" and "the backup job
+produces something restorable" are both continuously verified, not just
+proven once on 2026-07-12.
+
+Record the date, who ran it, and the verification results in this file once
+done — that record is itself the P0 evidence, not just the backup existing.
+
+**Status as of this writing: not yet done.** This step needs live Railway
+dashboard/CLI access this session does not have — it's the one P0 backup/restore
+action that requires a human with production credentials, not more code.
 
 ## Local embedding provider setup (CPA / §7216 compliance)
 
@@ -133,11 +251,11 @@ Subsequent container restarts read from the cache volume — no network egress, 
 
 ### Disk and memory
 
-| Resource | Estimate |
-| -------- | -------- |
-| Model size on disk | ~430 MB |
-| Peak RSS during batch embed | +200–400 MB above baseline |
-| Throughput | ~50–100 chunks/s on a 2-core VM |
+| Resource                    | Estimate                        |
+| --------------------------- | ------------------------------- |
+| Model size on disk          | ~430 MB                         |
+| Peak RSS during batch embed | +200–400 MB above baseline      |
+| Throughput                  | ~50–100 chunks/s on a 2-core VM |
 
 ### Compliance checklist
 

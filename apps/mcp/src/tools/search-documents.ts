@@ -116,6 +116,7 @@ export function registerSearchDocuments(
         { query, topK, sourceIds, filter },
         deps.config.retrieval.defaultTopK,
         scope,
+        deps.config.retrieval.maxChunksPerDocument,
       );
       auditSearch(deps, scope, query, results);
       return {
