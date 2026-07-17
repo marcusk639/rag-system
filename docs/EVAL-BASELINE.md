@@ -1,6 +1,6 @@
 # Retrieval Evaluation Baseline
 
-**Status as of 2026-07-09: harness is real-embedder-capable; no real-embedder run has been recorded yet.** This file exists so `pnpm eval:real`'s output has a permanent home, and so nobody mistakes the FakeEmbedder numbers below for evidence of real-world retrieval quality.
+**Status as of 2026-07-17: a real-embedder run has been recorded** (local ONNX `Xenova/bge-base-en-v1.5`, CPA corpus — see `## Real-embedder results` below and `examples/cpa-kb-demo/RESERVE-REPORT.md`). This file exists so `pnpm eval:real`'s output has a permanent home, and so nobody mistakes the FakeEmbedder numbers below for evidence of real-world retrieval quality.
 
 ## What exists today
 
@@ -9,17 +9,20 @@
 
 The harness itself (`tests/e2e/src/eval/run-eval.ts`, `tests/e2e/src/helpers/ingestion.ts`) was made embedder-swappable on 2026-07-09 — previously `Retriever` and the ingestion pipeline's embedder were hardcoded to `FakeEmbedder` with no way to substitute a real provider at all. `seedEvalCorpus`/`runOneIngestion`/`runRetrievalEval` now accept an optional `embedder`, defaulting to `FakeEmbedder` so every existing spec is unaffected.
 
-## Why no real-embedder numbers are recorded yet
+## Real-embedder results
 
-This session prepared the harness but did not execute `pnpm eval:real` — real embedding-provider credentials could not be verified in this environment (the operator's `.env` is access-restricted from this session by design, and guessing/probing for credential presence was correctly blocked). **This is an explicit, acknowledged gap, not a silent skip** — per this file's own purpose, the next person who has real credentials available should run:
+Recorded 2026-07-17, `pnpm --filter @rag/e2e run eval:cpa` — `provider=local model=Xenova/bge-base-en-v1.5 dims=768` (no API key, ONNX on-process), CPA corpus (7 synthetic SOPs / 64 chunks, 20 labeled questions + 8 out-of-corpus negatives), weights dense=0.3/sparse=0.7. Full write-up including the compliance-path evidence and the "I don't know" honesty caveat: `examples/cpa-kb-demo/RESERVE-REPORT.md`.
 
-```bash
-pnpm docker:up   # postgres + parser must be running
-EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval:real
-# or: EMBEDDING_PROVIDER=local pnpm eval:real   (no API key, runs ONNX on-process)
-```
+| k   | recall | precision | nDCG   |
+| --- | ------ | --------- | ------ |
+| @1  | 97.5%  | 100.0%    | 100.0% |
+| @3  | 100.0% | 35.0%     | 100.0% |
+| @5  | 100.0% | 21.0%     | 100.0% |
+| @10 | 100.0% | 10.5%     | 100.0% |
 
-and paste the resulting `tests/e2e/src/eval/real-eval-result.md` content into a new `## Real-embedder results` section below, then delete this paragraph.
+MRR: 1.000.
+
+**"I don't know" separation — does NOT hold at the raw retrieval-score layer:** the normalized negative top-score (~1.0000) is an artifact of per-query renormalization and not meaningful on its own. The valid cross-query signal is the raw component score: lowest in-corpus positive dense score is **0.5868**, highest out-of-corpus negative dense score is **0.6324** — the negative exceeds the positive, so a naive score-threshold refusal rule would misfire. Retrieval ranking is excellent (recall@3=100%, MRR=1.000), but that is a statement about ranking quality, not about whether the bot correctly says "I don't know" on out-of-corpus questions — that behavior, if implemented, lives in the answer/generation-confidence layer, which this eval does not exercise. See `examples/cpa-kb-demo/RESERVE-REPORT.md` for the full breakdown.
 
 **Dimension compatibility:** `chunks.embedding` is a fixed `vector(768)` Postgres column. `gemini` (`gemini-embedding-001`) and `local` (ONNX) both default to 768 dimensions and work unmodified. `openai`'s default model is 1536-dim and will fail at insert — set `EMBEDDING_DIMENSIONS=768` explicitly if evaluating an OpenAI model that supports dimension truncation (the `text-embedding-3-*` family does).
 
