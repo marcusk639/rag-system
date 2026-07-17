@@ -51,9 +51,17 @@
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git clean -d:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git stash clear:*)",
       "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
       "Bash(docker compose down -v:*)",
-      "Bash(docker-compose down -v:*)"
+      "Bash(docker-compose down -v:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker volume prune:*)",
+      "Bash(docker system prune:*)"
     ]
   },
   "hooks": {
@@ -64,6 +72,10 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-guard.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/command-guard.mjs\""
           }
         ]
       }
