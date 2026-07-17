@@ -72,6 +72,7 @@ describe("E2E: handleShipAuditLog (TWK Task 14)", () => {
       retrievedCount: 1,
       endpoint: "ask",
       topScore: 0.9,
+      answerId: marker,
     });
 
     const watermarkBefore = await getAuditLogShipperWatermark(db);
@@ -121,6 +122,7 @@ describe("E2E: handleShipAuditLog (TWK Task 14)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: marker,
     });
 
     const watermarkBefore = await getAuditLogShipperWatermark(db);

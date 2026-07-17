@@ -59,6 +59,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: `${marker}-zero-retrieved`,
     });
 
     await logAskEvent(db, {
@@ -76,6 +77,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
       retrievedCount: 1,
       endpoint: "search",
       topScore: 0.1, // below minScore
+      answerId: `${marker}-weak-score`,
     });
 
     await logAskEvent(db, {
@@ -93,6 +95,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
       retrievedCount: 1,
       endpoint: "ask",
       topScore: 0.9, // well above minScore — must be excluded
+      answerId: `${marker}-fine`,
     });
 
     const since = new Date(Date.now() - 60_000);
@@ -142,6 +145,7 @@ describe("E2E: getWeakResultAuditEvents (Phase 4)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: marker,
     });
 
     // `since` in the future relative to the row we just inserted.
