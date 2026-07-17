@@ -55,7 +55,7 @@ const PARSER_URL = process.env.PARSER_URL ?? "http://localhost:8000";
 // ----------------------------------------------------------------------------
 const DIMS = 768;
 
-class BowEmbedder implements EmbeddingProvider {
+export class BowEmbedder implements EmbeddingProvider {
   readonly name = "local";
   readonly model = "demo-bow-768";
   readonly dimensions = DIMS;
@@ -104,7 +104,7 @@ function tokenize(text: string): string[] {
 // ----------------------------------------------------------------------------
 // 2. FileConnector — emits the docs/ directory as SourceDocuments.
 // ----------------------------------------------------------------------------
-class FileConnector implements Connector {
+export class FileConnector implements Connector {
   readonly kind = "custom";
   private exhausted = false;
 
@@ -402,7 +402,16 @@ function log(phase: string, msg: string): void {
   process.stdout.write(`[${phase}] ${msg}\n`);
 }
 
-main().catch((err: unknown) => {
-  process.stderr.write(`Demo failed: ${(err as Error).stack ?? String(err)}\n`);
-  process.exit(1);
-});
+// Guard against running main() as a side effect of other modules importing
+// FileConnector/BowEmbedder from this file (e.g. compliance-evidence.ts) —
+// without this check, `import { FileConnector } from "./demo.js"` would also
+// kick off the full demo flow (including its own TRUNCATE) on module load.
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  main().catch((err: unknown) => {
+    process.stderr.write(
+      `Demo failed: ${(err as Error).stack ?? String(err)}\n`,
+    );
+    process.exit(1);
+  });
+}

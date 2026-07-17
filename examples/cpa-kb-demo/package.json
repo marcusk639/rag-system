@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "demo": "tsx src/demo.ts",
+    "evidence": "tsx src/compliance-evidence.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

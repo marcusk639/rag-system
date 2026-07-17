@@ -1,0 +1,13 @@
+
+> @rag/example-cpa-kb-demo@0.1.0 evidence /Users/marcusklein/dev/rag-system-kb-wt/examples/cpa-kb-demo
+> tsx src/compliance-evidence.ts
+
+EVIDENCE: data_class 'sop' maps to DocumentClass 'A' (expected A)
+EVIDENCE: Class-A ingest succeeded: 7 docs, 64 chunks (documentsFailed=0)
+EVIDENCE: data_class 'client_confidential' maps to DocumentClass 'D' (expected D)
+EVIDENCE: Class-D ingest REFUSED at the gate: documentsProcessed=0, documentsFailed=7 (runIngestion resolves rather than throws — ClassBlockedError is caught per-document via Promise.allSettled; see ingest_log check below for the actual error class/message)
+EVIDENCE: ingest_log block row: action=blocked reason="Class D documents cannot be indexed in Phase 1 (source ac899f83-7349-4a26-bc2d-e1da2ddcaab5). Class C requires a §314.4(f) addendum; Class D requires a §7216 consent workflow. Fix the source configuration or escalate to compliance."
+EVIDENCE: ingest_log rejection_reason matches ClassBlockedError("D", sourceId).message exactly
+EVIDENCE: audit_log row: endpoint=search retrieved=3 top_score=1 hash=0b69316d7bde...
+EVIDENCE: citation resolves: top chunk -> document bb30d18e-19e1-4a96-b322-e13d6edf41a1 (path=boi-filing-sop.md) [dense=0.393 sparse=0.000 score=1.000]
+EVIDENCE: ALL COMPLIANCE CHECKS PASSED
