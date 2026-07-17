@@ -156,7 +156,11 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       retrievedCount: 1,
       endpoint: "search",
       topScore: 0.87,
-      answerId: marker,
+      // search-path rows legitimately carry a null answer_id (there is no
+      // generated answer to attribute feedback to). The row is identified
+      // via questionHash (marker) below, so answerId is not load-bearing
+      // for identification here.
+      answerId: null,
     });
 
     const [row] = await db
