@@ -787,11 +787,12 @@ export interface AskEventRow {
    * The `answerId` returned alongside the answer (`AskResult.answerId`,
    * `packages/services/src/ask.ts`) — links this audit row to any
    * `answer_feedback` votes cast against the same answer. Not a FK (that
-   * write is best-effort and may be absent); required at the TypeScript
-   * layer for every new row even though the column is nullable at the SQL
-   * level (pre-0018 rows have none).
+   * write is best-effort and may be absent). Required (not optional) at the
+   * TypeScript layer so every call site makes an explicit choice: `/ask`
+   * always has a real answerId; `/search` has no generated answer and passes
+   * `null` — matching the nullable SQL column (pre-0018 rows also have none).
    */
-  answerId: string;
+  answerId: string | null;
 }
 
 /**

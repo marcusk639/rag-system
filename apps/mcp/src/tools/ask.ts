@@ -78,6 +78,7 @@ function auditAsk(
   question: string,
   retrieved: AskResult["retrieved"],
   model: string | undefined,
+  answerId: string,
 ): void {
   void logAskEvent(deps.db, {
     principalKind: scope.enforcedSourceIds === null ? "admin" : "scoped",
@@ -94,6 +95,7 @@ function auditAsk(
     retrievedCount: retrieved.length,
     endpoint: "ask",
     topScore: retrieved[0]?.score ?? null,
+    answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 
@@ -140,8 +142,22 @@ export function registerAsk(
 
       // `askQuestion` already enforced the confidentiality scope and short-
       // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
-      const { answer, citations, retrieved, reviewStatus, disclaimer } = result;
-      auditAsk(deps, scope, question, retrieved, deps.config.generation?.model);
+      const {
+        answer,
+        citations,
+        retrieved,
+        reviewStatus,
+        disclaimer,
+        answerId,
+      } = result;
+      auditAsk(
+        deps,
+        scope,
+        question,
+        retrieved,
+        deps.config.generation?.model,
+        answerId,
+      );
       return {
         // Lead with the practitioner-review disclaimer so a consuming agent
         // cannot present the draft as a finished answer (Circular 230 §10.37).
@@ -157,6 +173,7 @@ export function registerAsk(
           retrievedCount: retrieved.length,
           reviewStatus,
           disclaimer,
+          answerId,
         },
       };
     },
