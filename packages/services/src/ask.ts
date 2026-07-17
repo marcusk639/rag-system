@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { GenerationResult, Generator } from "@rag/rag";
 import { buildCitations, filterCitationsToAnswer } from "@rag/rag";
 import type {
@@ -65,6 +66,8 @@ export interface AskResult {
   reviewStatus: typeof REVIEW_STATUS;
   /** Human-readable form of `reviewStatus` for direct display. */
   disclaimer: string;
+  /** Stable id for this answer; feedback references it. */
+  answerId: string;
 }
 
 const EMPTY_ANSWER =
@@ -121,6 +124,7 @@ async function ask(
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
 ): Promise<AskResult> {
+  const answerId = randomUUID();
   const retrieved = capChunksPerDocument(
     await deps.retriever.search(buildQuery(input, defaultTopK), scope),
     maxChunksPerDocument,
@@ -133,6 +137,7 @@ async function ask(
       retrieved: [],
       reviewStatus: REVIEW_STATUS,
       disclaimer: ANSWER_DISCLAIMER,
+      answerId,
     };
   }
 
@@ -144,6 +149,7 @@ async function ask(
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,
+    answerId,
   };
 }
 
@@ -160,6 +166,7 @@ export type AskStreamEvent =
       retrieved: SanitizedRetrievalResult[];
       reviewStatus: typeof REVIEW_STATUS;
       disclaimer: string;
+      answerId: string;
     };
 
 /**
@@ -197,6 +204,7 @@ async function* askStream(
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
 ): AsyncGenerator<AskStreamEvent> {
+  const answerId = randomUUID();
   const retrieved = capChunksPerDocument(
     await deps.retriever.search(buildQuery(input, defaultTopK), scope),
     maxChunksPerDocument,
@@ -210,6 +218,7 @@ async function* askStream(
       retrieved: [],
       reviewStatus: REVIEW_STATUS,
       disclaimer: ANSWER_DISCLAIMER,
+      answerId,
     };
     return;
   }
@@ -232,5 +241,6 @@ async function* askStream(
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,
+    answerId,
   };
 }

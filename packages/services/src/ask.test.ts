@@ -113,6 +113,7 @@ describe("askQuestion", () => {
       retrieved,
       reviewStatus: "draft_requires_practitioner_review",
       disclaimer: expect.any(String),
+      answerId: expect.any(String),
     });
   });
 
@@ -205,6 +206,57 @@ describe("askQuestion", () => {
     expect(passedToGenerator).toHaveLength(3);
     expect(result.retrieved).toHaveLength(3);
   });
+
+  it("askQuestion returns a non-empty answerId (uuid) on a normal answer", async () => {
+    const retrieved = [retrievalResult("1")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+    const citations = [
+      {
+        index: 1,
+        documentId: "doc-1",
+        title: "Doc 1",
+        chunkId: "chunk-1",
+        score: 1,
+      },
+    ];
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "grounded [1]", citations });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(result.answerId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  it("askQuestion returns an answerId even on the empty-retrieval short-circuit", async () => {
+    const search = vi.fn().mockResolvedValue([]);
+    const answer = vi.fn();
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(result.answer).toMatch(/do not contain enough information/i);
+    expect(result.answerId).toBeTruthy();
+  });
 });
 
 describe("askQuestionStream", () => {
@@ -237,6 +289,30 @@ describe("askQuestionStream", () => {
     const doneEvent = events.find((e) => e.type === "done");
     expect(doneEvent?.citations).toHaveLength(1);
     expect(doneEvent?.citations[0]?.documentId).toBe("doc-1");
+  });
+
+  it("askQuestionStream's done event carries an answerId", async () => {
+    const retrieved = [retrievalResult("1")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+
+    async function* answerStream(): AsyncIterable<string> {
+      yield "grounded [1]";
+    }
+    const deps = makeDeps({
+      generator: { answerStream } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const events = [];
+    for await (const e of askQuestionStream(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    ))
+      events.push(e);
+    const done = events.find((e) => e.type === "done");
+    expect(done?.answerId).toBeTruthy();
   });
 });
 
