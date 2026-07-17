@@ -14,6 +14,7 @@ import type { Deps } from "./deps.js";
 import { registerErrorHandler } from "./error-handler.js";
 import { registerAskRoute } from "./routes/ask.js";
 import { registerDocumentRoutes } from "./routes/documents.js";
+import { registerFeedbackRoute } from "./routes/feedback.js";
 import { registerSearchRoute } from "./routes/search.js";
 import { registerSourceRoutes } from "./routes/sources.js";
 
@@ -127,6 +128,7 @@ export async function buildServer(opts: {
   await registerDocumentRoutes(app, deps);
   await registerSearchRoute(app, deps, config);
   await registerAskRoute(app, deps, config);
+  await registerFeedbackRoute(app, deps);
 
   return app;
 }

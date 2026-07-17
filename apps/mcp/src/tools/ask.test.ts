@@ -68,6 +68,7 @@ function askResultFixture() {
     ],
     reviewStatus: "pending" as const,
     disclaimer: "Draft — review before use.",
+    answerId: "answer-id-fixture-1",
   };
 }
 
@@ -79,7 +80,9 @@ describe("ask tool — audit logging", () => {
     const { server, handlers } = fakeServer();
     registerAsk(server, makeDeps(), ADMIN_SCOPE);
 
-    await handlers.get("ask")!({ question: "what is our refund policy" });
+    const result = (await handlers.get("ask")!({
+      question: "what is our refund policy",
+    })) as { structuredContent?: { answerId?: string } };
     await new Promise((r) => setImmediate(r));
 
     expect(logAskEventMock).toHaveBeenCalledTimes(1);
@@ -93,8 +96,12 @@ describe("ask tool — audit logging", () => {
       embeddingModel: "gemini-embedding-001",
       retrievedCount: 1,
       topScore: 0.8,
+      answerId: "answer-id-fixture-1",
     });
     expect(JSON.stringify(row)).not.toContain("refund policy");
+    // Task 4: structuredContent must also carry the answerId so a consuming
+    // agent (or the web UI) can reference it when submitting feedback.
+    expect(result.structuredContent?.answerId).toBe("answer-id-fixture-1");
   });
 
   it("does not audit-log when generation is not configured (isError short-circuit)", async () => {

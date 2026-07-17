@@ -48,6 +48,7 @@ function auditAsk(
   question: string,
   retrieved: AskResult["retrieved"],
   model: string | undefined,
+  answerId: string,
 ): void {
   const p = request.principal;
   void logAskEvent(deps.db, {
@@ -65,6 +66,7 @@ function auditAsk(
     retrievedCount: retrieved.length,
     endpoint: "ask",
     topScore: retrieved[0]?.score ?? null,
+    answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 
@@ -104,6 +106,7 @@ export async function registerAskRoute(
         request.body.question,
         result.retrieved,
         config.generation?.model,
+        result.answerId,
       );
       return result;
     },
@@ -117,7 +120,7 @@ export async function registerAskRoute(
   //
   // SSE event contract (consumed by apps/web/src/lib/stream-chat.ts):
   //   event: token  data: <JSON-encoded string chunk>
-  //   event: done   data: {citations, retrieved, reviewStatus, disclaimer}
+  //   event: done   data: {citations, retrieved, reviewStatus, disclaimer, answerId}
   //   event: error  data: {message}
   typed.post(
     "/ask/stream",
@@ -156,6 +159,7 @@ export async function registerAskRoute(
               request.body.question,
               event.retrieved,
               config.generation?.model,
+              event.answerId,
             );
             raw.write(
               `event: done\ndata: ${JSON.stringify({
@@ -163,6 +167,7 @@ export async function registerAskRoute(
                 retrieved: event.retrieved,
                 reviewStatus: event.reviewStatus,
                 disclaimer: event.disclaimer,
+                answerId: event.answerId,
               })}\n\n`,
             );
           }

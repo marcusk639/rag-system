@@ -156,6 +156,11 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       retrievedCount: 1,
       endpoint: "search",
       topScore: 0.87,
+      // search-path rows legitimately carry a null answer_id (there is no
+      // generated answer to attribute feedback to). The row is identified
+      // via questionHash (marker) below, so answerId is not load-bearing
+      // for identification here.
+      answerId: null,
     });
 
     const [row] = await db
@@ -185,6 +190,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: marker,
     });
 
     const [row] = await db
@@ -214,6 +220,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: marker,
     });
 
     const [row] = await db
@@ -242,6 +249,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       retrievedCount: 0,
       endpoint: "ask",
       topScore: null,
+      answerId: marker,
     });
 
     const [row] = await db
@@ -251,6 +259,36 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       .then((r) => r.rows);
 
     expect(row?.principal_subject).toBeNull();
+  });
+
+  it("logAskEvent persists the answerId, distinct from questionHash", async () => {
+    const marker = `answer-id-marker-${Date.now()}-${Math.random()}`;
+    const answerId = `a-log-${Date.now()}-${Math.random()}`;
+    await logAskEvent(db, {
+      principalKind: "admin",
+      principalSources: null,
+      principalSubject: null,
+      questionHash: marker,
+      channel: "api",
+      model: null,
+      embeddingProvider: "test-embedding-provider",
+      embeddingModel: "test-embedding-model",
+      sourceIds: [],
+      chunkIds: [],
+      docIds: [],
+      retrievedCount: 0,
+      endpoint: "ask",
+      topScore: null,
+      answerId,
+    });
+
+    const [row] = await db
+      .execute<{ answer_id: string | null }>(
+        sql`SELECT answer_id FROM audit_log WHERE question_hash = ${marker}`,
+      )
+      .then((r) => r.rows);
+
+    expect(row?.answer_id).toBe(answerId);
   });
 
   it("a real /ask request authenticated via a scope-assertion JWT records the JWT's sub as principal_subject", async () => {

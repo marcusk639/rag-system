@@ -200,6 +200,10 @@ describe("audit_log parity — POST /ask", () => {
       const body = res.json();
       expect(body.answer).toContain("grounded on 2 doc(s)");
       expect(body.citations).toHaveLength(2);
+      // Task 4: the response carries the stable answerId, and the audit row
+      // records the SAME id — links this row to any answer_feedback votes.
+      expect(body.answerId).toEqual(expect.any(String));
+      expect(body.answerId.length).toBeGreaterThan(0);
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
@@ -210,6 +214,7 @@ describe("audit_log parity — POST /ask", () => {
         principalKind: "admin",
         embeddingProvider: "test-embedding-provider",
         embeddingModel: "test-embedding-model",
+        answerId: body.answerId,
       });
       expect(JSON.stringify(rows[0])).not.toContain("refund policy");
     } finally {

@@ -89,6 +89,8 @@ function auditSearch(
     retrievedCount: results.length,
     endpoint: "search",
     topScore: results[0]?.score ?? null,
+    // /search has no generated answer — no answerId to record.
+    answerId: null,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 

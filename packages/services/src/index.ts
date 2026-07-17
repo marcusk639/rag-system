@@ -20,3 +20,4 @@ export {
   getDocumentDownload,
   type DocumentDownload,
 } from "./documents.js";
+export { submitAnswerFeedback, type SubmitFeedbackInput } from "./feedback.js";

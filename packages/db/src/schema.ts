@@ -383,6 +383,8 @@ export const auditLog = pgTable(
     endpoint: text("endpoint").notNull().default("ask"),
     /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
     topScore: real("top_score"),
+    /** The answer this row is for; links feedback to answer context. Nullable — pre-0018 rows have none. */
+    answerId: text("answer_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -396,6 +398,42 @@ export const auditLog = pgTable(
 );
 export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// answer_feedback — one Helpful/Not-Helpful vote per (answer, user). Plain
+// answer_id column (NOT a FK to audit_log — that write is best-effort and may
+// be absent). Upsert on (answer_id, principal_subject) = last vote wins.
+// ----------------------------------------------------------------------------
+export const answerFeedback = pgTable(
+  "answer_feedback",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v4()`),
+    answerId: text("answer_id").notNull(),
+    /** Asker's AAD oid, derived server-side from the principal; null for admin. */
+    principalSubject: text("principal_subject"),
+    /** "helpful" | "not_helpful" */
+    rating: text("rating").notNull(),
+    /** Optional firm-internal note; never sent to any external model. */
+    comment: text("comment"),
+    /** "web" | "teams" */
+    channel: text("channel").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    answerSubjectUnique: uniqueIndex("afb_answer_subject_unique").on(
+      table.answerId,
+      table.principalSubject,
+    ),
+    answerIdx: index("afb_answer_idx").on(table.answerId),
+  }),
+);
+
+export type AnswerFeedback = typeof answerFeedback.$inferSelect;
+export type NewAnswerFeedback = typeof answerFeedback.$inferInsert;
 
 // ----------------------------------------------------------------------------
 // ingest_log — one row per document ingestion attempt, regardless of outcome.

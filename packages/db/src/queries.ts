@@ -2,6 +2,7 @@ import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
 import {
+  answerFeedback,
   auditLog,
   auditLogShipperState,
   chunks,
@@ -14,6 +15,7 @@ import {
   type AuditLog,
   type DocsGapDigestRun,
   type DocsGapDigestSourceGroup,
+  type NewAnswerFeedback,
   type NewAuditLog,
   type NewChunk,
   type NewDocsGapDigestRun,
@@ -781,6 +783,16 @@ export interface AskEventRow {
   endpoint: "ask" | "search";
   /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
   topScore: number | null;
+  /**
+   * The `answerId` returned alongside the answer (`AskResult.answerId`,
+   * `packages/services/src/ask.ts`) — links this audit row to any
+   * `answer_feedback` votes cast against the same answer. Not a FK (that
+   * write is best-effort and may be absent). Required (not optional) at the
+   * TypeScript layer so every call site makes an explicit choice: `/ask`
+   * always has a real answerId; `/search` has no generated answer and passes
+   * `null` — matching the nullable SQL column (pre-0018 rows also have none).
+   */
+  answerId: string | null;
 }
 
 /**
@@ -804,8 +816,90 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     retrievedCount: row.retrievedCount,
     endpoint: row.endpoint,
     topScore: row.topScore,
+    answerId: row.answerId,
   };
   await db.insert(auditLog).values(values);
+}
+
+// ============================================================================
+// Answer feedback — Helpful / Not Helpful votes on a given answer.
+// ============================================================================
+
+/**
+ * Record one Helpful/Not-Helpful vote for `row.answerId`. Upserts on
+ * `(answer_id, principal_subject)` (matching `afb_answer_subject_unique`,
+ * which is `NULLS NOT DISTINCT` so repeated admin/no-subject votes on the
+ * same answer collapse to one row too) — a second vote from the same asker
+ * on the same answer overwrites the first (last-write-wins), it never
+ * accumulates a second row.
+ */
+export async function submitAnswerFeedback(
+  db: Db,
+  row: {
+    answerId: string;
+    principalSubject: string | null;
+    rating: "helpful" | "not_helpful";
+    comment: string | null;
+    channel: "web" | "teams";
+  },
+): Promise<void> {
+  const values: NewAnswerFeedback = {
+    answerId: row.answerId,
+    principalSubject: row.principalSubject,
+    rating: row.rating,
+    comment: row.comment,
+    channel: row.channel,
+  };
+  await db
+    .insert(answerFeedback)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [answerFeedback.answerId, answerFeedback.principalSubject],
+      set: {
+        rating: row.rating,
+        comment: row.comment,
+        createdAt: sql`now()`,
+      },
+    });
+}
+
+export interface FeedbackStats {
+  helpful: number;
+  notHelpful: number;
+  recentNotHelpful: Array<{
+    answerId: string;
+    comment: string | null;
+    createdAt: Date;
+  }>;
+}
+
+/**
+ * Aggregate Helpful/Not-Helpful vote counts, plus the 20 most recent
+ * Not-Helpful votes (with their comment, if any) for triage. `opts.since`
+ * restricts to votes cast at or after that time; omitted scans the whole
+ * table.
+ */
+export async function getFeedbackStats(
+  db: Db,
+  opts: { since?: Date } = {},
+): Promise<FeedbackStats> {
+  const rows = await db
+    .select()
+    .from(answerFeedback)
+    .where(opts.since ? gte(answerFeedback.createdAt, opts.since) : undefined);
+  return {
+    helpful: rows.filter((r) => r.rating === "helpful").length,
+    notHelpful: rows.filter((r) => r.rating === "not_helpful").length,
+    recentNotHelpful: rows
+      .filter((r) => r.rating === "not_helpful")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 20)
+      .map((r) => ({
+        answerId: r.answerId,
+        comment: r.comment,
+        createdAt: r.createdAt,
+      })),
+  };
 }
 
 export interface WeakResultAuditQuery {
