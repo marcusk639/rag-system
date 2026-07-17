@@ -1,14 +1,28 @@
 import { submitAnswerFeedback } from "@rag/services";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 
 const FeedbackBody = z.object({
-  answerId: z.string().min(1),
+  answerId: z.string().uuid(),
   rating: z.enum(["helpful", "not_helpful"]),
   comment: z.string().max(1000).optional(),
 });
+
+/**
+ * Derives the `answer_feedback` channel — "web" | "teams" — from the
+ * X-RAG-Channel header the Teams bot BFF sends (see
+ * apps/teams-bot/src/rag-client.ts). NOTE: this vocabulary is DIFFERENT from
+ * audit_log's "api" | "mcp" | "teams" (see routes/ask.ts's
+ * `channelFromRequest`), so it is intentionally NOT reused here — anything
+ * other than an explicit "teams" header defaults to "web".
+ */
+function feedbackChannel(request: FastifyRequest): "web" | "teams" {
+  const raw = request.headers["x-rag-channel"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value === "teams" ? "teams" : "web";
+}
 
 /**
  * POST /feedback — record a Helpful/Not-Helpful vote on a prior /ask answer.
@@ -35,7 +49,7 @@ export async function registerFeedbackRoute(
         // Server-derived identity — never the client's word.
         principalSubject:
           principal?.kind === "scoped" ? (principal.subject ?? null) : null,
-        channel: "web",
+        channel: feedbackChannel(request),
       });
       return reply.code(204).send();
     },
