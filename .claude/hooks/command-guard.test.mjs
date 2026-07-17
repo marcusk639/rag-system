@@ -37,6 +37,7 @@ const BLOCK = [
   ["truncate -s 0 important.log", "truncate -s 0"],
   ["chmod -R 777 .", "chmod -R"],
   ["chown -R root .", "chown -R"],
+  ["git branch -D feat/unmerged", "git branch -D (force)"],
   // B. SQL
   [`docker exec rag-postgres psql -U rag -d postgres -c "${DROPDB}"`, "psql DROP DATABASE"],
   [`psql "$DATABASE_URL" -c "${TRUNC}"`, "psql TRUNCATE"],
@@ -92,6 +93,8 @@ const ALLOW = [
   ["git checkout -b feat/new-thing", "git checkout -b"],
   ["git branch", "git branch"],
   ["git branch --list 'feat/*'", "git branch --list"],
+  ["git branch -d feat/merged", "git branch -d (safe merged delete)"],
+  ["chmod 644 file.txt", "chmod non-recursive"],
   ["git add .", "git add ."],
   ['git commit -m "feat: x"', "git commit -m"],
   ["git restore --staged src/index.ts", "git restore --staged (unstage)"],

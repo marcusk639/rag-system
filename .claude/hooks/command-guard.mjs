@@ -45,7 +45,8 @@ process.stdin.on("end", () => {
     [/\bmkfs\b/i, "mkfs formats a filesystem"],
     [/\bshred\b/i, "shred irreversibly destroys files"],
     [/\btruncate\b[^\n|;&]*-s\s*0\b/i, "truncate -s 0 empties a file"],
-    [new RegExp(`\\bch(mod|own)\\b${SEG}\\s-[a-zA-Z]*R`, "i"), "recursive chmod/chown -R"],
+    // NOTE: -R is case-sensitive (recursive); a lowercase -r is not chmod/chown's recursive flag.
+    [new RegExp(`\\bch(mod|own)\\b${SEG}\\s-[a-zA-Z]*R`), "recursive chmod/chown -R"],
     // B. Destructive SQL (unambiguous DDL, or any destructive verb through psql)
     [/\bdrop\s+(database|schema|table|index|column)\b/i, "SQL DROP (database/schema/table/index/column)"],
     // C. Destructive docker
@@ -58,7 +59,8 @@ process.stdin.on("end", () => {
     [new RegExp(`\\bgit\\b${SEG}\\bclean\\b${SEG}\\s-[a-zA-Z]*f`, "i"), "git clean -f deletes untracked files (incl. scratch/ledger)"],
     [/\bgit\s+checkout\s+(--\s+)?\.(\s|$)/i, "git checkout . discards all worktree changes"],
     [/\bgit\s+checkout\s+--\s+\S/i, "git checkout -- <path> discards worktree changes"],
-    [new RegExp(`\\bgit\\s+branch\\b${SEG}\\s-D\\b`, "i"), "git branch -D force-deletes a branch"],
+    // -D (uppercase, case-sensitive) is force-delete; -d is the safe merged-only delete — allow -d.
+    [new RegExp(`\\bgit\\s+branch\\b${SEG}\\s-D\\b`), "git branch -D force-deletes a branch"],
     [new RegExp(`\\bgit\\s+branch\\b${SEG}--delete${SEG}--force`, "i"), "git branch --delete --force"],
     [new RegExp(`\\bgit\\s+worktree\\s+remove\\b${SEG}(\\s-f\\b|--force)`, "i"), "git worktree remove --force"],
     [/\bgit\s+stash\s+(clear|drop)\b/i, "git stash clear/drop deletes stashed work"],
