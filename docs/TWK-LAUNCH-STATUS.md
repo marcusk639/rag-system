@@ -40,7 +40,8 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       via `railway ssh` — nothing copied off their infrastructure — exit 0 in 4s,
       **36/36 indexes** incl. HNSW, pgvector v0.8.2 intact, ANN query verified over
       all 6,175 chunks. Production confirmed untouched; throwaway dropped.
-      Full write-up: `docs/BACKUP-RESTORE-DRILL.md`.
+      Full write-up: `docs/BACKUP-RESTORE-DRILL.md`. Setup procedure for the
+      missing schedule: `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
       ⚠ **A restore is proven; a backup _schedule_ is not.** Until one exists the
       only backup is one a human remembers to take. Two layers are needed:
       **(1)** Railway **volume backups** — available for our volume, dashboard-only
