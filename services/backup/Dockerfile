@@ -14,6 +14,8 @@ RUN apt-get update \
   ca-certificates \
   curl \
   age \
+  jq \
+  awscli \
   && rm -rf /var/lib/apt/lists/* \
   # aka.ms/downloadazcopy-v10-linux serves an amd64 binary unconditionally.
   # Railway builds amd64, but an Apple Silicon workstation does not — and an
