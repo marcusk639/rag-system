@@ -140,6 +140,167 @@ Three outcomes, and the third matters most:
 
 ---
 
+## Claim extraction — the hard half, and where it goes wrong
+
+The walk is built (`scripts/extract-corpus.ts`, `listDocuments`). Turning document
+text into claims is the remaining piece, and it is harder than "prompt a model
+for `{claim, quote}`" for reasons worth writing down before anyone tries.
+
+### ⚠ First, a sequencing error in this document's own design
+
+The sections above describe extraction and the client-identifier screen as **one
+pass over the corpus**, on the reasoning that you are reading every document
+anyway. **That ordering is wrong, and the reason is egress.**
+
+Extraction sends document text to a model. The screen is the thing that
+establishes the corpus is Class A/B — and it **has not run yet**. Running them
+together discloses every document to a third-party model _before_ anything has
+checked whether some of them are client files. ISS-05 flags exactly this: the
+corpus is classified internal-only **by default, not because anyone checked.**
+
+**Correct order: screen the whole corpus, resolve the flags with Chris or Doug,
+then extract.** The shipped script already happens to do the safe half — it makes
+**zero model calls**, computing the inventory and screen locally — so nothing has
+leaked. But the combined-pass framing above would have led the next person to
+wire a generator into it, which is why this is recorded rather than quietly
+fixed. The "read every document once" efficiency argument is real but it is worth
+less than the ordering.
+
+### The two failure modes, and only one is mechanical
+
+Ask a model for `{claim, quote}` and you get two distinct failures:
+
+|       | Failure                                                         | Mechanically checkable?                           |
+| ----- | --------------------------------------------------------------- | ------------------------------------------------- |
+| **A** | The quote is not actually in the document                       | **Yes** — and this is the whole point of the rule |
+| **B** | The quote _is_ in the document but does not establish the claim | **No** — this is entailment                       |
+
+They need completely different treatment. Conflating them is how "verified
+against the source" quietly becomes "the model said so."
+
+### A — why this is harder than `document.includes(quote)`
+
+An honest model, not hallucinating, routinely returns a quote that is _nearly_
+verbatim:
+
+- **Whitespace.** Parsed markdown wraps at odd points; the model returns the
+  sentence with the newline collapsed to a space.
+- **Unicode.** Smart quotes → straight quotes, en-dash → hyphen, non-breaking
+  space → space. Common when the source came out of Word.
+- **Punctuation edges.** A trailing period added or dropped.
+- **Markdown artefacts.** The source reads `**BK-CATCHUP**`; the model strips the
+  asterisks.
+- **Tables.** The source is `| Code | BK-CATCHUP |` and the model quotes
+  `Code: BK-CATCHUP` — a faithful reading, not a verbatim span.
+
+Every normalization you add to accept these is **a licence to differ**, and
+normalization is where the rigour leaks. Too strict and the yield collapses; too
+lenient and paraphrase walks back in through the door the rule exists to close.
+
+#### The move that dissolves the problem: never store the model's quote
+
+Do not verify the model's string and keep it. **Use the model's string only to
+locate a span, then store the span taken from the document.**
+
+```
+model returns quote text
+  → code locates it in the source markdown
+  → code stores markdown.slice(start, end)   ← this is what persists
+  → if it cannot be located, the claim is DROPPED
+```
+
+What ends up in the artefact is then, by construction, **always real document
+text**. The model's job is reduced from _reproduce the text_ to _point at the
+text_, and pointing is something you can check.
+
+> Asking the model for character offsets directly would be cleaner still, and it
+> does not work — models cannot count characters reliably. Locate-then-slice gets
+> the same guarantee without depending on the model to do arithmetic.
+
+#### Make the normalization ladder explicit, and watch it
+
+Match in rungs, recording which rung succeeded:
+
+1. exact
+2. - whitespace collapsed
+3. - unicode folded (quotes, dashes, nbsp)
+4. - markdown stripped
+
+**The rung distribution is a diagnostic, not bookkeeping.** If most claims only
+match at rung 4, extraction is paraphrasing — and the fix is to tighten the
+prompt, **not** to add rung 5. A ladder that silently grows is the failure this
+whole design is trying to avoid, reintroduced as configuration.
+
+### B — quote real, claim overreaching
+
+The subtler failure: the model pulls a genuine sentence and hangs a claim on it
+that the sentence does not carry. Nothing mechanical catches this. A second model
+pass is legitimate — the same argument as `faithfulness.ts`, both texts are in the
+prompt — but only if it is set up not to cheat:
+
+- **Independent call.** The verifier sees the claim and the quote, **not the
+  document**. Given the document it will use document knowledge to fill the gap
+  and confirm almost anything.
+- **Adversarially framed.** _"Does this quote **alone** establish this claim?
+  Default to no."_ Verifiers asked to confirm, confirm.
+- **Sampled by a human periodically.** This is a model checking a model; without a
+  sample you have no idea what the agreement rate means.
+
+### The atomicity trap
+
+_"The catch-up bookkeeping code is BK-CATCHUP and it bills at the standard
+rate"_ is **two** claims. Compound claims are where support gets slippery: half
+the claim is in the quote, half is not, and the pair scores as supported.
+
+**Rule: one claim, one assertion.** If covering the claim requires a conjunction,
+split it. Splitting is cheap; a half-true gold entry poisons everything computed
+from it.
+
+### ⭐ The selection bias that quietly ruins the gold set
+
+This is the failure most likely to happen and least likely to be noticed.
+
+**A model extracting claims will preferentially pick the crisp, quotable,
+unambiguous ones** — a code, a threshold, a deadline stated in a single sentence.
+Those are exactly the facts retrieval already handles well. The questions that
+_discriminate_ between retrieval strategies come from the opposite material:
+things stated obliquely, facts spread across two sections, values living in a
+table cell, procedures described without naming the thing you would search for.
+
+So naive extraction yields an **easy** gold set — and this repo has already paid
+for that lesson once. `corpus.ts` produces a flat weight sweep that scores
+**identically at `dense=0`**, with embeddings contributing nothing, at MRR 1.000.
+**A gold set that cannot tell dense retrieval from sparse measures nothing**, and
+it will look like a healthy green dashboard while doing it.
+
+Mitigations, and they must be in the extraction prompt rather than bolted on
+after:
+
+- **Quota the hard categories** — require a share of claims drawn from tables,
+  from multi-section synthesis, and from obliquely-stated procedure.
+- **Require a `distractorNote` per claim**, and **drop claims that cannot name a
+  plausible near-neighbour.** A question with no distractor cannot discriminate
+  and is dead weight.
+- **Sanity-check the finished set the same way**: run the weight sweep. If it is
+  flat, the set is too easy — regardless of how many claims it holds.
+
+### Determinism, or the metric moves under you
+
+Re-running extraction produces different claims, so scores stop being comparable
+across runs and every regression is ambiguous. **Cache by `content_hash`** — the
+column already exists and already means "the parsed markdown changed" — and treat
+the claim set as a **versioned artefact that is reviewed and pinned**, not
+something regenerated on each eval.
+
+### What this costs
+
+~858 documents × one extraction call, plus a verification call per surviving
+claim. Not prohibitive, but not free either — and it is the argument for the
+**narrow start** recommended above: 20–30 documents in the families staff
+actually ask about, then let the retrieval log choose the rest.
+
+---
+
 ## The fourth dimension: is the answer any use?
 
 Everything above checks whether the answer is **true to the corpus**. None of it
