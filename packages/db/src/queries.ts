@@ -184,6 +184,8 @@ export interface DocumentSummary {
   mimeType: string;
   sourceModifiedAt: Date | null;
   sizeBytes: number | null;
+  /** SHA-256 of the parsed markdown. Lets a caller detect corpus drift. */
+  contentHash: string;
   metadata: Record<string, unknown>;
   /** Present only when `includeMarkdown` was set. */
   markdown?: string;
@@ -239,6 +241,7 @@ export async function listDocuments(
     mimeType: documents.mimeType,
     sourceModifiedAt: documents.sourceModifiedAt,
     sizeBytes: documents.sizeBytes,
+    contentHash: documents.contentHash,
     metadata: documents.metadata,
   };
 
@@ -638,7 +641,61 @@ export async function hybridSearch(
     }>(sql`
       WITH params AS (
         SELECT ${embedLiteral}::vector AS q_embedding,
-               plainto_tsquery('english', ${opts.query}) AS q_tsquery
+               -- OR-semantics tsquery. "plainto_tsquery"/"websearch_to_tsquery"
+               -- both AND every lexeme together, which requires ONE chunk to
+               -- contain EVERY content word of the question. On a natural
+               -- question that is a bar almost nothing clears: measured against
+               -- the TWK SOP corpus (321 chunks) with 15 realistic staff
+               -- questions, 5 of 15 (33%) matched ZERO chunks under AND —
+               -- including "How do I set up a new bookkeeping client" and "How
+               -- do I add 2% shareholder health insurance in QuickBooks", both
+               -- of which have a dedicated SOP in the corpus. For those queries
+               -- the sparse arm contributed nothing and hybrid search silently
+               -- degraded to dense-only, losing exactly the exact-token recall
+               -- (form numbers, work codes like BK-CATCHUP, product names) that
+               -- the sparse arm exists to provide.
+               --
+               -- Rewriting the lexemes with "|" restores that recall; precision
+               -- is then the ranking layer's job, which is how BM25-style
+               -- retrieval is meant to work: "ts_rank_cd" orders the matches,
+               -- the pool is truncated to "topK * candidatePoolMultiplier", and
+               -- RRF fuses by RANK POSITION (not raw score), so a broad match
+               -- set cannot swamp the dense arm.
+               --
+               -- "to_tsvector" first (rather than splitting the raw string) so
+               -- stop words and stemming are handled by the same dictionary the
+               -- indexed "chunks.tsv" column used.
+               --
+               -- Each lexeme is "quote_literal"-wrapped rather than concatenated
+               -- raw. "to_tsquery" parses its argument as tsquery SYNTAX, so an
+               -- unquoted lexeme carrying "&", "|", "!", "(", ":" or "<->" would
+               -- be read as an OPERATOR — a raw-concatenation build raises a
+               -- syntax error on inputs as ordinary as a pasted URL, and the
+               -- question text here is untrusted end-user input from a Teams
+               -- message. Quoting makes every lexeme a literal term. Verified
+               -- against pasted URLs, email addresses, punctuation-heavy source
+               -- text, and a pure tsquery-operator-soup string.
+               --
+               -- "NULLIF"+"COALESCE" guard the all-stop-word query ("how do I do
+               -- it"), where the aggregate is NULL/empty and "to_tsquery('')"
+               -- would raise a syntax error — that degrades to a deliberate
+               -- no-match tsquery, leaving dense retrieval to answer the query
+               -- rather than failing the whole search.
+               COALESCE(
+                 to_tsquery(
+                   'english',
+                   NULLIF(
+                     (
+                       SELECT string_agg(quote_literal(lex), ' | ')
+                       FROM unnest(
+                         tsvector_to_array(to_tsvector('english', ${opts.query}))
+                       ) AS lex
+                     ),
+                     ''
+                   )
+                 ),
+                 to_tsquery('english', 'zzzznomatchzzzz')
+               ) AS q_tsquery
       ),
       dense_hits AS (
         -- Pure ANN over the HNSW index, restricted to the active embedding

@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@google/genai':
+        specifier: ^1.7.0
+        version: 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       '@rag/core':
         specifier: workspace:*
         version: link:packages/core

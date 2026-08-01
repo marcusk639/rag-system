@@ -34,6 +34,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@google/genai": "^1.7.0",
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "@rag/rag": "workspace:*",

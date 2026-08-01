@@ -50,3 +50,30 @@ export {
   type Generator,
   type GenerationResult,
 } from "./generation/generator.js";
+
+// Claim extraction (corpus-grounded eval)
+export {
+  verifyClaim,
+  verifyClaims,
+  MATCH_RUNGS,
+  type MatchRung,
+  type VerifiedClaim,
+  type RejectedClaim,
+  type ClaimVerification,
+  type VerificationReport,
+} from "./extraction/claim-verification.js";
+export {
+  extractClaims,
+  CLAIM_EXTRACTION_PROMPT,
+  type CompleteFn,
+  type ExtractedClaim,
+  type ExtractionResult,
+  type ExtractDocumentInput,
+} from "./extraction/claim-extractor.js";
+export {
+  corpusFingerprint,
+  evaluateExtractionGate,
+  type ScreenState,
+  type ScreenSignoff,
+  type GateResult,
+} from "./extraction/screen-gate.js";
