@@ -66,7 +66,16 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       (3 / 858 / 6,175). Procedure: `docs/BACKUP-RESTORE-DRILL.md` →
       _Applying a migration by hand_.
 
-- [ ] **4. Deploy web + Teams bot** — Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
+- [ ] **4. Deploy web + Teams bot** — ⛔ **NEW BLOCKER (2026-08-01): the Teams bot
+      needs an Azure subscription the firm does not have.** Verified against the
+      tenant — `az` returns `No subscriptions found` for `marcus@twk-cpafirm.com`.
+      An **Azure Bot is an Azure _resource_** (runbook §3: "Create a resource →
+      Azure Bot"), so it needs a subscription with a payment method. The free F0
+      tier means **cost is not the obstacle; the absent subscription is.** The web
+      app is unaffected — Entra app registrations live in the tenant and are free.
+      ⚠ Unverified whether no subscription exists or Marcus merely has no role on
+      one; only an admin can distinguish them. Raised with Chris via the issue
+      register (Conflicts #11). Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
 - [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.
 - [ ] **6. Baseline diary** — capture Chris's "interrupt" baseline _before_ anyone uses the bot.
 
