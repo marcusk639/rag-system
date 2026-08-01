@@ -1,6 +1,9 @@
 # Backup Schedule — TWK Internal SharePoint KB
 
-**Status:** ⚠ Not yet set up. This is the procedure, not a record of it being done.
+**Status:** 🟡 **Stopgap LIVE since 2026-08-01** — nightly backups are running to
+Railway's own bucket. The permanent, decorrelated destination (SharePoint) is
+**blocked on Chris's admin consent**. See
+[Where this actually stands](#where-this-actually-stands).
 **Closes:** the open half of P0 gate #3 in [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md).
 **Prerequisite reading:** [`BACKUP-RESTORE-DRILL.md`](./BACKUP-RESTORE-DRILL.md) — a
 restore is already proven to work on real production data. What is missing is a
@@ -41,28 +44,54 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 
 ---
 
-## Step 0 — Decide where the dumps go ⛔ BLOCKING
+## Where this actually stands
 
-**This is a firm decision, not a personal one, and everything else waits on it.**
+| Layer                               | Covers                                       | Status                                     |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------ |
+| Restore procedure                   | —                                            | ✅ Proven on production data               |
+| Railway **volume backups**          | Corruption, bad migration, accidental delete | ✅ **Enabled 2026-08-01** (Daily + Weekly) |
+| Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC     |
+| Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent    |
+| Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                   |
+| Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                     |
+| Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                            |
 
-The recommended destination is **Azure Blob Storage in TWK's own Microsoft 365
-tenant**:
+🟡 **What "stopgap" means concretely.** Backups now run nightly and land in
+Railway's own `rag-documents` bucket under `backups/`. That bucket lives in the
+same project as the database it protects, so it does **not** survive project
+deletion, account loss, or a Railway-level failure — the exact scenarios the
+second layer exists for. It _does_ cover corruption, a bad migration, and a
+volume wipe (which destroys Railway's volume backups along with the volume).
+Strictly better than nothing, and **not** the finished state.
 
-- The firm is already a Microsoft shop — SharePoint is the KB source, Teams is
-  the delivery surface, Entra is the auth. The **existing Microsoft agreement
-  already covers the tenant**, so this adds no new data-processing relationship
-  to paper. Any other provider does.
-- It is a **different provider from Railway**, which is the entire point of the
-  second layer. Decorrelated failure.
-- It stays **firm-controlled**.
+⚠ **The stopgap is currently unencrypted** (`AGE_RECIPIENT` unset — the job logs
+a warning every run so this stays visible). The reasoning: the bucket already
+holds the KB's original documents under the same credentials, so the marginal
+new exposure is the `audit_log`. Encryption without a firm-controlled home for
+the private key trades a disclosure risk for a total-loss risk, and a key on a
+workstation is not a key that survives the disaster it guards against. **Revisit
+encryption as part of the SharePoint cutover**, when a real key home exists.
+
+---
+
+## Step 0 — Decide where the dumps go ⛔ RESOLVED 2026-08-01
+
+**This is a firm decision, not a personal one.** Verified rather than assumed —
+see the tenant check below.
+
+**Decision: SharePoint, via an app registration scoped `Sites.Selected`.**
+Azure Blob was the original recommendation and is the better-shaped tool, but it
+is unreachable: TWK has no Azure subscription, and creating one is a purchasing
+decision. SharePoint needs only admin consent — no spend, no PO — and folds into
+the Entra consent conversation Chris must have anyway for the web app and Teams
+bot.
 
 ⚠ **Do not ship these dumps to a personal cloud account.** It is the same
 problem already flagged for `docs/TWK SOPs/` in the consulting repo: firm data in
 an individual's account, outside firm control, surviving past any engagement.
-The convenience is real and the exposure is worse. If Azure access is slow to
-arrange, the honest interim is Railway's existing `rag-documents` bucket —
-explicitly a **stopgap**, since it is the same provider and therefore fails
-together with the thing it is backing up. Note it as such and replace it.
+The convenience is real and the exposure is worse. Marcus's _firm_ OneDrive is
+not the same thing as a personal account — but it is still tied to one person's
+identity and dies with their deprovisioning, so it is not the answer either.
 
 ### ✅ Tenant reality, checked 2026-08-01 — this changes the recommendation
 
@@ -138,152 +167,114 @@ nobody can verify it from a script later. Screenshot it once enabled.
 
 ---
 
-## Step 2 — Create the Azure destination
+## Step 1.5 — ✅ DONE: the stopgap is deployed
 
-In the **firm's** tenant, once Step 0 is settled.
+Recorded so nobody re-does it. Service `rag-backup` exists in the `rag-system`
+project, production environment.
 
-### 2a. Storage account
+| Setting        | Value                                        |
+| -------------- | -------------------------------------------- |
+| Config file    | `services/backup/railway.json`               |
+| `BACKUP_DEST`  | `s3` (Railway bucket — stopgap)              |
+| Cron           | `0 8 * * *` UTC = 3 a.m. CDT / 2 a.m. CST    |
+| Restart policy | **NEVER** — see below                        |
+| Credentials    | Railway **reference variables**, no literals |
 
-`portal.azure.com` → **Storage accounts** → **Create**
+First run 2026-08-01: dumped **35,551,090 bytes**, gzip verified, uploaded
+`twk-kb-2026-08-01T051051Z.sql.gz` (**33.9 MiB** confirmed present in the
+bucket), container exited **Completed**.
 
-| Field          | Value                                                                    |
-| -------------- | ------------------------------------------------------------------------ |
-| Resource group | `rg-twk-kb-backup` (create)                                              |
-| Name           | e.g. `twkkbbackup` — globally unique, 3–24 chars, lowercase alphanumeric |
-| Region         | Match the firm's other resources; a US region                            |
-| Performance    | Standard                                                                 |
-| Redundancy     | **GRS** (geo-redundant)                                                  |
+⚠ **Two settings here look wrong and are not.** `restartPolicyType: NEVER`,
+because a restart-looping failure keeps the deployment **Active** and Railway
+**skips scheduled runs while a previous one is still Active** — a crash-looping
+backup would silently suppress every future backup. And the cron was only
+enabled _after_ a manual run exited `Completed`, because scheduling a job that
+never terminates is how you get zero backups and a green dashboard.
 
-**Redundancy is the one setting not to economise on.** LRS keeps all copies in a
-single datacenter — which is precisely the failure a second backup layer exists
-to survive. GRS replicates to a paired region.
-
-### 2b. Container
-
-Storage account → **Data storage → Containers** → **+ Container**
-
-- Name: `kb-backups`
-- Public access level: **Private (no anonymous access)** — confirm this; a
-  public container here would expose the entire KB and audit log
-
-### 2c. Protective settings — do these now, not later
-
-Under **Data protection**:
-
-- **Enable soft delete for blobs** (30 days) — survives an accidental delete
-- **Enable versioning** — survives an overwrite
-
-Consider an **immutability (WORM) time-based retention policy** on the
-container. For an audit trail that exists to satisfy §7216 / Circular 230, "this
-record could not have been altered" is a materially stronger claim than "we
-have a copy." ⚠ Immutable blobs **cannot be deleted before their retention
-expires, by anyone, including you** — which is the point, and also means the
-retention length must be right before it is switched on. See Step 6.
-
-### 2d. SAS token — least privilege matters here
-
-Container `kb-backups` → **Shared access tokens**
-
-| Setting     | Value                                                          |
-| ----------- | -------------------------------------------------------------- |
-| Permissions | **Create** and **Write** only                                  |
-| Expiry      | 12 months — **and put the expiry date in a calendar reminder** |
-| Protocol    | HTTPS only                                                     |
-
-**Grant no Read, no Delete, no List.** The backup job only ever needs to add new
-blobs. If the Railway service is ever compromised, a write-only credential means
-the attacker can write junk but **cannot read the KB back out and cannot destroy
-the backup history** — which is exactly the property that makes a backup worth
-having during a security incident.
-
-⚠ **A SAS expiry is a silent time bomb.** When it lapses, uploads start failing
-while everything looks normal from the outside. This is the single most likely
-way this setup dies quietly, and it is why Step 5 is not optional.
-
-Copy the full **Blob SAS URL** — it looks like
-`https://<account>.blob.core.windows.net/kb-backups?sv=...&sig=...`. That whole
-string, container-scoped, is what `AZURE_SAS_URL` wants.
+**Credentials use Railway reference variables** (`${{rag-postgres.POSTGRES_USER}}`,
+`${{rag-api.OBJECT_STORE_ACCESS_KEY_ID}}`, …) rather than pasted literals, so
+they exist in exactly one place and rotate automatically. Note `rag-postgres`
+exposes **no `DATABASE_URL`** — it must be composed from
+`POSTGRES_USER` / `POSTGRES_PASSWORD` / `RAILWAY_PRIVATE_DOMAIN` / `POSTGRES_DB`.
 
 ---
 
-## Step 3 — Deploy the backup service
+## Step 2 — The ask to Chris ⛔ BLOCKING the real destination
 
-The service already exists in this repo at **`services/backup/`** —
-`Dockerfile`, `backup.sh`, `railway.json`. It has been built and exercised
-locally (dump, gzip integrity check, size floor, encryption, and the upload
-timeout all verified); it has **not** yet run against production.
+Everything below waits on one admin action. **Marcus can create the app
+registration; only an administrator can consent to it.**
 
-### 3a. Create the service
+### 2a. What to ask for
 
-Dashboard → project **rag-system** → **+ New** → **Empty Service**, name it
-`rag-backup`. Point it at this repo and set the config file to
-`services/backup/railway.json`.
+> An app registration in the TWK CPA tenant needs **admin consent** for a single
+> Microsoft Graph application permission — **`Sites.Selected`** — plus write
+> access granted to **one** SharePoint site used only for KB backups. No Azure
+> subscription, no cost, nothing else in the tenant becomes reachable.
 
-### 3b. Variables
+Why this framing works, and why it is honest:
 
-Service → **Variables**. `DATABASE_URL` must be **composed** — `rag-postgres`
-exposes no such variable, only `POSTGRES_USER` / `POSTGRES_PASSWORD` /
-`POSTGRES_DB` / `RAILWAY_PRIVATE_DOMAIN`:
+- **`Sites.Selected` is not broad access.** Unlike `Sites.ReadWrite.All`, it
+  grants nothing by default — an admin then grants the app write access to
+  specific sites, one at a time. For a firm whose SharePoint holds internal
+  knowledge and admin documents, that distinction is the entire basis for
+  agreeing.
+- **It bundles.** Chris already has to consent to Entra app registrations for
+  the web app and the Teams bot
+  ([`TWK-AZURE-DEPLOY-RUNBOOK.md`](./TWK-AZURE-DEPLOY-RUNBOOK.md)). This is one
+  more item in a conversation that must happen, not a new one.
+- **It costs nothing.** Worth saying explicitly and early — "we need somewhere
+  to put backups" sounds like a procurement request, and this one is not.
 
-```
-DATABASE_URL=postgresql://${{rag-postgres.POSTGRES_USER}}:${{rag-postgres.POSTGRES_PASSWORD}}@${{rag-postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{rag-postgres.POSTGRES_DB}}
-AZURE_SAS_URL=<the container SAS URL from Step 2d>
-```
+If Chris would rather stand up an Azure subscription, that is a _better_
+technical answer and the service already supports it (`BACKUP_DEST=azure`, needs
+only a container SAS). It is offered as his choice, not argued against.
 
-Optional but recommended:
+### 2b. Create the app registration (Marcus, no admin needed)
 
-```
-AGE_RECIPIENT=<age public key — see 3c>
-HEARTBEAT_URL=<dead-man's-switch ping URL — see Step 5>
-BACKUP_MIN_BYTES=10000000
-```
-
-Using Railway **reference variables** rather than pasted literals means the
-credentials never exist in two places and rotate automatically.
-
-### 3c. Client-side encryption (recommended)
-
-Azure encrypts at rest already. Client-side `age` encryption means the storage
-provider never holds plaintext — a meaningfully different guarantee for a file
-containing the full KB and staff identities.
+Tenant policy allows it — `allowedToCreateApps: True`, verified 2026-08-01.
 
 ```bash
-age-keygen -o twk-kb-backup.key     # prints the public key to stdout
+az ad app create --display-name "TWK KB Backup" --sign-in-audience AzureADMyOrg
+az ad sp create --id <appId>                    # service principal
+az ad app credential reset --id <appId> --years 1   # capture the secret ONCE
 ```
 
-Set the **public** key as `AGE_RECIPIENT`.
+⚠ **The client secret is shown once and has a hard expiry.** Put the expiry date
+in a calendar reminder now — a lapsed secret fails silently, exactly like a
+lapsed SAS, and Step 4 is what catches it.
 
-⚠ **The private key is now a single point of failure that can silently void
-every backup you own.** An encrypted dump whose key was lost is not a backup. It
-must survive the same disaster as the database — so **not** only on a
-workstation, and **not** only in this Railway project. A password manager the
-firm controls, plus a sealed offline copy, is the minimum. If that cannot be
-arranged reliably, leave `AGE_RECIPIENT` unset and rely on Azure's at-rest
-encryption; the job logs a warning so the choice stays visible rather than
-forgotten.
+### 2c. What Chris does (two clicks, needs Global Admin or Privileged Role Admin)
 
-### 3d. Schedule
+1. Entra admin centre → **App registrations** → **TWK KB Backup** → **API
+   permissions** → add **Microsoft Graph → Application permissions →
+   `Sites.Selected`** → **Grant admin consent**
+2. Grant the app write access to the one backup site — via Graph:
+   `POST /sites/{site-id}/permissions` with role `write` and the app's id
 
-Service → **Settings** → **Cron Schedule**:
+### 2d. Then create the site and switch over
 
+Create (or pick) a SharePoint site that holds **only** backups — not the KB
+source site. Get its id, then:
+
+```bash
+railway variables --service rag-backup \
+  --set 'BACKUP_DEST=sharepoint' \
+  --set 'GRAPH_TENANT_ID=b49c5690-ccd1-4336-9f66-52780215c4ec' \
+  --set 'GRAPH_CLIENT_ID=<appId>' \
+  --set 'GRAPH_CLIENT_SECRET=<secret>' \
+  --set 'GRAPH_SITE_ID=<site-id>' \
+  --set 'GRAPH_FOLDER=kb-backups'
 ```
-0 8 * * *
-```
 
-**Schedules are UTC.** `08:00` UTC is 3 a.m. CDT / 2 a.m. CST — overnight for the
-firm, and clear of business hours in either offset.
-
-⚠ **Leave the restart policy at `NEVER`** (already set in `railway.json`). This
-looks wrong and is not. Railway **skips** a scheduled run while the previous one
-is still Active, so a restart-looping failure would suppress every subsequent
-backup indefinitely. A failed run must stay failed and visible until the next
-schedule.
+The uploader is already written and validated at startup — no code change is
+needed at cutover. Revisit `AGE_RECIPIENT` at the same time, once the private
+key has a firm-controlled home.
 
 ---
 
-## Step 4 — First run and verification
+## Step 3 — First run and verification
 
-Trigger a run manually rather than waiting for 3 a.m.
+Trigger manually rather than waiting for 3 a.m.
 
 ```bash
 railway redeploy --service rag-backup
@@ -293,25 +284,34 @@ railway logs --service rag-backup
 Expected, in order:
 
 ```
-[backup] start 2026-08-01T080000Z
-[backup] dump complete: ~37000000 bytes
+[backup] start <stamp> -> sharepoint
+[backup] dump complete: ~35500000 bytes
 [backup] gzip integrity OK
 [backup] encrypted -> twk-kb-<stamp>.sql.gz.age
-[backup] uploaded twk-kb-<stamp>.sql.gz.age
+[backup] uploaded twk-kb-<stamp>.sql.gz.age -> sharepoint/kb-backups
 [backup] heartbeat sent
 [backup] done
 ```
 
-Then confirm the blob is actually in `kb-backups` in the portal, **with a
-plausible size**. A zero-byte or 2 KB blob is a failed backup that reported
-success.
+Then **confirm the file is really there, with a plausible size.** A zero-byte or
+2 KB artifact is a failed backup that reported success. For the s3 stopgap:
 
-**Confirm the service went Inactive.** If it shows Active after finishing,
-something is holding the process open and every subsequent run will be skipped.
+```bash
+railway run --service rag-backup -- docker run --rm \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e S3_ENDPOINT -e S3_BUCKET \
+  --entrypoint bash rag-backup-test -c \
+  'aws --endpoint-url "$S3_ENDPOINT" s3 ls "s3://$S3_BUCKET/backups/" --human-readable'
+```
+
+`railway run` injects the service's variables into a local command, so this
+verifies with the real credentials **without ever printing them**.
+
+**Confirm the deployment shows `Completed`, not `Active`.** If it stays Active,
+something is holding the process open and every later run will be skipped.
 
 ---
 
-## Step 5 — Make silent failure impossible ⚠
+## Step 4 — Make silent failure impossible ⚠
 
 **Read this even if you skip everything else optional.**
 
@@ -348,7 +348,7 @@ data, no filenames. Worth stating plainly when this goes to counsel.
 
 ---
 
-## Step 6 — Retention is a compliance question, not a default
+## Step 5 — Retention is a compliance question, not a default
 
 Do not pick a number here. **Bring it to counsel** alongside the existing
 open item **P2 #8** (audit-log off-host destination + retention window) — they
@@ -373,7 +373,7 @@ older than N days. Do not rely on manual cleanup.
 
 ---
 
-## Step 7 — Prove it, then the gate is closed
+## Step 6 — Prove it, then the gate is closed
 
 **A backup nobody has restored from is a hypothesis.**
 
@@ -398,19 +398,3 @@ GIN + tsvector), and an ANN query returns a real distance spread.
 by hand**. Until then P0 gate #3 is half-open, whatever the checkbox says.
 
 ---
-
-## Where this leaves the launch gate
-
-| Layer                           | Covers                                       | Status              |
-| ------------------------------- | -------------------------------------------- | ------------------- |
-| Restore procedure               | —                                            | ✅ Proven           |
-| Volume backups                  | Corruption, bad migration, accidental delete | ⬜ Step 1           |
-| Off-Railway `pg_dump`           | Project / account / provider loss            | ⬜ Steps 2–4        |
-| Monitoring                      | Silent failure of the above                  | ⬜ Step 5           |
-| Retention decision              | §7216 / Circular 230                         | ⬜ Step 6 (counsel) |
-| Restore from scheduled artifact | The claim itself                             | ⬜ Step 7           |
-
-**Steps 1 and 5 carry most of the risk reduction for the least effort.** Volume
-backups take fifteen minutes and cover the failures that actually happen;
-monitoring is what keeps the rest from decaying into theatre. Step 0 is what
-gates the sequence, and it needs Chris.
