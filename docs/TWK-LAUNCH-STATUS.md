@@ -1,6 +1,7 @@
 # TWK KB — Launch Status (current source of truth)
 
-**Updated:** 2026-07-16.
+**Updated:** 2026-07-31 (P0 gate #3 closed; P1 item 0 added). Engineering table
+last verified 2026-07-16.
 **Purpose:** One page that reflects what is _actually_ true right now, verified against the code — not what a plan's checkboxes claim. This project has a documented history of stale "resolved" claims creating false confidence; cross-check anything surprising against the tree before trusting it.
 
 ---
@@ -33,15 +34,24 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
 
 - [ ] **1. Content audit** — eyeball every synced source for client-confidential material, _with Chris/Doug_. (Firm domain judgment.)
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
-- [~] **3. Backup/restore drill** — **mechanism proven 2026-07-31; production leg still open.**
-  A full dump → fresh-instance restore → **88/88 e2e against the restored DB** passed,
-  with pgvector, the HNSW index, and the audit log all verified intact
-  (`docs/BACKUP-RESTORE-DRILL.md`). **Not yet done against Railway production:**
-  `rag-postgres` is a raw Docker image on a volume (no managed-plugin backups),
-  is private-network-only, and the Railway CLI isn't installed — so the backup job
-  must run _inside_ Railway. Every command is reproducible; only the dump source changes.
+- [x] **3. Backup/restore drill** — ✅ **DONE 2026-07-31, both legs.** Local:
+      fresh-instance restore + **88/88 e2e against restored data**. Production: real
+      data (858 docs / 6,175 chunks) dumped and restored **entirely inside Railway**
+      via `railway ssh` — nothing copied off their infrastructure — exit 0 in 4s,
+      **36/36 indexes** incl. HNSW, pgvector v0.8.2 intact, ANN query verified over
+      all 6,175 chunks. Production confirmed untouched; throwaway dropped.
+      Full write-up: `docs/BACKUP-RESTORE-DRILL.md`.
+      ⚠ **A restore is proven; a backup _schedule_ is not** — `railway volume` has no
+      `snapshot` subcommand, so confirm snapshots in the dashboard or add a scheduled
+      pg_dump service. Until then the only backup is one a human remembers to take.
 
 ### P1
+
+- [ ] **0. Apply migration `0018_answer_feedback` to production.** Found during the
+      backup drill: production has 17 migrations / 12 tables; local has 18 / 13. The
+      `answer_feedback` table does not exist in production, while `apps/api/src/routes/
+  feedback.ts` and its e2e spec are built and passing — **feedback submission would
+      fail against a missing table if the API were deployed today.**
 
 - [ ] **4. Deploy web + Teams bot** — Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
 - [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.
