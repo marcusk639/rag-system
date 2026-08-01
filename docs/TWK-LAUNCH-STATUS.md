@@ -41,18 +41,29 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       **36/36 indexes** incl. HNSW, pgvector v0.8.2 intact, ANN query verified over
       all 6,175 chunks. Production confirmed untouched; throwaway dropped.
       Full write-up: `docs/BACKUP-RESTORE-DRILL.md`.
-      ⚠ **A restore is proven; a backup _schedule_ is not** — `railway volume` has no
-      `snapshot` subcommand, so confirm snapshots in the dashboard or add a scheduled
-      pg_dump service. Until then the only backup is one a human remembers to take.
+      ⚠ **A restore is proven; a backup _schedule_ is not.** Until one exists the
+      only backup is one a human remembers to take. Two layers are needed:
+      **(1)** Railway **volume backups** — available for our volume, dashboard-only
+      (service → Backups tab), Daily + Weekly can both run; do this now, it is
+      checkboxes. **(2)** a scheduled **`pg_dump` shipped off Railway** — volume
+      backups restore only into the same project + environment and are deleted if
+      the volume is wiped, so they do not cover project/account/provider loss.
+      Retention for `audit_log` is a **counsel** question (ties to P2 #8), not a
+      default: volume-backup retention tops out at 3 months.
 
 ### P1
 
-- [ ] **0. Apply migration `0018_answer_feedback` to production.** Found during the
-      backup drill: production has 17 migrations / 12 tables; local has 18 / 13.
-      The `answer_feedback` table does not exist in production, while the feedback
-      route (`apps/api`) and its e2e spec are built and passing — **feedback
-      submission would fail against a missing table if the API were deployed
-      today.**
+- [x] **0. Apply migration `0018_answer_feedback` to production.** ✅ **DONE
+      2026-07-31.** Found during the backup drill (production 17 migrations / 12
+      tables vs local 18 / 13). Applied by hand — the deployed `rag-api` image
+      predates the migration file, so `pnpm db:migrate` could not be run from it;
+      redeploying first would have shipped code before schema. Snapshot taken
+      first; SQL + the Drizzle tracking row applied in one transaction; resulting
+      schema verified **byte-identical** to the migrator-applied local schema
+      (columns, defaults, and all three `indexdef` strings incl.
+      `NULLS NOT DISTINCT`). Production now 18/18, 39 indexes, data untouched
+      (3 / 858 / 6,175). Procedure: `docs/BACKUP-RESTORE-DRILL.md` →
+      _Applying a migration by hand_.
 
 - [ ] **4. Deploy web + Teams bot** — Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
 - [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.

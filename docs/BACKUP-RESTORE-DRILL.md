@@ -13,8 +13,13 @@ Two halves, run in this order:
    volume with real embeddings.
 
 ⚠ **A restore is proven; a backup _schedule_ is not.** See
-[Findings](#-findings-from-the-production-drill) — there is still no automated
-backup, and production is one migration behind.
+[Findings](#-findings-from-the-production-drill) — nothing takes a scheduled
+backup yet. Railway **volume backups are available** for our volume (dashboard
+only) and should be turned on now; they do **not** replace an off-Railway
+`pg_dump`, because they restore only into the same project + environment.
+
+_(Production is no longer a migration behind — `0018_answer_feedback` was applied
+2026-07-31. Procedure: [Applying a migration by hand](#applying-a-migration-by-hand).)_
 
 > **Why this exists:** Postgres is the sole store for chunks, embeddings, sources,
 > **and the compliance audit log**. Before the drill there was no confirmed,
@@ -157,19 +162,34 @@ together cover the full path.
 
 ## ⚠ Findings from the production drill
 
-**1. Production is one migration behind.** `0018_answer_feedback` is applied
-locally but **not in production** — 17 migrations vs 18, and the `answer_feedback`
-table does not exist there. Meanwhile `apps/api/src/routes/feedback.ts` and
-`answer-feedback.spec.ts` are built and passing. **If the API were deployed today,
-feedback submission would fail against a missing table.** This is a launch item,
-not a backup item — it is recorded here only because the drill surfaced it.
+**1. Production was one migration behind — ✅ resolved 2026-07-31.**
+`0018_answer_feedback` was applied locally but not in production (17 vs 18).
+Now applied; production is 18/18. See
+[Applying a migration by hand](#applying-a-migration-by-hand) for the procedure
+and why it was needed. Recorded here only because the drill surfaced it.
 
-**2. There is still no automated backup.** This drill proves a restore _works_; it
-does not create a backup _schedule_. `railway volume` exposes no `snapshot`
-subcommand, so volume snapshots are not manageable from the CLI — confirm in the
-dashboard whether they are enabled for `rag-postgres-volume`, and if not, add a
-scheduled Railway service running the `pg_dump` above to object storage. Until
-then the only backup is the one a human remembers to take.
+**2. There is no automated backup — but volume backups _are_ available.**
+⚠ **This corrects an earlier version of this document,** which said volume
+snapshots might not apply to us. They do:
+
+- The `railway` **CLI** exposes no snapshot/backup subcommand — that part was
+  right, and is why the earlier note reached the wrong conclusion.
+- But Railway's **volume backups apply to any mounted volume**, not just their
+  managed database offerings — [docs](https://docs.railway.com/volumes/backups).
+  `rag-postgres-volume` qualifies. They are configured **in the dashboard only**,
+  under the service's **Backups** tab.
+
+Schedules are Daily (kept 6 days) / Weekly (kept 1 month) / Monthly (kept 3
+months), and **multiple schedules can run on one volume**, so layered retention is
+just checkboxes. Incremental and copy-on-write, billed only for data unique to
+each snapshot.
+
+**They are not off-site, and that matters.** Two caveats from the docs:
+_"Backups can only be restored into the same project + environment"_ and
+_"Wiping a volume deletes all backups."_ So volume backups cover corruption, a bad
+migration, and accidental deletion — **not** project loss, account loss, or
+provider failure. That is the gap `pg_dump` fills, and why both belong in the
+plan. See [What is NOT yet proven](#what-is-not-yet-proven).
 
 **3. pgvector version differs between environments.** Production runs **v0.8.2**,
 local dev runs **v0.8.5**. Restoring a production dump into a local environment
@@ -215,20 +235,109 @@ into a second database on the **same** instance. A real disaster restores onto a
 `CREATE EXTENSION vector` from scratch, 88/88 e2e) but not at 6,175 chunks. The
 gap is small; the 4-second same-instance restore is the reassuring datapoint.
 
-### To close what's left
+### To close what's left — two layers, not one
 
-1. **Confirm volume snapshots** in the Railway dashboard for
-   `rag-postgres-volume` — whether enabled, how far back, and the restore
-   procedure. `railway volume` exposes no `snapshot` subcommand, so the CLI cannot
-   answer this.
-2. **If not enabled: add a scheduled Railway service** running the production
-   `pg_dump` above, shipping the artifact to object storage. It must run inside
-   the private network.
-3. **Verify a scheduled artifact restores** — not just that the job ran green.
-   A backup nobody has restored from is a hypothesis.
+They cover different failures. Neither is sufficient alone.
+
+**Layer 1 — volume backups. Do this now; it is checkboxes, not code.**
+Dashboard → `rag-postgres` → **Backups** tab. Enable **Daily _and_ Weekly**
+(multiple schedules are allowed on one volume): 6 days of fine-grained recovery
+plus a month of coarse. Covers corruption, a bad migration, an accidental
+`DROP` — the failures that actually happen. Cost is incremental-only on an 85 MB
+database, so effectively noise. **Restores are same-project + same-environment
+only, and wiping the volume deletes every backup with it.**
+
+**Layer 2 — scheduled `pg_dump` off Railway.** This is the disaster-recovery leg
+and the _only_ thing covering project loss, account loss, or a provider-level
+failure. A Railway **cron service** is the right shape — Railway supports
+scheduled services, with the hard requirement that
+[the process exits cleanly](https://docs.railway.com/cron-jobs#service-execution-requirements)
+or subsequent runs are skipped. It runs inside the private network, so the dump
+never transits a laptop. Ship the artifact to storage **not owned by the same
+Railway project**; the whole point is decorrelated failure.
+
+**What actually drives the schedule — and it isn't the chunk count.** Most of
+this database is _re-derivable_: documents, chunks, and embeddings can be
+rebuilt by re-syncing SharePoint (costs embedding spend and time, but no
+information is lost). What cannot be rebuilt from any upstream source:
+
+| Table                                            | Why it's irreplaceable                                |
+| ------------------------------------------------ | ----------------------------------------------------- |
+| `audit_log`                                      | The §7216 / Circular 230 evidence trail. No upstream. |
+| `answer_feedback`                                | Staff-supplied signal; nowhere else                   |
+| `staff_source_assignments`, `client_assignments` | Access-control config; painful to reconstruct         |
+| `ingest_log`, `docs_gap_digest_runs`             | Operational history                                   |
+
+So **backup cadence is a compliance question before it is an ops question.**
+⚠ Note the mismatch: volume-backup retention tops out at **3 months**, while tax
+record-retention expectations are measured in **years**. That is not a reason to
+skip volume backups — it is the reason Layer 2 needs its own retention window,
+and it ties directly to open launch item **P2 #8** (audit-log off-host
+destination + retention). **Retention length is a question for counsel, not a
+default to pick here.**
+
+**Then verify.** Restore from a _scheduled_ artifact — not one taken by hand.
+A backup nobody has restored from is a hypothesis.
 
 **Done when:** a restore has been watched succeed from an artifact **nobody took
 by hand**.
+
+---
+
+## Applying a migration by hand
+
+Used on 2026-07-31 to apply `0018_answer_feedback` to production. Worth keeping,
+because the situation recurs whenever **the deployed container is older than the
+migration**.
+
+`pnpm db:migrate` could not be used. The deployed `rag-api` image was built
+**2026-07-14**; `0018` landed **2026-07-17**, so the container ships `migrate.js`
+but not `0018_answer_feedback.sql` — the migrator cannot apply a file it doesn't
+have. Redeploying `rag-api` first would have fixed that, but it would also ship
+two weeks of unrelated application changes to get a schema change out, and it
+puts **code before schema**, which is the wrong order.
+
+So the SQL was applied directly, along with the tracking row Drizzle would have
+written itself.
+
+**The part that is easy to get wrong.** Drizzle decides what is pending by
+comparing each journal entry's `when` against `max(created_at)` in
+`drizzle.__drizzle_migrations`. Apply the SQL _without_ inserting that row and the
+migrator will try to apply `0018` again on the next deploy — and fail, because the
+table already exists. The row is not bookkeeping; it is what makes the next
+deploy a no-op.
+
+```bash
+# 1 — derive the hash exactly as Drizzle does: sha256 of the RAW file,
+#     before splitting on --> statement-breakpoint
+python3 -c "import hashlib;print(hashlib.sha256(
+  open('packages/db/drizzle/0018_answer_feedback.sql','rb').read()).hexdigest())"
+
+# 2 — VALIDATE the method against a migration production already has.
+#     If the recomputed hash of 0017 doesn't match the stored row, stop.
+railway ssh --service rag-postgres "psql -U \$POSTGRES_USER -d \$POSTGRES_DB \
+  -c \"select id, created_at, left(hash,16) from drizzle.__drizzle_migrations \
+       order by created_at desc limit 3;\""
+
+# 3 — snapshot first (see the production drill above)
+
+# 4 — apply the migration AND the tracking row in ONE transaction (-1),
+#     base64 to sidestep nested-quote mangling through railway ssh
+railway ssh --service rag-postgres \
+  "echo '<base64>' | base64 -d | psql -U \$POSTGRES_USER -d \$POSTGRES_DB \
+     -v ON_ERROR_STOP=1 -1 -f -"
+```
+
+The tracking row uses the journal's `when` verbatim — `1795000000000` for `0018`,
+**not** a wall-clock timestamp. Using `now()` would place it far in the future
+relative to later migrations' `when` values and silently mark everything after it
+as already applied.
+
+**Verify against local, not against expectations.** Local had `0018` applied by
+the migrator itself, which makes it the ground truth for what the result should
+look like. Diff columns, nullability, defaults, and full `indexdef` strings — the
+`NULLS NOT DISTINCT` clause on `afb_answer_subject_unique` is exactly the kind of
+detail a hand-application drops. Both sides came back byte-identical.
 
 ---
 
