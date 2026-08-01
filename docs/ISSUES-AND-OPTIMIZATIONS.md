@@ -92,6 +92,24 @@ on any issue, refuse on an empty set, query the **production** index read-only
 `tier1-automatable` questions, and **report `tier2-cpa-verified` questions as
 routed-for-review rather than scoring them**. **Effort:** M.
 
+### 🟠 H1b — No corpus enumeration helper (blocks corpus-grounded eval)
+
+**Raised 2026-08-01.** `packages/db/src/queries.ts` has `getDocument` (by id) but
+no `listDocuments`. There is no way to walk the indexed corpus, which the
+corpus-grounded ground-truth design (`docs/EVAL-CORPUS-GROUND-TRUTH.md`) needs:
+it reads `external_id, title, source_modified_at, content` across documents to
+extract checkable claims.
+
+**Small, but it must be read-only.** See **C3** — the only existing real-embedder
+runner truncates the database, so anything written against production needs a
+read-only connection and no `truncateAll`/`seedEvalCorpus` anywhere near it.
+
+**Value beyond the eval:** the same pass is the client-identifier review ISS-05
+calls "the real gate" — confirming none of the ~858 indexed documents carries
+client-identifying material. That is currently classified internal-only _by
+default, not because anyone checked_. Build the screen into the first pass;
+retrofitting it costs a second full read of the corpus. **Effort:** S.
+
 ### 🟠 H0 — Citations carry no last-modified date (blocks the TWK "index as-is" decision)
 
 **Raised 2026-08-01**, when TWK decided to index its SharePoint knowledge base **as it currently exists** rather than wait for a cleanup pass with no owner and no date. That decision is sound — the bot's retrieval and gap logs become a far better cleanup queue than working through folders alphabetically — but it puts **superseded documents in the index alongside current ones**, and the system has no way to distinguish them.
