@@ -52,6 +52,26 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       Retention for `audit_log` is a **counsel** question (ties to P2 #8), not a
       default: volume-backup retention tops out at 3 months.
 
+### ⚡ Fastest defensible path to a working prototype (2026-08-01)
+
+**The Azure blocker below stops the Teams bot, not the prototype.** Ranked
+options — full reasoning in
+[`PROTOTYPE-DELIVERY-OPTIONS.md`](./PROTOTYPE-DELIVERY-OPTIONS.md):
+
+| #     | Option                                             | Blocked by                                                         | Effort                |
+| ----- | -------------------------------------------------- | ------------------------------------------------------------------ | --------------------- |
+| **1** | **Deploy `apps/web`, pilot-scoped** ✅ recommended | **nothing** — no subscription, sign-in scopes are user-consentable | hours                 |
+| 2     | Teams **personal tab** wrapping the web app        | tenant custom-app-upload setting (⚠ unverified)                    | +½ day                |
+| 3     | Full Teams **bot**                                 | Azure subscription → Chris → purchasing                            | small, once unblocked |
+| 4     | MCP only — **already live**                        | nothing                                                            | zero                  |
+
+**Verified 2026-08-01:** all 3 indexed sources are SharePoint, `data_class =
+general` (844 + 14 + 0 docs) — internal KB content, **no client files, no Onvio,
+no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none, which is
+why a scoped pilot is defensible without counsel sign-off. ⚠ But `general` is the
+ingestion _default_, not a verified judgment — **gate #1 below is the real
+compliance action**, and it needs Chris/Doug, not an attorney.
+
 ### P1
 
 - [x] **0. Apply migration `0018_answer_feedback` to production.** ✅ **DONE
