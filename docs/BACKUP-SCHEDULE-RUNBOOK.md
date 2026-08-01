@@ -64,10 +64,50 @@ arrange, the honest interim is Railway's existing `rag-documents` bucket —
 explicitly a **stopgap**, since it is the same provider and therefore fails
 together with the thing it is backing up. Note it as such and replace it.
 
-**Ask Chris for:** an Azure subscription under the firm tenant (or approval to
-create one), and who administers it. If TWK has no Azure subscription at all,
-that is worth knowing now rather than at Step 2 — the Microsoft 365 tenant
-exists regardless, but a _subscription_ for paid resources may not.
+### ✅ Tenant reality, checked 2026-08-01 — this changes the recommendation
+
+Verified against the live tenant with `az`, signed in as
+`marcus@twk-cpafirm.com`:
+
+| Check                             | Result                                                   |
+| --------------------------------- | -------------------------------------------------------- |
+| Tenant                            | **TWK CPA** `b49c5690-ccd1-4336-9f66-52780215c4ec`       |
+| Azure **subscriptions** reachable | **None.** `ERROR: No subscriptions found`                |
+| Marcus's directory roles          | **None** — standard user, group memberships only         |
+| Billing accounts visible          | None                                                     |
+| Tenant `allowedToCreateApps`      | **`True`** — standard users may create app registrations |
+
+**The distinction that matters:** an Entra/M365 **tenant** is not an Azure
+**subscription**. Microsoft 365 licences include the former, never the latter.
+App registrations (what the web app and Teams bot need) live in the tenant and
+cost nothing. **Storage accounts require a subscription with billing attached** —
+so Azure Blob is not reachable today, and no amount of permission-fixing changes
+that. Someone has to create a subscription and attach a payment method.
+
+**Consequence: prefer SharePoint over Azure Blob as the destination.** Both need
+Chris. But they need _different_ things from him, and the sizes are not close:
+
+| Destination       | What Chris must do                                                            | Spend                                     |
+| ----------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
+| Azure Blob        | Create a subscription **and attach a payment method** — a purchasing decision | ~cents/mo, but a new billing relationship |
+| **SharePoint** ✅ | **Grant admin consent** to one app registration, scoped `Sites.Selected`      | **None**                                  |
+
+SharePoint wins on friction, not on elegance. Azure Blob is the better-shaped
+tool. But Chris **already has to consent to Entra app registrations** for the web
+app and Teams bot ([`TWK-AZURE-DEPLOY-RUNBOOK.md`](./TWK-AZURE-DEPLOY-RUNBOOK.md)),
+so the backup app folds into a conversation that must happen regardless — and it
+carries no purchase order.
+
+⚠ **`Sites.Selected` is the permission to ask for, not `Sites.ReadWrite.All`.**
+It grants the app write access to **one named site** rather than every site in
+the tenant. For a firm whose SharePoint holds internal knowledge and admin
+documents, that difference is the whole argument for saying yes.
+
+⚠ **Marcus can create the app registration but cannot consent to it.**
+`allowedToCreateApps: True` covers creation only; application permissions always
+require an administrator. And a cron job needs **app-only** auth — delegated
+tokens expire and re-prompt for MFA, which no headless job survives. So consent
+is genuinely unavoidable; there is no clever route around Chris.
 
 ---
 
