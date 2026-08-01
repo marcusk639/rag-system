@@ -138,6 +138,95 @@ Three outcomes, and the third matters most:
 
 ---
 
+---
+
+## The fourth dimension: is the answer any use?
+
+Everything above checks whether the answer is **true to the corpus**. None of it
+checks whether the answer is **worth reading**. An answer can be perfectly
+grounded, drawn from exactly the right document, and still useless — hedged into
+mush, a wall of quotes, "consult the SOP" when the SOP is right there, the actual
+step buried under preamble, or a refusal where the answer was plainly available.
+
+**This is the dimension that prompt changes actually move**, which makes it the
+one with a fast, safe iteration loop attached:
+
+| Failure                            | The lever that fixes it          |
+| ---------------------------------- | -------------------------------- |
+| Wrong/missing document retrieved   | chunking, RRF weights, reranking |
+| The document itself is wrong/stale | KB cleanup and governance        |
+| **Correct but useless answer**     | **the generation prompt**        |
+
+It also needs no CPA. _"Is this a useful answer to this question"_ is judgeable by
+anyone who can read.
+
+### ⚠ The trap: naive helpfulness scoring rewards exactly the wrong things
+
+LLM judges reliably reward **verbosity, fluency, and confidence**. In this system
+those are the risk profile, not the goal: confident-and-wrong over an uncleaned
+corpus is the failure mode the whole index-as-is decision accepted. A helpfulness
+metric that rewards assured prose will happily tune the assistant toward it.
+
+Two guards, and the first is the important one:
+
+**1. Abstention is correct behaviour, and must be scored as such.** The prompt's
+rule 3 emits a fixed string — _"The available documents do not contain enough
+information to answer that."_ That makes abstention **detectable mechanically, no
+judge involved.** Then the corpus claims decide whether it was right:
+
+| Corpus has the answer? | Assistant abstained? | Verdict                               |
+| ---------------------- | -------------------- | ------------------------------------- |
+| No                     | Yes                  | ✅ **Correct** — and a KB gap to log  |
+| No                     | No                   | 🔴 Fabrication — the worst outcome    |
+| Yes                    | Yes                  | 🟠 Over-refusal — retrieval or prompt |
+| Yes                    | No                   | → score on the rubric below           |
+
+This composition is the payoff of doing corpus extraction first: **it is what
+lets you tell a good abstention from a bad one**, which no answer-only metric can.
+
+**2. Cap and penalise padding.** Score length discipline explicitly, or the loop
+drifts toward longer answers because the judge likes them.
+
+### Rubric — each line maps to a prompt rule, so a bad score names its own fix
+
+| Dimension                  | Asks                                                           | Prompt rule |
+| -------------------------- | -------------------------------------------------------------- | ----------- |
+| **Answers what was asked** | Or a nearby question it found easier?                          | —           |
+| **Actionable**             | Gives the step, code, threshold — not "see the SOP"            | 4           |
+| **Complete for the ask**   | Multi-part question → multi-part answer                        | 7           |
+| **Honest about gaps**      | States what the documents don't cover instead of over-claiming | 8           |
+| **Surfaces disagreement**  | Where sources conflict, says so and cites both                 | 5           |
+| **Length discipline**      | No padding, no preamble, answer near the top                   | 4           |
+
+That last column is the design goal: **a low score points at a specific rule to
+change**, rather than at a vague sense that answers feel weak.
+
+The disagreement row is newly testable — corpus extraction finds contradictions
+in the KB, so you can ask a question you _know_ has two conflicting sources and
+check whether the assistant surfaces both or silently picks one. That is the
+wrong-version risk, measured directly.
+
+### Running the tune loop without fooling yourself
+
+1. **Freeze the question set before tuning.** A metric computed over questions
+   that change with the prompt measures nothing.
+2. **Re-run the whole set on every prompt change.** Prompt edits trade off —
+   pushing thoroughness (rule 7) against length discipline (rule 4) is a real
+   tension, and a fix for one commonly regresses the other.
+3. **Record the prompt version alongside the scores.** Without it no change is
+   attributable and the history is noise.
+4. **Spot-check against a human periodically.** Tuning against an LLM judge
+   optimises for the judge — that is not a reason to avoid the loop, it is a
+   reason to keep a human sample in it. This is the step that gets skipped.
+
+**None of this establishes correctness**, and it does not need to. It establishes
+that the assistant **finds what the KB has and says something useful about it** —
+which is the part you can fix this month, and the precondition for the CPA
+verdict being worth anyone's time. Judging a system that retrieves badly tells
+you about the retrieval, not the idea.
+
+---
+
 ## Prerequisites and hazards
 
 1. **🔴 Read-only, always.** See `ISSUES-AND-OPTIMIZATIONS.md` **C3**:
