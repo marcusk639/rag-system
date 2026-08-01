@@ -3,6 +3,7 @@ import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
+import { AnswerFeedback } from "@/components/answer-feedback";
 import type { ChatSession, Citation, Message, Source } from "@/types";
 
 interface ChatInterfaceProps {
@@ -11,7 +12,11 @@ interface ChatInterfaceProps {
   addMessage: (message: Message) => void;
   updateMessage: (
     messageId: string,
-    patch: { appendContent?: string; citations?: Citation[] },
+    patch: {
+      appendContent?: string;
+      citations?: Citation[];
+      answerId?: string;
+    },
   ) => void;
   onCitationClick?: (citation: Citation) => void;
 }
@@ -49,7 +54,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           onToken: (text) =>
             updateMessage(assistantId, { appendContent: text }),
-          onDone: (citations) => updateMessage(assistantId, { citations }),
+          onDone: (citations, answerId) =>
+            updateMessage(assistantId, { citations, answerId }),
           onError: (message) =>
             updateMessage(assistantId, {
               appendContent: `\n\n_Error: ${message}_`,
@@ -98,6 +104,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           </button>
                         ))}
                       </div>
+                    )}
+                    {message.content && !streaming && (
+                      <AnswerFeedback answerId={message.answerId} />
                     )}
                     {message.content && (
                       // Non-dismissible practitioner-review disclaimer on every

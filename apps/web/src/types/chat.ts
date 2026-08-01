@@ -17,6 +17,8 @@ export interface Message {
   role: MessageRole;
   content: string;
   citations?: Citation[];
+  /** Server-assigned id for this answer. Required to submit feedback on it. */
+  answerId?: string;
 }
 
 export interface ChatSession {

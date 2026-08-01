@@ -51,7 +51,11 @@ export const useChatSessions = () => {
   const updateMessage = useCallback(
     (
       messageId: string,
-      patch: { appendContent?: string; citations?: Citation[] },
+      patch: {
+        appendContent?: string;
+        citations?: Citation[];
+        answerId?: string;
+      },
     ): void => {
       setSessions((prev) =>
         prev.map((s) => {
@@ -67,6 +71,7 @@ export const useChatSessions = () => {
                     ? m.content + patch.appendContent
                     : m.content,
                 citations: patch.citations ?? m.citations,
+                answerId: patch.answerId ?? m.answerId,
               };
             }),
           };

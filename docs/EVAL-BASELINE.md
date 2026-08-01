@@ -1,6 +1,8 @@
 # Retrieval Evaluation Baseline
 
-**Status as of 2026-07-09: harness is real-embedder-capable; no real-embedder run has been recorded yet.** This file exists so `pnpm eval:real`'s output has a permanent home, and so nobody mistakes the FakeEmbedder numbers below for evidence of real-world retrieval quality.
+**Status as of 2026-08-01: the first real-embedder run has been executed. It did
+not measure retrieval quality — it proved the corpus cannot.** See
+[Real-embedder results](#real-embedder-results-gemini-2026-08-01). This file exists so `pnpm eval:real`'s output has a permanent home, and so nobody mistakes the FakeEmbedder numbers below for evidence of real-world retrieval quality.
 
 ## What exists today
 
@@ -22,6 +24,82 @@ EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval:real
 and paste the resulting `tests/e2e/src/eval/real-eval-result.md` content into a new `## Real-embedder results` section below, then delete this paragraph.
 
 **Dimension compatibility:** `chunks.embedding` is a fixed `vector(768)` Postgres column. `gemini` (`gemini-embedding-001`) and `local` (ONNX) both default to 768 dimensions and work unmodified. `openai`'s default model is 1536-dim and will fail at insert — set `EMBEDDING_DIMENSIONS=768` explicitly if evaluating an OpenAI model that supports dimension truncation (the `text-embedding-3-*` family does).
+
+## Real-embedder results (gemini, 2026-08-01)
+
+**First real-embedder run in the project's history.** Provider `gemini`, model
+`gemini-embedding-001`, 768 dims, 17 questions, against the same starter corpus.
+
+| k   | recall@k   | precision@k | nDCG@k |
+| --- | ---------- | ----------- | ------ |
+| 1   | 91.2%      | 100.0%      | 100.0% |
+| 3   | **100.0%** | 39.2%       | 99.1%  |
+| 5   | **100.0%** | 23.5%       | 99.1%  |
+| 10  | **100.0%** | 11.8%       | 99.1%  |
+
+MRR: **1.000**. Marginally better than FakeEmbedder (recall@3 97.1% → 100%).
+
+### ⚠ The result that matters is the one that did NOT move
+
+**The dense/sparse weight sweep is completely flat.** Every configuration —
+`dense=1/sparse=0`, `0.7/0.3`, `0.5/0.5`, `0.3/0.7`, and `dense=0/sparse=1` —
+returns **identical** numbers at every k, with MRR 1.000 throughout.
+
+Read that last configuration again: at **`dense=0`, embeddings contribute nothing
+to the ranking at all** — it is pure keyword search — and the score is unchanged.
+**On this corpus, the embedding model is not doing measurable work.** You would
+get the same numbers with no vector search whatsoever.
+
+This was predicted by inference when only FakeEmbedder numbers existed (a
+bag-of-words hash makes "dense" a keyword proxy, so flatness was expected). **It
+is now demonstrated with a real semantic embedder**, which rules out the
+harness and the model and leaves only one explanation: the corpus is too easy.
+14 documents across vocabulary-disjoint topics (Postgres, Docker, espresso,
+sailing, gardening) means keyword overlap alone identifies the right document
+every time. There is no semantic difficulty for an embedding model to resolve.
+
+### What this run is, and is not, evidence of
+
+| Claim                                                             | Supported?                                                |
+| ----------------------------------------------------------------- | --------------------------------------------------------- |
+| The pipeline works end to end with a real embedding provider      | ✅ **Yes** — this is the real value of the run            |
+| Gemini embeddings are correctly wired, dimensioned, and queryable | ✅ Yes — 768-dim, no insert failures                      |
+| Retrieval quality on TWK's knowledge base                         | ❌ **No.** Nothing here speaks to that                    |
+| Dense vs sparse weighting is correctly tuned                      | ❌ **No** — the corpus cannot distinguish any setting     |
+| Reranking would or would not help                                 | ❌ **No** — unmeasurable on a corpus already at MRR 1.000 |
+
+**Consequence, and it is the actionable one:** a corpus with a ceiling of 1.000
+MRR can only ever detect catastrophic regressions. It cannot support a decision
+about weights, reranking, chunking, or embedding models — every such change will
+read as "no difference." **The blocking input is a real question set with genuine
+near-neighbour distractors** (P2 #7 / ISS-05). Until that exists, retrieval
+tuning is unfalsifiable and should not be attempted.
+
+### Reproducing this run
+
+```bash
+docker compose up -d          # postgres + parser
+EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=... \
+EGRESS_ALLOWED_HOSTS=generativelanguage.googleapis.com \
+API_TOKENS=<any-non-empty> AUTH_PROVIDER=static-token \
+E2E_DATABASE_URL=postgres://rag:rag@localhost:5432/rag \
+DATABASE_URL=postgres://rag:rag@localhost:5432/rag \
+  pnpm eval:real
+```
+
+Three config gates block this and are **not** documented elsewhere — each one
+stopped the run until satisfied: `API_TOKENS` must be non-empty, `AUTH_PROVIDER`
+must be `static-token` (not `static`), and `EGRESS_ALLOWED_HOSTS` must include the
+provider host or `EgressPolicy` refuses the call.
+
+> ⚠ **On the egress guard.** It blocked this run by default, which is correct
+> behaviour — it exists so no provider call happens without a DPA decision. It was
+> overridden here only because **this corpus is synthetic test data (espresso,
+> sailing, gardening); no firm content left the machine.** Overriding it against
+> real KB content is a different act and needs the P0 #2 counsel determination,
+> which is still open.
+
+---
 
 ## FakeEmbedder numbers (regression guard only — NOT a real-world baseline)
 

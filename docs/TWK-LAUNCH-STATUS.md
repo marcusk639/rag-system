@@ -148,7 +148,15 @@ compliance action**, and it needs Chris/Doug, not an attorney.
 
 ### P2
 
-- [ ] **7. Real CPA eval questions with Doug** — the gold set that unblocks reranker/tuning decisions (harness already runs against a real embedder; questions are the missing input).
+- [ ] **7. Real CPA eval questions with Doug** — ⬆ **ESCALATED 2026-08-01: this
+      is now the single blocking input for all retrieval work.** The first
+      real-embedder run proved the current corpus cannot measure quality — the
+      dense/sparse sweep is _flat_, identical even at `dense=0` where embeddings
+      contribute nothing. Every tuning decision (reranking, weights, chunking,
+      models) is therefore **unfalsifiable** until this exists. Instrument is
+      built and waiting: `tests/e2e/src/eval/twk-gold-set.ts` (empty by design,
+      validated, references real production docs) + a 90-minute session guide,
+      `docs/EVAL-GOLD-SET-GUIDE.md`. Original note follows — — the gold set that unblocks reranker/tuning decisions (harness already runs against a real embedder; questions are the missing input).
 - [ ] **8. Audit-log off-host destination + retention window** — decision, then small config.
 - [ ] **9. Classifier build-vs-buy** — deferred; nothing depends on it.
 - [ ] **10. Reset the shared local dev Postgres** — local-dev hygiene only; not production.
