@@ -49,6 +49,49 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 
 ## 2. High
 
+### 🔴 C3 — `run-real-eval.ts` truncates the database; a TWK gold-set runner must not be copied from it
+
+**Raised 2026-08-01.** `tests/e2e/src/eval/run-real-eval.ts:108` calls
+`truncateAll(db)`, which executes
+`TRUNCATE TABLE chunks, documents, ingestion_jobs, sources RESTART IDENTITY CASCADE`
+(`tests/e2e/src/helpers/db.ts:21`).
+
+**That is correct where it is.** The runner seeds its own synthetic corpus and
+needs a clean slate. **The hazard is what happens next:** the TWK gold-set runner
+(C4 below) must query the **real, already-indexed** corpus — and the obvious way
+to write it is to copy the only existing real-embedder runner and change the
+question source. **Doing that and pointing it at production destroys the index**
+(currently ~858 documents), and the failure is silent until someone asks a
+question and gets nothing.
+
+**Recommendation:** a TWK runner must never truncate, never seed, and should open
+a **read-only** connection so the mistake is impossible rather than merely
+discouraged. Add an explicit guard — refuse to run if the target database is not
+the test database — and a comment on `truncateAll` naming this hazard at the
+definition site, not just at the call site. **Effort:** S. **Value:** high — this
+is a data-loss class, not a quality one.
+
+### 🔴 C4 — `pnpm eval:twk` is documented but does not exist
+
+**Raised 2026-08-01.** `tests/e2e/src/eval/twk-gold-set.ts:32` instructs the
+reader: _"Append entries below. Nothing else in the harness changes — `pnpm
+eval:twk` picks them up automatically and refuses to run while the set is
+empty."_ **No such script is defined in any `package.json`.** The only eval
+scripts are `eval` (vitest specs, FakeEmbedder) and `eval:real`
+(`run-real-eval.ts`, synthetic corpus).
+
+**Why it matters more than a missing npm alias normally would.** That sentence is
+the handoff instruction at the end of a carefully-built gold-set schema. Whoever
+completes the CPA gold-set session will follow it, find nothing, and either give
+up or — worse — reach for `eval:real`, which measures a **different, synthetic
+corpus** and would report healthy numbers that say nothing about the real KB.
+
+**What it must do:** load `TWK_GOLD_QUESTIONS`, run `validateGoldSet` and refuse
+on any issue, refuse on an empty set, query the **production** index read-only
+(see C3), score retrieval (`metrics.ts`) plus faithfulness (`faithfulness.ts`) for
+`tier1-automatable` questions, and **report `tier2-cpa-verified` questions as
+routed-for-review rather than scoring them**. **Effort:** M.
+
 ### 🟠 H0 — Citations carry no last-modified date (blocks the TWK "index as-is" decision)
 
 **Raised 2026-08-01**, when TWK decided to index its SharePoint knowledge base **as it currently exists** rather than wait for a cleanup pass with no owner and no date. That decision is sound — the bot's retrieval and gap logs become a far better cleanup queue than working through folders alphabetically — but it puts **superseded documents in the index alongside current ones**, and the system has no way to distinguish them.
