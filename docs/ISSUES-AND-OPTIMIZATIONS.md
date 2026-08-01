@@ -49,7 +49,27 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 
 ## 2. High
 
-### 🟠 H1 — No reranking stage (largest retrieval-quality gap)
+### 🟠 H0 — Citations carry no last-modified date (blocks the TWK "index as-is" decision)
+
+**Raised 2026-08-01**, when TWK decided to index its SharePoint knowledge base **as it currently exists** rather than wait for a cleanup pass with no owner and no date. That decision is sound — the bot's retrieval and gap logs become a far better cleanup queue than working through folders alphabetically — but it puts **superseded documents in the index alongside current ones**, and the system has no way to distinguish them.
+
+**Why the citation is the right place to fix it.** A person browsing SharePoint sees the folder, the modified date, and the near-duplicates beside a file, and hesitates. A citation reads as authoritative. Under Circular 230 §10.35 the citation is the entire basis of the defensibility argument, so a citation to a 2019 procedure is worse than no answer — it manufactures confidence instead of prompting a check.
+
+**This is nearly free, which is the point.** Everything needed is already in place:
+
+- The SharePoint connector already captures `lastModifiedDateTime` and `lastModifiedBy` into document metadata (`packages/connectors/src/sharepoint/index.ts:335-337`), and `documents.source_modified_at` is a column.
+- `hybridSearch` already selects `doc.metadata` (`packages/db/src/queries.ts:587`), so it already travels with every `RetrievalResult` — `RetrievalResult.document.metadata` is typed `DocumentMetadata`.
+- **The only gap is `buildCitations`** (`packages/rag/src/generation/generator.ts:101-108`), which projects each result down to `{index, title, url}` and drops everything else.
+
+**Recommendation:** widen the citation shape to carry `modifiedAt` (and `modifiedBy` where present), surface it in the API/MCP citation payload, and render it in the chat UI. Consider also passing the date into the `<document>` context block so the model can say "note this procedure is from 2019" in the answer body — but **do not** let the model infer currency or suppress older documents on its own: that silently hides documents that may be the right answer, and it cannot be defended when it gets one wrong. **A visible date beats a clever guess.**
+
+**Effort:** S. **Value:** high — it is the difference between a dated KB being usable and being a liability.
+
+**Related, same decision, config-only:** scope the TWK source to named `driveId`/`folderPath` values rather than the whole site. Both config keys already exist in the SharePoint connector.
+
+### 🟠 H1 — No reranking stage (largest retrieval-quality gap) ⚠ **likely stale — verify before actioning**
+
+> **2026-08-01:** this entry appears to predate the reranking implementation. `packages/rag/src/retrieval/reranker.ts` now ships `HttpCrossEncoderReranker` (Cohere/Jina-shaped REST), and `Retriever` takes an optional `rerank` option that over-fetches `poolMultiplier × topK` and degrades to RRF order on reranker failure — which is what this entry asks for. Confirm and close rather than re-implementing.
 
 `Retriever.search` (`packages/rag/src/retrieval/retriever.ts:29`) returns the RRF-fused top-K **directly** to the generator. Hybrid RRF is a strong _candidate generator_, but the single highest-ROI improvement in modern RAG is a **rerank** pass over the candidate pool before it reaches the LLM. The infrastructure is already shaped for it: `hybridSearch` over-fetches an 8× pool (`packages/db/src/queries.ts:221`) and then truncates to `topK` by RRF score — that pool is exactly what a reranker should consume.
 
