@@ -52,6 +52,53 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       Retention for `audit_log` is a **counsel** question (ties to P2 #8), not a
       default: volume-backup retention tops out at 3 months.
 
+### ✅ LIVE 2026-08-01 — the web app is deployed and auth-gated
+
+`rag-web` → **https://rag-web-production-1c0a.up.railway.app** — Option 1 below,
+shipped. Verified: `/api/health` 200; `/` redirects **307 → /api/auth/signin**;
+an unauthenticated `POST /api/chat` returns **307, not 200** (no unauthenticated
+data path). `rag-api` redeployed from current `main` and now runs the feedback
+route against the migration applied earlier.
+
+Entra objects created in the TWK tenant (within the permissions the tenant
+already grants Marcus — no admin action needed):
+
+| Object           | Value                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App registration | `TWK KB Assistant (Web)` · `c885331a-8e73-47c0-9dff-263756a81942`                                                                                                               |
+| Security group   | `RAG-Admins` · `33cdedd4-61cb-465e-afe2-f37045cf243c`                                                                                                                           |
+| Sign-in scopes   | `openid profile email offline_access` — **user-consentable**                                                                                                                    |
+| Group claims     | `groupMembershipClaims=SecurityGroup` — ids arrive **inline in the token**, so the admin gate does **not** need the app-only Graph fallback (which would require admin consent) |
+
+⚠ **`WEB_AUTH_MODE=static-fallback` was deliberately NOT used.** It disables
+authentication entirely and issues every visitor one shared token — the firm's
+internal KB on an open URL. It exists as an emergency override; it is not a
+shortcut to launch.
+
+⚠ **Still pilot-scoped, and that is what keeps it defensible.** Named users only,
+Class A/B sources only, no client data. P0 #1 (the content audit) is unchanged and
+is still the real gate.
+
+#### 🔌 Port gotcha — this will bite the next service too
+
+`rag-api`'s redeploy failed its healthcheck, and the cause is a trap worth
+recording. **`packages/core/src/config.ts` resolves the listen port from
+`API_PORT` only** (`Number(env.API_PORT ?? 3000)`) — it never reads `PORT`.
+Railway injects **`PORT=8080`** and its V2 healthcheck probes _that_. So the app
+listened on 3000 while the probe knocked on 8080 and got nothing.
+
+It had gone unnoticed because the previous deployment's manifest carried **no
+`healthcheckPath`**, so nothing ever probed it, and the **domain** had an explicit
+target port of 3000 — public traffic worked fine. Applying `apps/api/railway.json`
+enabled the healthcheck for the first time and exposed the mismatch.
+
+Fixed by setting `API_PORT=8080` and `railway domain update … --port 8080`.
+**Both are required** — moving the app without moving the domain returns 502.
+`apps/web` is unaffected: Next.js standalone reads `PORT` natively.
+
+**Better long-term fix (not done):** make config read `API_PORT ?? PORT ?? 3000`
+so no per-service magic number is needed and any platform works.
+
 ### ⚡ Fastest defensible path to a working prototype (2026-08-01)
 
 **The Azure blocker below stops the Teams bot, not the prototype.** Ranked
