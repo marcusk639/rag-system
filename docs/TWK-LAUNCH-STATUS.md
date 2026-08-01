@@ -48,10 +48,11 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
 ### P1
 
 - [ ] **0. Apply migration `0018_answer_feedback` to production.** Found during the
-      backup drill: production has 17 migrations / 12 tables; local has 18 / 13. The
-      `answer_feedback` table does not exist in production, while `apps/api/src/routes/
-  feedback.ts` and its e2e spec are built and passing — **feedback submission would
-      fail against a missing table if the API were deployed today.**
+      backup drill: production has 17 migrations / 12 tables; local has 18 / 13.
+      The `answer_feedback` table does not exist in production, while the feedback
+      route (`apps/api`) and its e2e spec are built and passing — **feedback
+      submission would fail against a missing table if the API were deployed
+      today.**
 
 - [ ] **4. Deploy web + Teams bot** — Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
 - [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.
