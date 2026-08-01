@@ -174,6 +174,119 @@ export async function getDocument(db: Db, id: string) {
   return row;
 }
 
+/** One row of the corpus walk. `markdown` is omitted unless asked for — the
+ *  full text of ~858 documents does not belong in memory by default. */
+export interface DocumentSummary {
+  id: string;
+  sourceId: string;
+  externalId: string;
+  title: string;
+  mimeType: string;
+  sourceModifiedAt: Date | null;
+  sizeBytes: number | null;
+  metadata: Record<string, unknown>;
+  /** Present only when `includeMarkdown` was set. */
+  markdown?: string;
+}
+
+export interface ListDocumentsOptions {
+  /** Restrict to one source. Omit to walk every source. */
+  sourceId?: string;
+  /** Page size. Default 100. */
+  limit?: number;
+  /**
+   * Keyset cursor — pass the previous page's last `id`. Keyset rather than
+   * OFFSET so a long walk stays O(1) per page and cannot skip or repeat rows
+   * if the table changes underneath it.
+   */
+  afterId?: string;
+  /** Include the parsed markdown. Off by default; see `DocumentSummary`. */
+  includeMarkdown?: boolean;
+}
+
+/**
+ * Walk the indexed corpus, one page at a time.
+ *
+ * Exists for corpus-level analysis — claim extraction for the corpus-grounded
+ * eval tier, and the client-identifier screen that ISS-05 calls "the real gate"
+ * (see `docs/EVAL-CORPUS-GROUND-TRUTH.md`). Nothing else in the system needs to
+ * enumerate documents; ingestion addresses them by `externalId` and retrieval
+ * reaches them through `hybridSearch`.
+ *
+ * ⚠ **Callers walking production must use `createReadOnlyDb`.** This function is
+ * read-only in itself, but the surrounding script is the risk: the only existing
+ * real-embedder runner (`tests/e2e/src/eval/run-real-eval.ts`) calls
+ * `truncateAll`, and it is the obvious template to copy. See C3 in
+ * `docs/ISSUES-AND-OPTIMIZATIONS.md`.
+ *
+ * Ordered by `id` so the keyset cursor is total and stable.
+ */
+export async function listDocuments(
+  db: Db,
+  opts: ListDocumentsOptions = {},
+): Promise<DocumentSummary[]> {
+  const limit = opts.limit ?? 100;
+
+  const conditions = [];
+  if (opts.sourceId) conditions.push(eq(documents.sourceId, opts.sourceId));
+  if (opts.afterId) conditions.push(gt(documents.id, opts.afterId));
+
+  const base = {
+    id: documents.id,
+    sourceId: documents.sourceId,
+    externalId: documents.externalId,
+    title: documents.title,
+    mimeType: documents.mimeType,
+    sourceModifiedAt: documents.sourceModifiedAt,
+    sizeBytes: documents.sizeBytes,
+    metadata: documents.metadata,
+  };
+
+  const rows = await db
+    .select(
+      opts.includeMarkdown ? { ...base, markdown: documents.markdown } : base,
+    )
+    .from(documents)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(documents.id)
+    .limit(limit);
+
+  return rows as DocumentSummary[];
+}
+
+/**
+ * Convenience wrapper over `listDocuments` that yields every document, paging
+ * transparently. Prefer this for a full-corpus walk — it keeps at most one page
+ * in memory rather than materializing the whole corpus.
+ */
+export async function* iterateDocuments(
+  db: Db,
+  opts: Omit<ListDocumentsOptions, "afterId"> = {},
+): AsyncGenerator<DocumentSummary> {
+  const limit = opts.limit ?? 100;
+  let afterId: string | undefined;
+
+  for (;;) {
+    const page = await listDocuments(db, { ...opts, limit, afterId });
+    if (page.length === 0) return;
+    for (const row of page) yield row;
+    if (page.length < limit) return;
+    afterId = page[page.length - 1]!.id;
+  }
+}
+
+/** Total document count, optionally scoped to one source. */
+export async function countDocuments(
+  db: Db,
+  opts: { sourceId?: string } = {},
+): Promise<number> {
+  const result = await db
+    .select({ n: sql<string>`count(*)` })
+    .from(documents)
+    .where(opts.sourceId ? eq(documents.sourceId, opts.sourceId) : undefined);
+  return Number(result[0]?.n ?? 0);
+}
+
 export async function deleteDocumentsByExternalIds(
   db: Db,
   sourceId: string,
