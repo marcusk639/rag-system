@@ -33,7 +33,13 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
 
 - [ ] **1. Content audit** — eyeball every synced source for client-confidential material, _with Chris/Doug_. (Firm domain judgment.)
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
-- [ ] **3. Backup/restore drill** — prove a real restore of the Railway Postgres works.
+- [~] **3. Backup/restore drill** — **mechanism proven 2026-07-31; production leg still open.**
+  A full dump → fresh-instance restore → **88/88 e2e against the restored DB** passed,
+  with pgvector, the HNSW index, and the audit log all verified intact
+  (`docs/BACKUP-RESTORE-DRILL.md`). **Not yet done against Railway production:**
+  `rag-postgres` is a raw Docker image on a volume (no managed-plugin backups),
+  is private-network-only, and the Railway CLI isn't installed — so the backup job
+  must run _inside_ Railway. Every command is reproducible; only the dump source changes.
 
 ### P1
 
