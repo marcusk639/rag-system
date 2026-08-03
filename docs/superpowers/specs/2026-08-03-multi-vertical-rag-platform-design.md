@@ -146,6 +146,45 @@ deploying into a bank.
 blocks, in prose a compliance officer reads without touching TypeScript. In these
 verticals that review is part of the sale.
 
+### 3.6 Pack ↔ core compatibility is explicit and fails closed
+
+Because updates are **pull-based**, a client can end up running any combination
+of image tag and pack version. "Silently ran an incompatible pack" is exactly the
+failure that cannot be debugged remotely, so compatibility is declared, checked
+at boot, and refused rather than guessed.
+
+Every pack declares the core contract it targets:
+
+```yaml
+pack:
+  id: cpa
+  version: 2.1.0
+  requiresCore: "^3.0.0" # semver range against the PACK CONTRACT version
+```
+
+**`requiresCore` is a version of the pack contract, not of the product.** Core
+exposes `PACK_CONTRACT_VERSION` — bumped only when the pack format's meaning
+changes (a new required field, changed semantics for an existing one, a removed
+capability). Shipping a patched retriever does not bump it; adding a mandatory
+`kind` to scanners does.
+
+At boot, core resolves the pack, checks `requiresCore` against its own
+`PACK_CONTRACT_VERSION`, and **refuses to start on a mismatch** — the same
+fail-fast posture as `assertEmbeddingDimensions` and `assertRequiredIndexes`. The
+error names both versions and which direction is stale, because the operator
+reading it is a client's IT staff, not you:
+
+```
+Pack "cpa" 2.1.0 requires core pack-contract ^3.0.0; this image provides 2.4.0.
+The pack is newer than the image — pull a newer image tag, or check out an
+older pack.
+```
+
+Two rules follow:
+
+- **Unknown fields in a pack are an error, not a warning.** A pack written against a newer contract will contain fields this core silently ignores otherwise — and silently ignoring a _scanner_ is a compliance failure, not a cosmetic one.
+- **Both versions appear in the acceptance-run output (§6.3) and in the health endpoint**, so "what is this client actually running" is answerable from a screenshot.
+
 ---
 
 ## 4. Pack vs. database: the configuration split
@@ -167,16 +206,37 @@ verticals that review is part of the sale.
 | Vocabulary additions                                    | DB       | Additive, harmless                                       |
 | Branding (`APP_NAME`)                                   | DB / env | Cosmetic                                                 |
 
-### 4.1 The safety property
+### 4.1 The safety property — two axes, not one
 
-**Database configuration can narrow, never widen.** You may add a folder
-exclusion; you may not remove the tier gate. You may lower `topK`; you may not
-mark a blocked tier indexable.
+An earlier draft stated this as _"database configuration can narrow, never
+widen."_ **That is wrong**, and the table above contradicts it: `sources` is
+DB-editable, and adding a source widens the corpus. So does removing a folder
+exclusion. Configuration that could only ever narrow would be useless.
 
-This is not a new invention. `effectiveSourceFilter`
-(`packages/core/src/access-control.ts:262`) already lets a caller's filter narrow
-_within_ their enforced scope but never beyond it. The same rule, applied to
-configuration.
+The property holds on one axis and not the other, and they need separate names
+because they get enforced differently:
+
+| Axis                     | Question it answers                                          | Can DB config change it?                                                          |
+| ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| **Sensitivity boundary** | _What is permitted to be indexed at all?_                    | **No — never, in either direction.** Pack-only.                                   |
+| **Retrieval scope**      | _Which permitted material is actually indexed and returned?_ | **Yes, freely — widen or narrow.** Add a source, drop an exclusion, raise `topK`. |
+
+Concretely: an admin may add a SharePoint site, remove a folder exclusion, and
+raise `topK` — all widening, all fine, because every document that arrives still
+passes the same sensitivity gate. An admin may **not** mark a blocked tier
+indexable, weaken a scanner, or edit the prompt, because those change what the
+gate itself permits.
+
+The two are enforced by different mechanisms:
+
+- **Sensitivity boundary:** structurally unreachable from config. Tier and scanner definitions are pack-resident, and `adminEditable` cannot name a protected setting (§4.2) — a pack that tries fails validation at boot.
+- **Retrieval scope:** validated against the settings catalog's types and ranges on every write, and audited. Widening is legitimate but must be attributable.
+
+There is an existing precedent for the sensitivity axis: `effectiveSourceFilter`
+(`packages/core/src/access-control.ts:262`) lets a caller's filter narrow _within_
+their enforced scope but never beyond it. Note the analogy is to the **enforced
+scope**, not to the caller filter — the caller filter is exactly the
+freely-adjustable retrieval-scope axis.
 
 ### 4.2 The admin surface is pack-declared, with a core-enforced floor
 
@@ -262,10 +322,37 @@ vertical:
 - each `identifying` scanner matches its own positive fixture and does **not** match the pack's clean fixture
 - at least one tier is indexable; every non-indexable tier states a reason
 - no `adminEditable` entry names a protected setting
-- the pack's prompt, run against the fixture corpus with a deterministic fake generator, produces a cited answer **and** abstains on an out-of-corpus question
+- the prompt satisfies **structural** requirements (below)
 
-The last assertion is what stops a rewritten prompt from quietly losing the
-grounding contract.
+#### What the prompt check can and cannot do
+
+An earlier draft specified running the pack's prompt "against the fixture corpus
+with a deterministic fake generator" to prove it "produces a cited answer and
+abstains." **That test cannot work.** `FakeGenerator`
+(`packages/test-fixtures/src/fake-generator.ts`) receives `(question, context)`
+only — the system prompt is a constructor concern of the real generators and
+never reaches it. A fake ignores the prompt entirely, so the assertion would
+prove nothing about prompt quality while appearing to.
+
+Split into two checks with honest scopes:
+
+**Structural, in PR CI (fast, deterministic, no model).** Assert the prompt text
+contains the grounding contract's required elements: an instruction to cite with
+`[N]`, an instruction to answer only from supplied documents, an explicit
+abstention instruction, and an untrusted-content clause. This is a lint, not a
+behavioral proof — it catches a prompt rewritten without the contract, which is
+the realistic failure. It cannot catch a prompt that contains the words and still
+behaves badly.
+
+**Behavioral, nightly, against a real local model.** Boot with
+`GENERATION_PROVIDER` pointed at a local endpoint (§5), run the pack's fixture
+questions, and assert a cited answer plus abstention on an out-of-corpus
+question. Non-deterministic and slower, so it does not gate a PR — it gates a
+release. This is the only check that actually tests behavior, and it is
+affordable precisely because §5 makes local generation available.
+
+**Do not claim the structural check proves the grounding contract holds.** It
+proves the contract was not deleted.
 
 ### 6.3 Image acceptance run — the same command in CI and at the client
 
@@ -320,7 +407,7 @@ order. Each gets its own implementation plan.
 1. **Domain extraction from core.** Neutral default prompt; tiers open (schema migration); scanners and disclaimer moved behind pack-supplied policy; the CPA pack created as the first pack. _Largest and riskiest — it touches the ingestion gate and the compliance machinery._ **The tier migration inside this slice needs its own design pass before implementation** (see §10) — the rest of the slice does not.
 2. **Local generation.** `baseURL` on `GeneratorOptions` plus config and docs. _Hours, independent of everything else, unblocks two verticals._
 3. **Settings catalog + DB-resident config + admin surface.** Catalog with types and `protected` flags; per-request read with short-TTL cache; generic admin UI; audited writes.
-4. **Verification framework.** Pack validation, conformance suite, acceptance run, drift check.
+4. **Verification framework.** Pack validation (incl. the §3.6 contract check and RE2-based scanner bounding), the structural conformance suite in PR CI, the nightly behavioral check against a local model, the acceptance run, and the drift check. _Depends on slice 2 — the nightly behavioral check needs local generation to be affordable._
 
 **Sequencing note:** slice 2 is independent and can ship first. Slice 1 should
 not begin until the TWK content-boundary work
