@@ -311,12 +311,41 @@ function runPreFlight(
 // ----------------------------------------------------------------------------
 // Gemini generator
 // ----------------------------------------------------------------------------
+
+/** The Gemini API host, and the only host `GeminiGenerator` may contact. */
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+
+/**
+ * Why `baseURL` is refused rather than honored on the Gemini path.
+ *
+ * NOT because the SDK lacks the knob — `@google/genai` does expose
+ * `httpOptions.baseUrl`. Self-hosted generation is supported through the
+ * `openai` provider only, because that provider is a client for any
+ * OpenAI-compatible server; one self-hosted path is easier to reason about
+ * (and to keep honest) than two. Silently ignoring the setting would leave an
+ * operator believing they were air-gapped while every prompt went to Google.
+ */
+const GEMINI_BASE_URL_REFUSAL =
+  "generation baseURL is supported by the 'openai' provider only; " +
+  "set GENERATION_PROVIDER=openai to use a self-hosted endpoint";
+
 export class GeminiGenerator implements Generator {
   private client: GoogleGenAI;
   private readonly _egressPolicy: EgressPolicy;
 
   constructor(private readonly opts: GeneratorOptions) {
-    this.client = new GoogleGenAI({ apiKey: opts.apiKey });
+    // Enforced here rather than only in `createGenerator` — this class is
+    // exported, so a direct `new GeminiGenerator({ baseURL })` would otherwise
+    // drop the setting on the floor without a word.
+    if (opts.baseURL) throw new Error(GEMINI_BASE_URL_REFUSAL);
+    this.client = new GoogleGenAI({
+      apiKey: opts.apiKey,
+      // Passed explicitly, never omitted: the SDK falls back to
+      // `GOOGLE_GEMINI_BASE_URL` when this key is absent, which would let an
+      // environment variable redirect the client away from the very host
+      // `preFlight` asserts against the allow-list.
+      httpOptions: { baseUrl: GEMINI_BASE_URL },
+    });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
 
@@ -324,7 +353,7 @@ export class GeminiGenerator implements Generator {
   private preFlight(prompt: string): void {
     runPreFlight(
       prompt,
-      "https://generativelanguage.googleapis.com",
+      GEMINI_BASE_URL,
       this._egressPolicy,
       this.opts.triPolicy ?? "warn",
       this.opts.onTriDetected,
@@ -378,14 +407,34 @@ export class GeminiGenerator implements Generator {
 // ----------------------------------------------------------------------------
 // OpenAI generator
 // ----------------------------------------------------------------------------
+/**
+ * The OpenAI SDK's own default base URL, restated here so it can be passed
+ * explicitly rather than left to the SDK — see the constructor below. The
+ * trailing `/v1` is the SDK's; `assertAllowed` compares hostnames, so the path
+ * is irrelevant to the allow-list.
+ */
+const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
 export class OpenAIGenerator implements Generator {
   private client: OpenAI;
   private readonly _egressPolicy: EgressPolicy;
+  /**
+   * The host the client will actually contact. Computed once and used for both
+   * the SDK client and the egress pre-flight so the two cannot diverge — the
+   * whole point of the allow-list is that it vouches for the host being called.
+   */
+  private readonly effectiveBaseURL: string;
 
   constructor(private readonly opts: GeneratorOptions) {
+    this.effectiveBaseURL = opts.baseURL ?? OPENAI_DEFAULT_BASE_URL;
     this.client = new OpenAI({
       apiKey: opts.apiKey,
-      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+      // Passed unconditionally, never conditionally spread. The SDK constructor
+      // destructures `baseURL = readEnv("OPENAI_BASE_URL")`, so an ABSENT key is
+      // not the same as the default — the environment variable wins, and the
+      // client would call a host the pre-flight never checked while the
+      // allow-list approved api.openai.com.
+      baseURL: this.effectiveBaseURL,
     });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
@@ -396,7 +445,7 @@ export class OpenAIGenerator implements Generator {
       prompt,
       // The host actually being called. Passing a literal here would have the
       // allow-list vouch for a host the client never contacts.
-      this.opts.baseURL ?? "https://api.openai.com",
+      this.effectiveBaseURL,
       this._egressPolicy,
       this.opts.triPolicy ?? "warn",
       this.opts.onTriDetected,
@@ -456,15 +505,14 @@ export function createGenerator(
   const { provider, ...generatorOpts } = opts;
   switch (provider) {
     case "gemini":
-      if (generatorOpts.baseURL) {
-        // Fail loud. The Google SDK has no equivalent knob, so accepting this
-        // would leave an operator believing they are self-hosted while every
-        // prompt goes to generativelanguage.googleapis.com.
-        throw new Error(
-          "generation baseURL is supported by the 'openai' provider only; " +
-            "set GENERATION_PROVIDER=openai to use a self-hosted endpoint",
-        );
-      }
+      // Fail loud. NOT because the Google SDK lacks the knob — it exposes
+      // `httpOptions.baseUrl` — but because self-hosted generation is supported
+      // through the `openai` provider only, that provider being a client for any
+      // OpenAI-compatible server. Accepting it here would leave an operator
+      // believing they are self-hosted while every prompt goes to
+      // generativelanguage.googleapis.com. See GEMINI_BASE_URL_REFUSAL, which
+      // the constructor enforces for callers who bypass this factory.
+      if (generatorOpts.baseURL) throw new Error(GEMINI_BASE_URL_REFUSAL);
       return new GeminiGenerator(generatorOpts);
     case "openai":
       return new OpenAIGenerator(generatorOpts);
