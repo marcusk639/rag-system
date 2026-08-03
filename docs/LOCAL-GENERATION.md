@@ -11,7 +11,8 @@ but not answered from.
 
 ## Requirements
 
-Any OpenAI-compatible server. Verified shapes:
+Any OpenAI-compatible server. Typical shapes (default ports from each project's
+documentation; not exercised in this environment):
 
 | Server    | Typical base URL            | Notes                          |
 | --------- | --------------------------- | ------------------------------ |
@@ -31,9 +32,19 @@ EGRESS_ALLOWED_HOSTS=127.0.0.1      # REQUIRED — see below
 EMBEDDING_PROVIDER=local            # for a fully air-gapped deployment
 ```
 
-`GENERATION_API_KEY` is optional. Self-hosted servers ignore it; when no key is
-configured anywhere, a placeholder is sent because the OpenAI SDK requires a
+`GENERATION_API_KEY` is optional. Most self-hosted servers ignore it, and a
+placeholder is sent when it is unset, because the OpenAI SDK requires a
 non-empty value.
+
+Precedence is deliberate: `GENERATION_API_KEY` wins; failing that, **a
+configured `GENERATION_BASE_URL` gets the placeholder, never the embedding
+provider's key**; the embedding provider's key (`GEMINI_API_KEY` /
+`OPENAI_API_KEY`, per `EMBEDDING_PROVIDER`) is inherited only in the hosted,
+single-vendor case. A self-hosted endpoint is not verifiably yours — the same
+reason the TRI scan is not relaxed for it — so it is not handed a hosted
+vendor's production key by default. If your server does require auth
+(llama.cpp / vLLM `--api-key`, or a reverse proxy in front of it), set
+`GENERATION_API_KEY` explicitly.
 
 ## The egress allow-list applies to your endpoint
 
@@ -50,10 +61,13 @@ misconfiguration that would reach a third party fail loudly.
 ## Gemini cannot be self-hosted this way
 
 `GENERATION_PROVIDER=gemini` with `GENERATION_BASE_URL` set **throws at
-startup**. The Google SDK has no equivalent option, so accepting the setting
-would leave you believing you were self-hosted while every prompt went to
-Google. Use `GENERATION_PROVIDER=openai` — that provider is a client for any
-OpenAI-compatible server, not only OpenAI's.
+startup**. Not because the Google SDK lacks the option — it does expose
+`httpOptions.baseUrl` — but because self-hosted generation is supported through
+the `openai` provider only: that provider is a client for any OpenAI-compatible
+server, not only OpenAI's, and one self-hosted path is easier to keep honest
+than two. Accepting the setting on the Gemini path would leave you believing
+you were self-hosted while every prompt went to Google, so it fails loudly
+instead. Use `GENERATION_PROVIDER=openai`.
 
 ## The TRI scan is not relaxed automatically
 
@@ -64,13 +78,16 @@ so nothing infers "self-hosted, therefore safe."
 Where you genuinely control the endpoint, the scan is guarding against a
 disclosure that cannot occur, and `GENERATION_TRI_POLICY=off` is a defensible
 choice. Make it deliberately. Note that `COMPLIANCE_MODE=client-data` forces
-`block` regardless, so a deployment that has declared client data in scope
-cannot select `off` by omission.
+`block` regardless — it overrides an explicit `off`, not merely an omitted one —
+so a deployment that has declared client data in scope cannot select `off` at
+all.
 
 ## Verifying
 
 1. Boot the API. The log should carry `generation using a self-hosted endpoint`
-   with your base URL.
+   with your base URL. That line is only emitted once the host has been checked
+   against `EGRESS_ALLOWED_HOSTS`; if it is missing, look for the matching
+   `error` line naming the host and the allow-list.
 2. Ask a question through `/ask` and confirm you get a cited answer.
 3. Remove your endpoint's host from `EGRESS_ALLOWED_HOSTS`, restart, and ask
    again. It must fail with `EGRESS_BLOCKED`. If it succeeds, the allow-list is
