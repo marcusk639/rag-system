@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ValidationError, type RetrievalResult } from "@rag/core";
+import {
+  EgressError,
+  EgressPolicy,
+  ValidationError,
+  type RetrievalResult,
+} from "@rag/core";
 import { HttpCrossEncoderReranker, createReranker } from "./reranker.js";
+
+/**
+ * Allow-list covering the fake endpoint the suite reranks against. Passed
+ * explicitly rather than relying on `EgressPolicy.fromEnv()`, which reads
+ * `EGRESS_ALLOWED_HOSTS` and would make these tests depend on the runner's
+ * environment.
+ */
+const ALLOW_TEST_HOST = () => new EgressPolicy(["example.test"]);
 
 type RerankCfg = Parameters<typeof createReranker>[0];
 
@@ -58,6 +71,7 @@ describe("HttpCrossEncoderReranker", () => {
       endpoint: "https://example.test/rerank",
       model: "rerank-v3.5",
       apiKey: "secret",
+      egressPolicy: ALLOW_TEST_HOST(),
     });
   }
 
@@ -99,5 +113,76 @@ describe("HttpCrossEncoderReranker", () => {
     await expect(reranker().rerank("q", [rr("a")], 1)).rejects.toThrow(
       /cohere rerank failed: 429/,
     );
+  });
+});
+
+/**
+ * The reranker ships firm document text to a third-party vendor, so it must sit
+ * behind the SAME `EgressPolicy` allow-list that governs embeddings, generation,
+ * and audit-log shipping. Before this suite existed it was the only outbound
+ * path in the system with no egress control at all — enabling
+ * `RERANK_PROVIDER=cohere` would have sent SOP chunk text to Cohere without the
+ * allow-list check that exists so no provider call happens without a DPA
+ * decision.
+ */
+describe("HttpCrossEncoderReranker — egress boundary", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function withPolicy(hosts: string[]) {
+    return new HttpCrossEncoderReranker({
+      name: "cohere",
+      endpoint: "https://example.test/rerank",
+      model: "rerank-v3.5",
+      apiKey: "secret",
+      egressPolicy: new EgressPolicy(hosts),
+    });
+  }
+
+  it("refuses a host that is not allow-listed, and never reaches fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(withPolicy([]).rerank("q", [rr("a")], 1)).rejects.toThrow(
+      EgressError,
+    );
+    // The assertion that matters: the refusal happens BEFORE the network call,
+    // so no document text leaves the process.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the endpoint host is allow-listed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [{ index: 0 }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await withPolicy(["example.test"]).rerank("q", [rr("a")], 1);
+    expect(out.map((r) => r.document.id)).toEqual(["doc-a"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("short-circuits empty candidates BEFORE the egress check", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Deny-all policy, but zero candidates means zero network calls. Throwing
+    // here would fail a query that was never going to leave the process — the
+    // ordering of the two guards is load-bearing, not incidental.
+    expect(await withPolicy([]).rerank("q", [], 5)).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("createReranker threads the injected policy into the built reranker", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Proves the runtime's `egressPolicy` actually reaches the instance rather
+    // than the instance silently falling back to `EgressPolicy.fromEnv()`.
+    const built = createReranker(cfg({ provider: "cohere", apiKey: "k" }), {
+      egressPolicy: new EgressPolicy([]),
+    });
+    await expect(built!.rerank("q", [rr("a")], 1)).rejects.toThrow(EgressError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
