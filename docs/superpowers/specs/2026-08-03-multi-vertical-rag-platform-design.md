@@ -185,26 +185,99 @@ Two rules follow:
 - **Unknown fields in a pack are an error, not a warning.** A pack written against a newer contract will contain fields this core silently ignores otherwise — and silently ignoring a _scanner_ is a compliance failure, not a cosmetic one.
 - **Both versions appear in the acceptance-run output (§6.3) and in the health endpoint**, so "what is this client actually running" is answerable from a screenshot.
 
+### 3.7 Sensitive-content disposition at ingest
+
+Scanning is only half a control; what happens **on a match** is the other half,
+and it must be declared rather than implied. Scanners gain a `disposition`, whose
+default derives from the `kind` they already carry:
+
+```yaml
+scanners:
+  - id: ssn
+    kind: identifying
+    disposition: exclude # default for identifying
+  - id: tax-form-with-amount
+    kind: contextual
+    disposition: flag # default for contextual
+```
+
+| Disposition | Effect                                         | When it is right                                                       |
+| ----------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+| `exclude`   | Document is never indexed; the event is logged | The document is a client file, not firm procedure. **The default.**    |
+| `redact`    | Indexed with matched spans masked              | Overwhelmingly procedure, stray reference, and the concern is _egress_ |
+| `flag`      | Indexed as-is; recorded for review             | Advisory signal — a procedure that merely names a regulated form       |
+
+#### Exclusion is the default; redaction is the exception
+
+Two independent lines of evidence, and one structural fact, put the default at
+exclusion:
+
+- **Redaction degrades exactly this workload.** Amazon Science (arXiv 2411.05978) measured sanitization at ~1–5% cost on sentiment and entailment but **>25% on comprehension Q&A** — which is what a knowledge-base assistant does.
+- **NIST SP 800-188** frames de-identification as reducing residual risk, never eliminating it; residual risk must be evaluated explicitly rather than assumed away.
+- **A document that fails an identifying scanner usually should not be in a procedures corpus at all.** Redacting it keeps a client file in the index with holes in it, which serves no one.
+
+#### ⚠ Redaction protects the model, not the user
+
+**Redacting an indexed chunk does not redact the source.** `metadata.url` points
+at the original in the client's SharePoint or Drive, and users have access to it —
+that is the point of a citation. Redact a chunk and the citation still links to
+the unredacted file.
+
+So redaction's value is narrow and specific: **it stops text reaching a
+third-party model.** It does nothing about internal access. That makes it a
+legitimate _egress_ control and an invalid _confidentiality_ control, and the
+distinction must not blur — a deployment that redacts and believes it has
+protected against internal disclosure has protected against nothing.
+
+Two rules follow, both mirroring AWS's own RAG reference architecture, which does
+not trust single-pass redaction either:
+
+- **Re-scan after redacting.** A document still tripping an identifying scanner post-redaction is **excluded**, not indexed.
+- **Record the redaction** in `ingest_log`: scanner id and match count, **never the matched value**.
+
+#### What is tunable, and what is not
+
+Per §4.1's sensitivity axis, disabling a scanner that would have excluded a
+document **widens the sensitivity boundary** — so a deployment-level
+"scrubbing: off" switch is the tier gate disabled under another name.
+
+- **Identifying scanners are not disableable from configuration.** Their definitions and dispositions are pack-resident and `protected` (§4.2).
+- **Contextual scanners are DB-tunable** — a deployment may quiet them. They are advisory by construction, and on TWK's corpus the contextual patterns produced **316 flags, all false positives**, so tuning them is a genuine operational need. The half that caught the 522-SSN roster stays on.
+
+#### ⚠ This reorders the pipeline's most sensitive section
+
+`scanForTRI` currently runs at `packages/ingestion/src/pipeline.ts:309` — **after**
+`upsertDocument` has already persisted the row including full markdown. That is
+adequate for `flag`, which is all it does today. **It cannot support `exclude`:**
+by the time the scan runs, the sensitive text is already in the database.
+
+Supporting exclusion requires moving the scan **between parse and persist**. The
+change is small and the blast radius is not — slice 1 must treat it as a
+first-class task with its own tests, not as a tweak.
+
 ---
 
 ## 4. Pack vs. database: the configuration split
 
 **The test: does changing this require review?**
 
-| Item                                                    | Where    | Rationale                                                |
-| ------------------------------------------------------- | -------- | -------------------------------------------------------- |
-| Tier definitions and `indexable`                        | Pack     | Widening changes what is legally allowed in the index    |
-| Scanner patterns and `kind`                             | Pack     | Weakening a scanner is a compliance change               |
-| System prompt                                           | Pack     | It is the grounding contract                             |
-| Disclaimer                                              | Pack     | Often a regulatory requirement                           |
-| Classification rule _shapes_ — what a rule may match on | Pack     | Defines what classification can express at all           |
-| Sources to index                                        | DB       | Deployment fact                                          |
-| Classification _patterns_ — this client's folder names  | DB       | Client-specific instances of a pack-defined shape (§3.3) |
-| Folder exclusions                                       | DB       | Client-specific; changes during engagement               |
-| Staff roster                                            | DB       | Changes with hiring                                      |
-| Retrieval knobs (`topK`, weights, rerank on/off)        | DB       | Tuning, no policy content                                |
-| Vocabulary additions                                    | DB       | Additive, harmless                                       |
-| Branding (`APP_NAME`)                                   | DB / env | Cosmetic                                                 |
+| Item                                                    | Where    | Rationale                                                                   |
+| ------------------------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| Tier definitions and `indexable`                        | Pack     | Widening changes what is legally allowed in the index                       |
+| Scanner patterns and `kind`                             | Pack     | Weakening a scanner is a compliance change                                  |
+| Scanner `disposition` (exclude/redact/flag)             | Pack     | Determines whether a match keeps material out (§3.7)                        |
+| Whether an _identifying_ scanner runs at all            | Pack     | Disabling one widens the sensitivity boundary                               |
+| Whether a _contextual_ scanner flags                    | DB       | Advisory only; 316 false positives on TWK made this a real operational need |
+| System prompt                                           | Pack     | It is the grounding contract                                                |
+| Disclaimer                                              | Pack     | Often a regulatory requirement                                              |
+| Classification rule _shapes_ — what a rule may match on | Pack     | Defines what classification can express at all                              |
+| Sources to index                                        | DB       | Deployment fact                                                             |
+| Classification _patterns_ — this client's folder names  | DB       | Client-specific instances of a pack-defined shape (§3.3)                    |
+| Folder exclusions                                       | DB       | Client-specific; changes during engagement                                  |
+| Staff roster                                            | DB       | Changes with hiring                                                         |
+| Retrieval knobs (`topK`, weights, rerank on/off)        | DB       | Tuning, no policy content                                                   |
+| Vocabulary additions                                    | DB       | Additive, harmless                                                          |
+| Branding (`APP_NAME`)                                   | DB / env | Cosmetic                                                                    |
 
 ### 4.1 The safety property — two axes, not one
 
@@ -405,6 +478,9 @@ This design is larger than one plan. It decomposes into four, in dependency
 order. Each gets its own implementation plan.
 
 1. **Domain extraction from core.** Neutral default prompt; tiers open (schema migration); scanners and disclaimer moved behind pack-supplied policy; the CPA pack created as the first pack. _Largest and riskiest — it touches the ingestion gate and the compliance machinery._ **The tier migration inside this slice needs its own design pass before implementation** (see §10) — the rest of the slice does not.
+
+   **Includes the §3.7 pipeline reorder** — moving the sensitive-content scan from after `upsertDocument` to between parse and persist, so `exclude` becomes expressible. Treat as a first-class task with its own tests: today's ordering means a document that _should_ be excluded is already in the database, markdown and all, before anything looks at it.
+
 2. **Local generation.** `baseURL` on `GeneratorOptions` plus config and docs. _Hours, independent of everything else, unblocks two verticals._
 3. **Settings catalog + DB-resident config + admin surface.** Catalog with types and `protected` flags; per-request read with short-TTL cache; generic admin UI; audited writes.
 4. **Verification framework.** Pack validation (incl. the §3.6 contract check and RE2-based scanner bounding), the structural conformance suite in PR CI, the nightly behavioral check against a local model, the acceptance run, and the drift check. _Depends on slice 2 — the nightly behavioral check needs local generation to be affordable._
@@ -438,3 +514,5 @@ slice ships its docs with it.
 - **The tier migration is the highest-risk change in this design.** `dataClass` gates ingestion, and the current enum collapses Class C and D into one value — so, per `cpa-consulting/docs/rag/findings/r5-compliance-gate.md`, _"any change that lets C through lets D through."_ This warrants its own spec before implementation, not just a task.
 - **Generic admin UIs are a support surface.** Every exposed setting is something a client can set badly. Start with the smallest `adminEditable` list that works and widen on demand.
 - **The drift check depends on a stable question set per client.** Without one it cannot run. For TWK that set does not exist yet and is blocked on the same gold-set session as retrieval tuning.
+- **Exclusion at ingest is silent by construction, and silence is the failure mode.** A document excluded by §3.7 leaves an `ingest_log` row and nothing else — no chunks, no search hit, no answer citing it. To a user it is indistinguishable from a document that was never synced. This is correct behaviour and a poor experience: "the KB doesn't know about our onboarding SOP" is a support call whose answer lives only in a log table. An operator-visible view of what was excluded and why should ship with slice 1, not after the first confused user.
+- **Scanner false-negatives are unbounded and unmeasurable.** The design treats an identifying-scanner match as authoritative, but nothing establishes what the scanners _miss_. TWK's screen found a 522-SSN roster because SSNs are formatted; a client name in prose trips nothing. Exclusion is therefore a floor, not a guarantee, and the human review in the content-boundary plan remains load-bearing rather than a formality this replaces.
