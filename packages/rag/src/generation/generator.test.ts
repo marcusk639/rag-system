@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 import {
   buildPrompt,
@@ -376,10 +376,34 @@ describe("filterCitationsToAnswer — grouped citation forms", () => {
   });
 });
 
+/**
+ * Read the base URL a generator's SDK client was actually constructed with.
+ *
+ * `client` is private on our generator classes, and `httpOptions` is private on
+ * `GoogleGenAI` — but the property under test IS the client's, not the
+ * pre-flight's. Every other test in this file can only prove the allow-list saw
+ * some string; these two prove the client points at that same host. Reaching
+ * through the type boundary is the point, not an accident.
+ */
+function openAIClientBaseURL(gen: OpenAIGenerator): string {
+  return (gen as unknown as { client: { baseURL: string } }).client.baseURL;
+}
+
+function geminiClientBaseURL(gen: GeminiGenerator): string | undefined {
+  return (gen as unknown as { client: { httpOptions?: { baseUrl?: string } } })
+    .client.httpOptions?.baseUrl;
+}
+
 describe("baseURL — self-hosted generation endpoints", () => {
   const cleanChunk = [
     rr({ text: "File the engagement letter in the client folder." }),
   ];
+
+  afterEach(() => {
+    // These tests stub provider env vars that both SDKs read at construction.
+    // Leaking one would silently redirect every later test's client.
+    vi.unstubAllEnvs();
+  });
 
   it("validates the effective host, not api.openai.com, when baseURL is set", async () => {
     // The allow-list names OpenAI and nothing else. Pointing baseURL somewhere
@@ -445,5 +469,70 @@ describe("baseURL — self-hosted generation endpoints", () => {
         baseURL: "http://127.0.0.1:9/v1",
       }),
     ).toThrow(/baseURL/);
+  });
+
+  it("refuses baseURL on direct construction, not only through the factory", () => {
+    // `GeminiGenerator` is exported. A caller who bypasses the factory must not
+    // get an instance that silently drops the setting on the floor.
+    expect(
+      () =>
+        new GeminiGenerator({
+          apiKey: "test-key",
+          model: "test-model",
+          baseURL: "http://127.0.0.1:9/v1",
+        }),
+    ).toThrow(/baseURL/);
+  });
+
+  it("constructs the OpenAI client with the configured baseURL, not just the pre-flight", () => {
+    // The other tests here only prove `preFlight` honors baseURL. They would
+    // all still pass if the client ignored it and called api.openai.com — which
+    // is the exact failure this feature exists to prevent, and no live-model run
+    // has ever exercised it.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+      triPolicy: "off",
+    });
+    expect(openAIClientBaseURL(gen)).toBe("http://127.0.0.1:9/v1");
+  });
+
+  it("neutralizes OPENAI_BASE_URL when no baseURL is configured", () => {
+    // REGRESSION. The OpenAI SDK constructor destructures
+    // `baseURL = readEnv("OPENAI_BASE_URL")`, so OMITTING the key is not the
+    // same as passing the default: the env var wins. The pre-flight meanwhile
+    // asserted the api.openai.com literal, so the allow-list approved one host
+    // while the client called another. Passing the effective URL unconditionally
+    // is what makes the two provably the same host.
+    vi.stubEnv("OPENAI_BASE_URL", "http://not-on-the-allow-list.example/v1");
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+    });
+    expect(openAIClientBaseURL(gen)).toBe("https://api.openai.com/v1");
+  });
+
+  it("neutralizes GOOGLE_GEMINI_BASE_URL on the Gemini client", () => {
+    // REGRESSION, same shape as the OpenAI case above: `@google/genai` falls
+    // back to GOOGLE_GEMINI_BASE_URL when `httpOptions.baseUrl` is absent, so
+    // an env var could redirect the client away from the one host
+    // `preFlight` asserts against the allow-list.
+    vi.stubEnv(
+      "GOOGLE_GEMINI_BASE_URL",
+      "http://not-on-the-allow-list.example",
+    );
+    const gen = new GeminiGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["generativelanguage.googleapis.com"]),
+      triPolicy: "off",
+    });
+    expect(geminiClientBaseURL(gen)).toBe(
+      "https://generativelanguage.googleapis.com",
+    );
   });
 });
