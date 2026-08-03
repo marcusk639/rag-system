@@ -14,6 +14,7 @@ import {
   type Parser,
   type SourceDocument,
 } from "@rag/core";
+import { isExcludedPath, redactOrThrow, ContentSafetyError } from "@rag/core";
 import {
   type Db,
   deleteDocumentByExternalId,
@@ -261,12 +262,52 @@ async function ingestOne(
     title: source.title,
   });
 
+  // 0. Layer 2 — structural exclusion. Cheapest and most reliable guard:
+  //    a document that is never parsed cannot be chunked, embedded, or stored.
+  //    The 2026-08-03 screen's strongest signal was LOCATION, not content —
+  //    per-client billing files sat under client-named folders.
+  const exclusion = isExcludedPath(source.metadata?.path);
+  if (exclusion.excluded) {
+    log.warn(
+      { reason: exclusion.reason, marker: "ingest.excluded_path" },
+      "skipping document: path is on the client-content denylist",
+    );
+    return { chunksCreated: 0 };
+  }
+
   // 1. Parse to clean markdown.
   const parsed = await parser.parse({
     content: source.content,
     mimeType: source.mimeType,
     filename: source.title,
   });
+
+  // 1b. Layer 1 — redact structured identifiers BEFORE anything downstream.
+  //     This must precede embedding, not merely storage: embeddings go to a
+  //     third party, so redacting on the way into Postgres while embedding raw
+  //     text protects the database and discloses the document. That ordering
+  //     mistake is what put client data in front of an external provider on
+  //     2026-08-01. Hashing the redacted text also means a document whose only
+  //     change is a redaction does not silently reuse a stale embedding.
+  let redacted;
+  try {
+    redacted = redactOrThrow(parsed.markdown);
+  } catch (err) {
+    // Fail CLOSED: quarantine by skipping, never index raw.
+    log.error(
+      { err, marker: "ingest.redaction_failed" },
+      "redaction failed; quarantining document rather than indexing it",
+    );
+    if (err instanceof ContentSafetyError) return { chunksCreated: 0 };
+    throw err;
+  }
+  if (redacted.totalRedacted > 0) {
+    log.warn(
+      { findings: redacted.findings, marker: "ingest.redacted" },
+      "redacted identifiers before indexing",
+    );
+  }
+  parsed.markdown = redacted.text;
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched
   //    documents (source updated metadata only) skip embedding work.
