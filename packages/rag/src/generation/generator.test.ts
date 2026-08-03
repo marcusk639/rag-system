@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 import {
   buildPrompt,
+  createGenerator,
   filterCitationsToAnswer,
   GeminiGenerator,
   OpenAIGenerator,
@@ -356,5 +357,77 @@ describe("filterCitationsToAnswer — grouped citation forms", () => {
   it("ignores an implausibly wide range rather than inflating the set", () => {
     // A year range in prose must not sweep in every citation.
     expect(kept("Applies to tax years [2019-2024].")).toEqual([]);
+  });
+});
+
+describe("baseURL — self-hosted generation endpoints", () => {
+  const cleanChunk = [
+    rr({ text: "File the engagement letter in the client folder." }),
+  ];
+
+  it("validates the effective host, not api.openai.com, when baseURL is set", async () => {
+    // The allow-list names OpenAI and nothing else. Pointing baseURL somewhere
+    // else must be blocked — otherwise the allow-list is approving a host the
+    // client is not calling, which is worse than having no allow-list at all.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+    });
+    await expect(gen.answer("q", cleanChunk)).rejects.toThrow(EgressError);
+  });
+
+  it("allows the effective host when the allow-list names it", async () => {
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+      triPolicy: "off",
+    });
+    // Reaching a connection error proves the pre-flight passed. Asserting "not
+    // EgressError" rather than a specific network error keeps this from
+    // depending on how the SDK surfaces ECONNREFUSED.
+    const err = await gen.answer("q", cleanChunk).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(EgressError);
+  });
+
+  it("still validates api.openai.com when baseURL is omitted", async () => {
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy([]),
+      triPolicy: "off",
+    });
+    await expect(gen.answer("q", cleanChunk)).rejects.toThrow(EgressError);
+  });
+
+  it("blocks an SSN through a local endpoint under the default policy", async () => {
+    // §5.2: a local endpoint does not relax the TRI gate. Nothing about
+    // "looks local" is verifiable — localhost can be a tunnel.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+    });
+    await expect(
+      gen.answer("q", [rr({ text: "Client SSN 123-45-6789 on file." })]),
+    ).rejects.toThrow(ComplianceError);
+  });
+
+  it("refuses baseURL under the gemini provider rather than ignoring it", async () => {
+    // Silently ignoring it would let an operator believe they are air-gapped
+    // while every prompt goes to Google.
+    expect(() =>
+      createGenerator({
+        provider: "gemini",
+        apiKey: "test-key",
+        model: "test-model",
+        baseURL: "http://127.0.0.1:9/v1",
+      }),
+    ).toThrow(/baseURL/);
   });
 });
