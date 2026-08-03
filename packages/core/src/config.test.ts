@@ -289,6 +289,21 @@ describe("loadConfig — generation baseURL and apiKey", () => {
     expect(cfg.generation?.apiKey).toBeUndefined();
   });
 
+  it("collapses empty-string GENERATION_BASE_URL and GENERATION_API_KEY to undefined", () => {
+    // `FOO=` in a .env yields "", which would read as "a value is present"
+    // downstream. This is what `|| undefined` is for, and what the
+    // omitted-variable test above cannot exercise.
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "openai",
+      GENERATION_MODEL: "llama3.1:8b",
+      GENERATION_BASE_URL: "",
+      GENERATION_API_KEY: "",
+    });
+    expect(cfg.generation?.baseURL).toBeUndefined();
+    expect(cfg.generation?.apiKey).toBeUndefined();
+  });
+
   it("rejects a malformed GENERATION_BASE_URL rather than passing it to the SDK", () => {
     // z.string().url() — a typo'd host should fail at boot, not at first query.
     expect(() =>
