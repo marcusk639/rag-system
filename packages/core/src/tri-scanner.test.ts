@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { scanForTRI } from "./tri-scanner.js";
+import {
+  TRI_IDENTIFYING_LABELS,
+  TRI_PATTERN_LABELS,
+  identifyingTRIPatterns,
+  scanForTRI,
+} from "./tri-scanner.js";
 
 describe("scanForTRI", () => {
   // ── Clean text ────────────────────────────────────────────────────────────────
@@ -241,5 +246,51 @@ describe("scanForTRI", () => {
     expect(result.patterns).toContain("SSN");
     expect(result.patterns).toContain("taxpayer+amount");
     expect(result.patterns).toContain("tax-form+amount");
+  });
+});
+
+describe("identifyingTRIPatterns", () => {
+  // Why this split exists: a screen of the TWK corpus (858 documents) flagged
+  // 41% of it, but the classes are not alike. `tax-form+amount` matched 316
+  // documents and its hits are what a procedure explaining how to review a
+  // return looks like. `SSN`/`EIN` matched 24, one of which held 260 distinct
+  // SSN-shaped values — a client roster, not a placeholder. A single policy
+  // knob governing both is what let a permissive default cover the second case.
+
+  it("selects the identifying labels out of a mixed scan result", () => {
+    const { patterns } = scanForTRI(
+      "SSN 123-45-6789; taxpayer owes $1,000; Form 1040 line 15: $80,000.",
+    );
+
+    expect(identifyingTRIPatterns(patterns)).toEqual(["SSN"]);
+  });
+
+  it("returns empty for a contextual-only result", () => {
+    const { patterns } = scanForTRI(
+      "Confirm the Form 1040 refund does not exceed $25,000 before release.",
+    );
+
+    expect(patterns.length).toBeGreaterThan(0);
+    expect(identifyingTRIPatterns(patterns)).toEqual([]);
+  });
+
+  it("selects EIN as identifying", () => {
+    const { patterns } = scanForTRI("Employer ID 12-3456789 on file.");
+
+    expect(identifyingTRIPatterns(patterns)).toEqual(["EIN"]);
+  });
+
+  it("returns empty for an empty input", () => {
+    expect(identifyingTRIPatterns([])).toEqual([]);
+  });
+
+  // Drift guard. The split is a list of label STRINGS matched against what the
+  // scanner emits, so renaming a pattern's label would silently downgrade an
+  // identifying pattern to contextual — the exact failure this exists to
+  // prevent, and one no other test would catch.
+  it("every identifying label corresponds to a real scanner pattern", () => {
+    for (const label of TRI_IDENTIFYING_LABELS) {
+      expect(TRI_PATTERN_LABELS).toContain(label);
+    }
   });
 });

@@ -85,6 +85,50 @@ const TRI_PATTERNS: TRIPattern[] = [
   },
 ];
 
+/** Every label `scanForTRI` can emit. Exported so callers that classify labels
+ * can assert their lists still correspond to real patterns. */
+export const TRI_PATTERN_LABELS: readonly string[] = TRI_PATTERNS.map(
+  (p) => p.label,
+);
+
+/**
+ * Labels whose match is **identifying** rather than **contextual**.
+ *
+ * The distinction is the difference between "this text is about a tax return"
+ * and "this text contains someone's tax identifier", and it matters because
+ * callers apply a policy to the result.
+ *
+ * The contextual patterns (`tax-form+amount`, `W2+amount`, `schedule+amount`,
+ * `1099+amount`, `taxpayer+amount`) match any text naming an IRS form near a
+ * dollar figure — which is what a *procedure explaining how to prepare that
+ * form* looks like. A screen of the TWK corpus (858 documents) put
+ * `tax-form+amount` on 316 of them, and the inspected hits were SOPs.
+ * Treating those as a hard stop makes the assistant fail on exactly the
+ * questions it exists to answer.
+ *
+ * `SSN` and `EIN` are not like that. They match a formatted identifier, and in
+ * that same screen they hit 24 documents — one holding 260 distinct SSN-shaped
+ * values, which is a client roster rather than a placeholder. No corpus-level
+ * false-positive rate makes it safe to disclose those to a third party.
+ *
+ * So a single permissive policy must not cover both. Callers are expected to
+ * treat an identifying match as a hard stop regardless of how lenient their
+ * policy is for the contextual ones.
+ */
+export const TRI_IDENTIFYING_LABELS: readonly string[] = ["SSN", "EIN"];
+
+const IDENTIFYING = new Set(TRI_IDENTIFYING_LABELS);
+
+/**
+ * Narrow a `TRIScanResult['patterns']` list to the identifying labels only.
+ * Returns `[]` when the scan matched nothing identifying — which is the common
+ * case on an internal SOP corpus, and the case a lenient policy is calibrated
+ * for.
+ */
+export function identifyingTRIPatterns(patterns: readonly string[]): string[] {
+  return patterns.filter((p) => IDENTIFYING.has(p));
+}
+
 /**
  * Scan `text` for TRI patterns.
  * Returns `{ detected: false, patterns: [] }` when no patterns match.
