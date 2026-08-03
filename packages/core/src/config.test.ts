@@ -264,3 +264,40 @@ describe("loadConfig — DOCS_GAP_DIGEST_* (Phase 4 documentation-gap digest)", 
     ).toThrow();
   });
 });
+
+describe("loadConfig — generation baseURL and apiKey", () => {
+  it("reads GENERATION_BASE_URL and GENERATION_API_KEY into the generation block", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "openai",
+      GENERATION_MODEL: "llama3.1:8b",
+      GENERATION_BASE_URL: "http://127.0.0.1:11434/v1",
+      GENERATION_API_KEY: "gen-key",
+    });
+    expect(cfg.generation?.baseURL).toBe("http://127.0.0.1:11434/v1");
+    expect(cfg.generation?.apiKey).toBe("gen-key");
+  });
+
+  it("leaves both undefined when unset, rather than empty strings", () => {
+    // An empty string would defeat the "is a key present" check downstream.
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+    });
+    expect(cfg.generation?.baseURL).toBeUndefined();
+    expect(cfg.generation?.apiKey).toBeUndefined();
+  });
+
+  it("rejects a malformed GENERATION_BASE_URL rather than passing it to the SDK", () => {
+    // z.string().url() — a typo'd host should fail at boot, not at first query.
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        GENERATION_PROVIDER: "openai",
+        GENERATION_MODEL: "llama3.1:8b",
+        GENERATION_BASE_URL: "127.0.0.1:11434",
+      }),
+    ).toThrow();
+  });
+});
