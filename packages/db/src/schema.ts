@@ -592,7 +592,7 @@ export const staffSourceAssignments = pgTable(
 // display-only count aggregates -- never raw question text, a hash, or any
 // other reversible derivative. Do NOT add a column here that could
 // reconstruct what was asked; that is a separate, out-of-scope policy
-// decision (see docs/TWK-MANUAL-RUNBOOK.md).
+// decision (see the deployment runbook for the operating tenant).
 // ----------------------------------------------------------------------------
 /**
  * Structurally mirrors `SourceGroupSummary` in

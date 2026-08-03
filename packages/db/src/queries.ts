@@ -645,10 +645,10 @@ export async function hybridSearch(
                -- both AND every lexeme together, which requires ONE chunk to
                -- contain EVERY content word of the question. On a natural
                -- question that is a bar almost nothing clears: measured against
-               -- the TWK SOP corpus (321 chunks) with 15 realistic staff
-               -- questions, 5 of 15 (33%) matched ZERO chunks under AND —
-               -- including "How do I set up a new bookkeeping client" and "How
-               -- do I add 2% shareholder health insurance in QuickBooks", both
+               -- a representative accounting-firm SOP corpus with 15 realistic
+               -- staff questions, 5 of 15 (33%) matched ZERO chunks under AND —
+               -- including multi-clause questions about client setup and
+               -- payroll configuration, both
                -- of which have a dedicated SOP in the corpus. For those queries
                -- the sparse arm contributed nothing and hybrid search silently
                -- degraded to dense-only, losing exactly the exact-token recall
