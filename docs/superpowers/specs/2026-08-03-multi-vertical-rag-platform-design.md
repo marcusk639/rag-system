@@ -252,7 +252,7 @@ adequate for `flag`, which is all it does today. **It cannot support `exclude`:*
 by the time the scan runs, the sensitive text is already in the database.
 
 Supporting exclusion requires moving the scan **between parse and persist**. The
-change is small and the blast radius is not — slice 1 must treat it as a
+change is small and the blast radius is not — slice 1b must treat it as a
 first-class task with its own tests, not as a tweak.
 
 ### 3.8 The scrub toggle — `ingest.scrubBeforeIndex`
@@ -459,6 +459,31 @@ this yields a **fully air-gapped deployment** — nothing leaves the client's
 network. The egress allow-list still applies and should be set to the local
 endpoint's host.
 
+### 5.1 This change is not purely additive — it opens a hole that must be closed
+
+`OpenAIGenerator.preFlight` passes a **hardcoded literal** to the egress check:
+
+```
+generator.ts:372   this.client = new OpenAI({ apiKey: opts.apiKey });   // no baseURL
+generator.ts:380   runPreFlight(prompt, "https://api.openai.com", ...)  // hardcoded
+generator.ts:294   egressPolicy.assertAllowed(endpoint);
+```
+
+Adding `baseURL` without threading it into `runPreFlight` would make the
+allow-list validate `api.openai.com` while the request goes somewhere else —
+silently defeating the boundary that gates the reranker. The endpoint argument
+must become `this.opts.baseURL ?? "https://api.openai.com"`, and a test must
+pin that the check sees the **effective** host. This is a live correctness gap
+independent of the feature; the feature is what makes it exploitable.
+
+### 5.2 Do not auto-relax the TRI gate for local endpoints
+
+With a fully local model the TRI gate guards nothing — its purpose is
+preventing third-party egress — so inferring "local, therefore relax
+`triPolicy`" is tempting. Don't. "Looks local" is not a security property:
+`localhost:11434` can be an SSH tunnel to anywhere. Keep `triPolicy` explicit
+and document that an air-gapped deployment may relax it **deliberately**.
+
 ---
 
 ## 6. Verification
@@ -563,24 +588,69 @@ rolling forward. Runs only at the client, only on demand, read-only via
 
 ## 8. Implementation slices
 
-This design is larger than one plan. It decomposes into four, in dependency
+This design is larger than one plan. It decomposes into five, in dependency
 order. Each gets its own implementation plan.
 
-1. **Domain extraction from core.** Neutral default prompt; tiers open (schema migration); scanners and disclaimer moved behind pack-supplied policy; the CPA pack created as the first pack. _Largest and riskiest — it touches the ingestion gate and the compliance machinery._ **The tier migration inside this slice needs its own design pass before implementation** (see §10) — the rest of the slice does not.
+Slice 1 was originally one unit. It is split here because its parts do not share
+a risk profile: two-thirds of it is file moves with no migration, and one-third
+is two migrations plus a reorder of the most sensitive stretch of the ingestion
+pipeline. Bundling them would gate the safe work on the dangerous work for no
+reason.
 
-   **Includes the §3.7 pipeline reorder** — moving the sensitive-content scan from after `upsertDocument` to between parse and persist, so `exclude` becomes expressible. Treat as a first-class task with its own tests: today's ordering means a document that _should_ be excluded is already in the database, markdown and all, before anything looks at it.
+**Slice 1a — Domain extraction (the safe two-thirds).**
+Neutral default prompt with the CPA prompt moved into the first pack; the
+disclaimer (`ask.ts:51-59`) made pack-supplied; the CPA pack skeleton created.
+No schema migration, no pipeline change. This is what delivers "core is not
+opinionated about any domain." _Days._
 
-   **Includes the §3.8 `processingVersion` column** — the change-detection half of the scrub toggle, and a prerequisite for it. Ships in this slice even though the toggle itself lands in slice 3, because retrofitting provenance onto an already-ingested corpus means a full re-sync at every client. Cheap now, expensive later.
+The one real hazard is behavioural, not structural: the live TWK pilot's answers
+change the moment the default prompt goes neutral, so the core change and the
+pack that restores its prompt must land in a single deploy.
 
-2. **Local generation.** `baseURL` on `GeneratorOptions` plus config and docs. _Hours, independent of everything else, unblocks two verticals._
-3. **Settings catalog + DB-resident config + admin surface.** Catalog with types and `protected` flags; per-request read with short-TTL cache; generic admin UI; audited writes. **Includes `ingest.scrubBeforeIndex` (§3.8)** with its on-toggle warning, the targeted re-ingest path, and the redaction-density report — the toggle without those is a switch whose consequences are invisible.
-4. **Verification framework.** Pack validation (incl. the §3.6 contract check and RE2-based scanner bounding), the structural conformance suite in PR CI, the nightly behavioral check against a local model, the acceptance run, and the drift check. _Depends on slice 2 — the nightly behavioral check needs local generation to be affordable._
+**Slice 1b — The sensitivity machinery (the dangerous third).**
+Tiers opened (`dataClassEnum` → text, `DocumentClass` open — migration #1);
+scanners moved behind pack policy; the §3.7 pipeline reorder; the §3.8
+`processingVersion` column (migration #2). _Weeks._ Gated on two things:
 
-**Sequencing note:** slice 2 is independent and can ship first. Slice 1 should
-not begin until the TWK content-boundary work
-([`../plans/2026-08-03-kb-content-boundary.md`](../plans/2026-08-03-kb-content-boundary.md)
-Phase 1) has removed confirmed Class D data from the live index — refactoring the
-sensitivity machinery while a client roster is retrievable is the wrong order.
+- **the tier migration's own design pass** (§10) — `dataClass` gates ingestion at `pipeline.ts:245`, and the current enum collapses Class C and D, so any change that lets C through lets D through;
+- **the TWK content-boundary work** ([`../plans/2026-08-03-kb-content-boundary.md`](../plans/2026-08-03-kb-content-boundary.md) Phase 1) having removed confirmed Class D data from the live index. Refactoring the sensitivity machinery while a client roster is retrievable is the wrong order.
+
+The pipeline reorder deserves its own tests regardless of the migrations:
+today's ordering means a document that _should_ be excluded is already in the
+database, markdown and all, before anything looks at it. `processingVersion`
+ships here rather than with the toggle in slice 3 because retrofitting
+provenance onto an already-ingested corpus means a full re-sync at every client
+— cheap now, expensive later.
+
+**Slice 2 — Local generation.**
+`baseURL` on `GeneratorOptions`, threaded through config and `buildCoreDeps`,
+plus the §5.1 egress fix and the §5.2 non-decision, plus docs. _Half a day to a
+day; independent of everything else; unblocks two verticals._
+
+**Slice 3 — Settings catalog + DB-resident config + admin surface.**
+Catalog with types and `protected` flags; per-request read with short-TTL cache;
+generic admin UI; audited writes. **Includes `ingest.scrubBeforeIndex` (§3.8)**
+with its on-toggle warning, the targeted re-ingest path, and the
+redaction-density report — the toggle without those is a switch whose
+consequences are invisible.
+
+**Slice 4 — Verification framework.**
+Pack validation (incl. the §3.6 contract check and RE2-based scanner bounding),
+the structural conformance suite in PR CI, the nightly behavioral check against
+a local model, the acceptance run, and the drift check. _Depends on slice 2 —
+the nightly behavioral check needs local generation to be affordable._
+
+### 8.1 Recommended order: 2 → 1a → (containment) → 1b → 3 → 4
+
+**Start with slice 2**, for four reasons in ascending order of importance:
+
+1. It is the only slice with no gate in front of it.
+2. It unblocks the healthcare and treatment-center verticals, and makes slice 4's nightly behavioral check affordable.
+3. It forces the §5.1 egress fix, which is worth doing whether or not local generation ever ships.
+4. **It is a walking skeleton for the plumbing slice 1a needs.** `GeneratorOptions` → config → `buildCoreDeps` → `createGenerator` is the identical path the externalized prompt travels. If that threading is awkward, slice 2 surfaces it in a day, on a change whose blast radius is one optional field — rather than mid-way through a change that alters what the live pilot says.
+
+Then **1a**, which is the actual deliverable of a domain-neutral core. Then
+**1b**, once containment has landed and the tier migration has its design pass.
 
 ---
 
@@ -605,5 +675,5 @@ slice ships its docs with it.
 - **The tier migration is the highest-risk change in this design.** `dataClass` gates ingestion, and the current enum collapses Class C and D into one value — so, per `cpa-consulting/docs/rag/findings/r5-compliance-gate.md`, _"any change that lets C through lets D through."_ This warrants its own spec before implementation, not just a task.
 - **Generic admin UIs are a support surface.** Every exposed setting is something a client can set badly. Start with the smallest `adminEditable` list that works and widen on demand.
 - **The drift check depends on a stable question set per client.** Without one it cannot run. For TWK that set does not exist yet and is blocked on the same gold-set session as retrieval tuning.
-- **Exclusion at ingest is silent by construction, and silence is the failure mode.** A document excluded by §3.7 leaves an `ingest_log` row and nothing else — no chunks, no search hit, no answer citing it. To a user it is indistinguishable from a document that was never synced. This is correct behaviour and a poor experience: "the KB doesn't know about our onboarding SOP" is a support call whose answer lives only in a log table. An operator-visible view of what was excluded and why should ship with slice 1, not after the first confused user.
+- **Exclusion at ingest is silent by construction, and silence is the failure mode.** A document excluded by §3.7 leaves an `ingest_log` row and nothing else — no chunks, no search hit, no answer citing it. To a user it is indistinguishable from a document that was never synced. This is correct behaviour and a poor experience: "the KB doesn't know about our onboarding SOP" is a support call whose answer lives only in a log table. An operator-visible view of what was excluded and why should ship with slice 1b — alongside the exclusion behaviour itself, not after the first confused user.
 - **Scanner false-negatives are unbounded and unmeasurable.** The design treats an identifying-scanner match as authoritative, but nothing establishes what the scanners _miss_. TWK's screen found a 522-SSN roster because SSNs are formatted; a client name in prose trips nothing. Exclusion is therefore a floor, not a guarantee, and the human review in the content-boundary plan remains load-bearing rather than a formality this replaces.
