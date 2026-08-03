@@ -178,8 +178,6 @@ export async function buildCoreDeps(
     shipAuditLogTz: config.auditSink.tz,
   });
 
-  // Generation reuses the embedding provider's API key — same vendor in
-  // practice (Gemini embedding + Gemini generation, OpenAI + OpenAI).
   let generator: Generator | null = null;
   if (config.generation) {
     // Generation used to borrow the embedding provider's key outright, on the
@@ -220,6 +218,10 @@ export async function buildCoreDeps(
           ? { baseURL: config.generation.baseURL }
           : {}),
         maxOutputTokens: config.generation.maxOutputTokens,
+        // The same shared policy the embedder, audit sink, and reranker use.
+        // Without it the generator built its own from the environment — same
+        // allow-list in practice, but nothing guaranteed it.
+        egressPolicy,
         triPolicy,
         onTriDetected: (patterns) =>
           logger.warn(
@@ -229,12 +231,28 @@ export async function buildCoreDeps(
       });
       if (config.generation.baseURL) {
         // An operator who believes they are air-gapped needs one line in the
-        // boot log confirming it — and needs the failure to be obvious if the
-        // allow-list does not name the host.
-        logger.info(
-          { baseURL: config.generation.baseURL },
-          "generation using a self-hosted endpoint",
-        );
+        // boot log confirming it — and that line must not affirm a belief we
+        // have not checked. A deployment whose EGRESS_ALLOWED_HOSTS omits this
+        // host boots clean and then 503s on every /ask; say so at boot instead.
+        //
+        // Logged, never thrown: api/mcp crash-looping on a config error is an
+        // existing deployment hazard (see CLAUDE.md), and retrieval still works
+        // without generation.
+        try {
+          egressPolicy.assertAllowed(config.generation.baseURL);
+          logger.info(
+            { baseURL: config.generation.baseURL },
+            "generation using a self-hosted endpoint",
+          );
+        } catch {
+          logger.error(
+            {
+              baseURL: config.generation.baseURL,
+              allowedHosts: egressPolicy.allowedHosts,
+            },
+            "GENERATION_BASE_URL host is not in EGRESS_ALLOWED_HOSTS — every /ask will fail with EGRESS_BLOCKED",
+          );
+        }
       }
     }
   }
