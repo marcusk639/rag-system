@@ -255,6 +255,94 @@ Supporting exclusion requires moving the scan **between parse and persist**. The
 change is small and the blast radius is not — slice 1 must treat it as a
 first-class task with its own tests, not as a tweak.
 
+### 3.8 The scrub toggle — `ingest.scrubBeforeIndex`
+
+The consumer can turn removal of sensitive spans on or off per deployment.
+
+**Catalog entry:** `ingest.scrubBeforeIndex`, boolean, default `true`,
+**unprotected** — a pack may expose it via `adminEditable`. It is operational,
+not policy: it does not change what counts as sensitive, only whether this
+deployment applies removal.
+
+**Scope — it governs `redact` and nothing else:**
+
+| Disposition | Toggle on              | Toggle off          |
+| ----------- | ---------------------- | ------------------- |
+| `redact`    | spans masked pre-chunk | ingested unmodified |
+| `exclude`   | excluded               | **still excluded**  |
+| `flag`      | logged                 | **still logged**    |
+
+A deployment that would rather keep raw text and rely on exclusion can say so.
+It cannot use this switch to admit material the sensitivity gate rejects — that
+would be §4.1's boundary widened under a friendlier name.
+
+#### Downside 1 — the switch is not symmetric, and people will assume it is
+
+Scrubbing rewrites the text that gets chunked and embedded. The index keeps no
+memory of what was removed. **Turning it off later affects only documents
+ingested afterward**; making it retroactive requires re-ingestion. A toggle that
+looks reversible and isn't will be flipped by someone expecting the corpus to
+change, and it won't.
+
+**Mitigations:**
+
+- **Record processing provenance per document.** Store which ruleset version and scrub setting produced each row. This makes "which documents were indexed under scrubbing?" a query rather than a guess.
+- **Targeted re-ingest, not full re-sync.** With that record, re-processing hits only affected documents. The pipeline already has the precedent — `documentHasChunks` (`packages/db/src/queries.ts:346`) re-derives work the connector cursor will not re-offer.
+- **Say it at the point of change.** The admin UI must state, on toggle, that it applies to future ingestion and name how many documents were indexed under the previous setting. A warning in a spec nobody reads is not a mitigation.
+
+#### Downside 2 — it perturbs change detection
+
+The pipeline keys idempotency on `sha256(parsed.markdown)`. Fold scrubbing into
+that hash and flipping the toggle — or editing one scanner pattern — makes every
+affected document look content-changed, forcing re-chunk and re-embed. Leave it
+out and a ruleset change **silently fails to propagate**, which is worse: the
+policy was updated and the corpus quietly wasn't.
+
+**Resolution: hash the source pre-scrub, and version the processing separately.**
+
+`contentHash` keeps its current meaning — the source document's content. Add a
+`processingVersion` capturing `(scrubEnabled, scannerRulesetVersion)`.
+Re-processing triggers when **either** changes:
+
+| Source  | Ruleset | Action                               |
+| ------- | ------- | ------------------------------------ |
+| same    | same    | skip — correct and fast              |
+| same    | changed | re-process — new patterns must apply |
+| changed | any     | re-process                           |
+
+This is better than one combined hash on two counts: `contentHash` keeps meaning
+one thing, and ruleset drift becomes explicitly queryable — which is also the
+mechanism Downside 1's mitigations depend on. One column, two problems.
+
+#### Downside 3 — scrubbing degrades retrieval invisibly
+
+Masking spans changes chunk text, so embeddings shift and BM25 loses tokens. A
+heavily-scrubbed document can become effectively unretrievable, with no signal
+anywhere.
+
+**Mitigations:**
+
+- **Record redaction density** (matches per document) at ingest.
+- **Surface high-density documents to the operator.** A document needing heavy redaction is evidence it should have been `exclude`d instead — the density report is how that judgment gets made from data rather than intuition.
+
+#### Downside 4 — redaction still protects the model, not the user
+
+Carried from §3.7 and repeated because this toggle is where someone will believe
+otherwise: scrubbing controls what reaches a third-party model. `metadata.url`
+still opens the unredacted original, and users have access.
+
+**Mitigations:**
+
+- **Suppress the download for scrubbed documents.** `citations[].downloadable` and the object-store path are ours to control; set `hasOriginal = false` so `/documents/:id/download` 404s. This does not close the source link, which is the client's system, but it closes the one we own.
+- **Label the citation as redacted.** Without it, a user reads an answer built from masked text, opens the source, and sees content the answer omitted — with no explanation. The label is what makes that difference legible instead of looking like a bug.
+- **The admin UI copy must state the limitation** where the toggle lives, not only in this document.
+
+#### Deliberately not built
+
+**Per-source scrub settings.** Plausible — one source scrubbed, another not — but
+no engagement has needed it. Deployment-wide now; the catalog key is namespaced
+`ingest.*` so a per-source override can be added without renaming.
+
 ---
 
 ## 4. Pack vs. database: the configuration split
@@ -268,6 +356,7 @@ first-class task with its own tests, not as a tweak.
 | Scanner `disposition` (exclude/redact/flag)             | Pack     | Determines whether a match keeps material out (§3.7)                        |
 | Whether an _identifying_ scanner runs at all            | Pack     | Disabling one widens the sensitivity boundary                               |
 | Whether a _contextual_ scanner flags                    | DB       | Advisory only; 316 false positives on TWK made this a real operational need |
+| `ingest.scrubBeforeIndex` (redaction on/off)            | DB       | Applies removal; does not change what counts as sensitive (§3.8)            |
 | System prompt                                           | Pack     | It is the grounding contract                                                |
 | Disclaimer                                              | Pack     | Often a regulatory requirement                                              |
 | Classification rule _shapes_ — what a rule may match on | Pack     | Defines what classification can express at all                              |
@@ -481,8 +570,10 @@ order. Each gets its own implementation plan.
 
    **Includes the §3.7 pipeline reorder** — moving the sensitive-content scan from after `upsertDocument` to between parse and persist, so `exclude` becomes expressible. Treat as a first-class task with its own tests: today's ordering means a document that _should_ be excluded is already in the database, markdown and all, before anything looks at it.
 
+   **Includes the §3.8 `processingVersion` column** — the change-detection half of the scrub toggle, and a prerequisite for it. Ships in this slice even though the toggle itself lands in slice 3, because retrofitting provenance onto an already-ingested corpus means a full re-sync at every client. Cheap now, expensive later.
+
 2. **Local generation.** `baseURL` on `GeneratorOptions` plus config and docs. _Hours, independent of everything else, unblocks two verticals._
-3. **Settings catalog + DB-resident config + admin surface.** Catalog with types and `protected` flags; per-request read with short-TTL cache; generic admin UI; audited writes.
+3. **Settings catalog + DB-resident config + admin surface.** Catalog with types and `protected` flags; per-request read with short-TTL cache; generic admin UI; audited writes. **Includes `ingest.scrubBeforeIndex` (§3.8)** with its on-toggle warning, the targeted re-ingest path, and the redaction-density report — the toggle without those is a switch whose consequences are invisible.
 4. **Verification framework.** Pack validation (incl. the §3.6 contract check and RE2-based scanner bounding), the structural conformance suite in PR CI, the nightly behavioral check against a local model, the acceptance run, and the drift check. _Depends on slice 2 — the nightly behavioral check needs local generation to be affordable._
 
 **Sequencing note:** slice 2 is independent and can ship first. Slice 1 should
@@ -498,14 +589,14 @@ sensitivity machinery while a client roster is retrievable is the wrong order.
 Documentation is a first-class requirement of this design, not a follow-up. Each
 slice ships its docs with it.
 
-| Document                         | Answers                                                             | Audience                    |
-| -------------------------------- | ------------------------------------------------------------------- | --------------------------- |
-| `docs/ARCHITECTURE.md` (revised) | How the system works, and where the domain boundary is              | Engineer arriving fresh     |
-| `docs/PACK-AUTHORING.md`         | How to write a vertical pack, field by field, with a worked example | You, starting engagement #2 |
-| `docs/DEPLOYING.md`              | How a client stands it up, configures it, and verifies it           | Client's IT                 |
-| `docs/UPGRADING.md`              | How to pull a new image, run acceptance, interpret drift            | Client's IT                 |
-| `docs/SETTINGS.md`               | Every catalog setting: type, range, effect, protected or not        | You and the client admin    |
-| `packs/<vertical>/README.md`     | What this pack asserts and blocks                                   | Compliance reviewer         |
+| Document                         | Answers                                                                                                                                         | Audience                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `docs/ARCHITECTURE.md` (revised) | How the system works, and where the domain boundary is                                                                                          | Engineer arriving fresh     |
+| `docs/PACK-AUTHORING.md`         | How to write a vertical pack, field by field, with a worked example                                                                             | You, starting engagement #2 |
+| `docs/DEPLOYING.md`              | How a client stands it up, configures it, and verifies it                                                                                       | Client's IT                 |
+| `docs/UPGRADING.md`              | How to pull a new image, run acceptance, interpret drift                                                                                        | Client's IT                 |
+| `docs/SETTINGS.md`               | Every catalog setting: type, range, effect, protected or not — and for any setting that is not reversible, that fact stated at the entry (§3.8) | You and the client admin    |
+| `packs/<vertical>/README.md`     | What this pack asserts and blocks                                                                                                               | Compliance reviewer         |
 
 ---
 
