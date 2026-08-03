@@ -147,7 +147,10 @@ export async function buildCoreDeps(
 
   const auditLogSink = createAuditLogSink(config.auditSink, { egressPolicy });
 
-  const reranker = createReranker(config.rerank);
+  // Same shared policy as the embedder and audit sink above — a hosted
+  // reranker ships firm document text to a third-party vendor, so it belongs
+  // behind the one `EGRESS_ALLOWED_HOSTS` allow-list, not outside it.
+  const reranker = createReranker(config.rerank, { egressPolicy });
 
   const retriever = new Retriever(
     db,
@@ -185,11 +188,32 @@ export async function buildCoreDeps(
         "generation configured but no API key on embedding config — generation disabled",
       );
     } else {
+      // `client-data` compliance mode forces the strict TRI policy regardless of
+      // GENERATION_TRI_POLICY. The permissive default (`warn`) is calibrated for
+      // an internal-SOP corpus where the scan's contextual patterns are known
+      // false positives; a deployment that has declared real client data in
+      // scope must never inherit that leniency by omission.
+      const triPolicy =
+        config.complianceMode === "client-data"
+          ? "block"
+          : (config.generation.triPolicy ?? "warn");
+      if (triPolicy !== config.generation.triPolicy) {
+        logger.info(
+          { triPolicy, complianceMode: config.complianceMode },
+          "generation TRI policy forced by compliance mode",
+        );
+      }
       generator = createGenerator({
         provider: config.generation.provider,
         model: config.generation.model,
         apiKey,
         maxOutputTokens: config.generation.maxOutputTokens,
+        triPolicy,
+        onTriDetected: (patterns) =>
+          logger.warn(
+            { triPatterns: patterns, marker: "generation.tri.warned" },
+            "TRI patterns detected in generation prompt; proceeding under triPolicy=warn",
+          ),
       });
     }
   }

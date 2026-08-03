@@ -20,6 +20,16 @@ const STATUS_BY_CODE: Record<string, number> = {
   // A document upload arrived but no object store is configured to persist the
   // original bytes — a server misconfiguration, not a client error.
   STORAGE_NOT_CONFIGURED: 503,
+  // The generation-time TRI pre-flight refused to send the assembled prompt to
+  // an external provider (`triPolicy=block`). This is a deliberate server-side
+  // policy decision about *this* request's content, not a crash — 422 so the
+  // client can say something true instead of "Internal server error", and so it
+  // is distinguishable from a real 500 in logs and dashboards.
+  // (@rag/core's ComplianceError.)
+  COMPLIANCE_VIOLATION: 422,
+  // The egress allow-list refused the provider host. A server misconfiguration
+  // (missing EGRESS_ALLOWED_HOSTS entry), not a client error.
+  EGRESS_BLOCKED: 503,
   CONNECTOR_AUTH_ERROR: 502,
   CONNECTOR_TRANSIENT_ERROR: 503,
   PARSER_ERROR: 502,
