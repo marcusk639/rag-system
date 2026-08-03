@@ -37,6 +37,14 @@
 export type ScoringTier =
   /** Retrieval + faithfulness only. Automatable, needs no CPA review. */
   | "tier1-automatable"
+  /**
+   * Answer vs. what the corpus actually says, scored by entailment against a
+   * verbatim quote (see eval/corpus-grounded.ts). Automatable and needs no CPA
+   * review — but it establishes only that the assistant reproduces the firm's
+   * documents faithfully, NOT that the documents are right. Must never be
+   * conflated with `tier2-cpa-verified`.
+   */
+  | "tier1-corpus-grounded"
   /** Substantive CPA correctness. Requires a credentialed reviewer. */
   | "tier2-cpa-verified";
 
@@ -132,6 +140,19 @@ export function validateGoldSet(
       issues.push({
         id: q.id,
         problem: "tier2-cpa-verified requires an expectedAnswer",
+      });
+    }
+
+    // The corpus-grounded tier scores against a verbatim quote held in its own
+    // claims file, never against `expectedAnswer`. Allowing one here would put
+    // a document excerpt in the field reserved for a credentialed preparer's
+    // determination — and `verifiedBy` would then attribute an attestation to
+    // someone who signed for a different kind of claim entirely.
+    if (q.tier === "tier1-corpus-grounded" && q.expectedAnswer) {
+      issues.push({
+        id: q.id,
+        problem:
+          "tier1-corpus-grounded must not set expectedAnswer — corpus claims live in their own file",
       });
     }
   }

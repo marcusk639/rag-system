@@ -5,12 +5,12 @@ import {
   checkCitations,
   parseJudgeReply,
   type FaithfulnessResult,
-} from "../eval/faithfulness";
+} from "../eval/faithfulness.js";
 import {
   validateGoldSet,
   isGoldSetUsable,
   type TwkGoldQuestion,
-} from "../eval/twk-gold-set";
+} from "../eval/twk-gold-set.js";
 
 const chunk = (doc: string, text = "some text") => ({
   chunkId: `${doc}-c1`,
