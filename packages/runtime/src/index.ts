@@ -3,6 +3,7 @@ export { initMonitoring, captureException } from "./monitoring.js";
 import {
   EgressPolicy,
   createAuthProvider,
+  resolveGenerationCredentials,
   type AuditLogSink,
   type AuthProvider,
   type Config,
@@ -181,11 +182,19 @@ export async function buildCoreDeps(
   // practice (Gemini embedding + Gemini generation, OpenAI + OpenAI).
   let generator: Generator | null = null;
   if (config.generation) {
-    const apiKey = config.embedding.apiKey;
-    if (!apiKey) {
+    // Generation used to borrow the embedding provider's key outright, on the
+    // assumption of a single vendor. That assumption fails for the deployment
+    // this feature exists to serve: EMBEDDING_PROVIDER=local has no key, so a
+    // self-hosted generation endpoint would have disabled itself here.
+    const credentials = resolveGenerationCredentials({
+      generationApiKey: config.generation.apiKey,
+      embeddingApiKey: config.embedding.apiKey,
+      baseURL: config.generation.baseURL,
+    });
+    if (credentials.kind === "disabled") {
       logger.warn(
-        { provider: config.generation.provider },
-        "generation configured but no API key on embedding config — generation disabled",
+        { provider: config.generation.provider, reason: credentials.reason },
+        "generation configured but no usable API key — generation disabled",
       );
     } else {
       // `client-data` compliance mode forces the strict TRI policy regardless of
@@ -206,7 +215,10 @@ export async function buildCoreDeps(
       generator = createGenerator({
         provider: config.generation.provider,
         model: config.generation.model,
-        apiKey,
+        apiKey: credentials.apiKey,
+        ...(config.generation.baseURL
+          ? { baseURL: config.generation.baseURL }
+          : {}),
         maxOutputTokens: config.generation.maxOutputTokens,
         triPolicy,
         onTriDetected: (patterns) =>
@@ -215,6 +227,15 @@ export async function buildCoreDeps(
             "TRI patterns detected in generation prompt; proceeding under triPolicy=warn",
           ),
       });
+      if (config.generation.baseURL) {
+        // An operator who believes they are air-gapped needs one line in the
+        // boot log confirming it — and needs the failure to be obvious if the
+        // allow-list does not name the host.
+        logger.info(
+          { baseURL: config.generation.baseURL },
+          "generation using a self-hosted endpoint",
+        );
+      }
     }
   }
 
