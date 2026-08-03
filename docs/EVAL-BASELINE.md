@@ -58,6 +58,37 @@ harness and the model and leaves only one explanation: the corpus is too easy.
 sailing, gardening) means keyword overlap alone identifies the right document
 every time. There is no semantic difficulty for an embedding model to resolve.
 
+> ### ⛔ CORRECTION 2026-08-01 (later the same day) — the elimination above was incomplete
+>
+> **"Leaves only one explanation" was wrong.** A third explanation was never
+> considered: **the sparse arm was broken**, so varying its weight was a no-op
+> regardless of the corpus. `hybridSearch` built its full-text query with
+> `plainto_tsquery`, which ANDs every lexeme — requiring one chunk to contain
+> every content word of the question. Measured against the firm's real SOP
+> corpus, **5 of 15 realistic staff questions matched zero chunks**, so the
+> "sparse" contribution was frequently empty.
+>
+> After fixing that (OR-semantics tsquery, `packages/db/src/queries.ts`), the
+> **same sweep on the same corpus with the same harness is no longer flat**:
+>
+> | weights              | recall@5 (before → after) | nDCG@5 (before → after) |
+> | -------------------- | ------------------------- | ----------------------- |
+> | dense=1 sparse=0     | 97.1% → 97.1%             | 97.3% → 97.3%           |
+> | dense=0.7 sparse=0.3 | 97.1% → **100.0%**        | 97.3% → **99.1%**       |
+> | dense=0.5 sparse=0.5 | 97.1% → **100.0%**        | 97.3% → **99.5%** ←peak |
+> | dense=0.3 sparse=0.7 | 97.1% → **100.0%**        | 97.3% → 97.4%           |
+> | dense=0 sparse=1     | 97.1% → **100.0%**        | 97.3% → 97.4%           |
+>
+> **What still stands:** the corpus IS too easy (MRR 1.000), and the gold set is
+> still the blocking input for real tuning decisions. **What does not:** the
+> claim that the flat sweep proved the corpus was the _only_ problem, and the
+> blanket conclusion that no retrieval work is worth doing until the gold set
+> exists — a measurable defect was sitting underneath it the whole time.
+>
+> The transferable lesson: **a degenerate metric is a reason to suspect the
+> instrument, not only the data.** Full analysis:
+> [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) § H-1 / H-1b.
+
 ### What this run is, and is not, evidence of
 
 | Claim                                                             | Supported?                                                |

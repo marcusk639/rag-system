@@ -10,6 +10,33 @@ last verified 2026-07-16.
 
 **The code is done and merged; launch is gated on human/legal/infra work, not engineering.** All three staff surfaces (web app, MCP, Teams bot) are built, reviewed, and on `main`. What remains are the P0 gates and the Azure/Railway stand-up — none of it is code.
 
+> ### ⚠ AMENDED 2026-08-01 — "not engineering" was too strong
+>
+> An end-to-end quality review found **three defects sitting directly between a
+> staff question and a useful answer**, none of which a build-passes gate would
+> catch. All three are now fixed, with tests and before/after measurements:
+>
+> |         | Defect                                                                    | Effect on a real question                                                                                                                |
+> | ------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+> | **C-1** | TRI pre-flight blocked any prompt naming an IRS form near a dollar figure | Tax-procedure questions returned `500 Internal server error`. 8% of the firm's SOPs trip it; **every hit measured was a false positive** |
+> | **H-1** | `plainto_tsquery` ANDs every term, so the sparse arm returned nothing     | **5 of 15** realistic staff questions got zero keyword hits — "hybrid" search ran on one arm                                             |
+> | **H-7** | Citation filter only matched single-number brackets                       | An answer citing `[1, 2]` rendered with **zero sources** — silently                                                                      |
+>
+> Two corrections to claims made elsewhere in this file and its companions:
+>
+> - **The engineering go-live gate below is stale.** `pnpm typecheck` is **red on
+>   `main`** (5 errors in `tests/e2e/src/specs/eval-faithfulness.spec.ts`),
+>   verified pre-existing.
+> - **[`EVAL-BASELINE.md`](./EVAL-BASELINE.md)'s "the corpus is too easy" finding
+>   was incomplete.** The flat weight sweep was partly the H-1 bug. Post-fix the
+>   sweep responds and recall@5 rises 97.1% → 100%. The gold set is still the
+>   right priority; the blanket "no retrieval work until it exists" is not.
+>
+> Full analysis, severity-scored, incl. 20 further findings not yet actioned:
+> **[`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md)**.
+> The largest unactioned gap is **no conversation memory** — follow-up questions
+> ("what about for partnerships?") fail on both surfaces.
+
 ---
 
 ## Engineering — DONE (verified on `main`, 2026-07-16)
@@ -20,7 +47,7 @@ last verified 2026-07-16.
 | Harness readiness (hooks, CI, coverage) | **Complete**                  | pre-commit/pre-push hooks, CI format+parser-pytest jobs, coverage tooling (`readiness-report.md`, Level 3)                                                                                               |
 | Web chat app (`apps/web`)               | **Built + deploy config**     | Entra SSO, per-user scope, streaming, citations; `Dockerfile` + `railway.json` (commit `e285d89`)                                                                                                        |
 | Teams bot (`apps/teams-bot`)            | **Built + reviewed + merged** | 9-task plan, whole-branch review passed; merge `fe61ad7`; 43 unit tests                                                                                                                                  |
-| Eng go-live gate                        | **Green**                     | `build + typecheck + lint + unit` all pass on `main`                                                                                                                                                     |
+| Eng go-live gate                        | ⚠ **Amber** (was "Green")     | `build + lint + unit` pass on `main`. **`typecheck` does NOT** — 5 errors in `tests/e2e/src/specs/eval-faithfulness.spec.ts`, verified pre-existing 2026-08-01. See review § M-7.                        |
 
 **Do not re-do any of the above.** If a plan doc's checkboxes look unchecked, they are stale — the work landed; verify against the tree.
 
