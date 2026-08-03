@@ -11,3 +11,4 @@ export * from "./oidc-auth.js";
 export * from "./auth-provider-factory.js";
 export * from "./egress-policy.js";
 export * from "./tri-scanner.js";
+export * from "./content-safety.js";
