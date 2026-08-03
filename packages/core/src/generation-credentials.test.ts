@@ -32,18 +32,47 @@ describe("resolveGenerationCredentials", () => {
     ).toEqual({ kind: "ok", apiKey: LOCAL_ENDPOINT_PLACEHOLDER_KEY });
   });
 
-  it("still prefers a real key over the placeholder when both apply", () => {
+  it("never forwards an inherited hosted-vendor key to a self-hosted endpoint", () => {
+    // DELIBERATE ORDER — do not "restore" inheritance ahead of this branch.
+    // An earlier revision preferred the inherited key here. That meant
+    // EMBEDDING_PROVIDER=gemini plus GENERATION_BASE_URL=http://127.0.0.1:11434/v1
+    // sent `Authorization: Bearer <GEMINI_API_KEY>` to that endpoint. It
+    // contradicts the reasoning the rest of this feature rests on: if a local
+    // host is not trusted enough to relax the TRI scan (localhost can be an SSH
+    // tunnel), it is not trusted enough to be handed a production API key by
+    // default. GENERATION_API_KEY remains the escape hatch for a self-hosted
+    // server that genuinely requires auth.
     expect(
       resolveGenerationCredentials({
         embeddingApiKey: "embed-key",
         baseURL: "http://127.0.0.1:11434/v1",
       }),
-    ).toEqual({ kind: "ok", apiKey: "embed-key" });
+    ).toEqual({ kind: "ok", apiKey: LOCAL_ENDPOINT_PLACEHOLDER_KEY });
+  });
+
+  it("still lets an explicit generation key reach a self-hosted endpoint", () => {
+    // The escape hatch: llama.cpp `--api-key`, vLLM `--api-key`, a reverse proxy.
+    expect(
+      resolveGenerationCredentials({
+        generationApiKey: "gen-key",
+        embeddingApiKey: "embed-key",
+        baseURL: "http://127.0.0.1:11434/v1",
+      }),
+    ).toEqual({ kind: "ok", apiKey: "gen-key" });
   });
 
   it("disables generation when there is no key and no local endpoint", () => {
     const result = resolveGenerationCredentials({});
     expect(result.kind).toBe("disabled");
+    // Pinned because this string is what an operator reads in the boot log when
+    // generation silently turns itself off. It named a nonexistent
+    // `EMBEDDING_API_KEY`, telling them to set a variable this codebase never
+    // reads.
+    expect(result.kind === "disabled" && result.reason).toBe(
+      "no GENERATION_API_KEY, no embedding API key to inherit " +
+        "(GEMINI_API_KEY or OPENAI_API_KEY, per EMBEDDING_PROVIDER), " +
+        "and no GENERATION_BASE_URL",
+    );
   });
 
   it("treats whitespace-only values as absent", () => {
