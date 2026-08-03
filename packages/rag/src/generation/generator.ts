@@ -248,6 +248,20 @@ export interface GeneratorOptions {
    * silently becomes "off". Wired to the pino logger in packages/runtime.
    */
   onTriDetected?: (patterns: string[]) => void;
+  /**
+   * Override the API base URL. Applies to the `openai` provider only, and is
+   * how a self-hosted OpenAI-compatible endpoint (Ollama, vLLM, LM Studio,
+   * llama.cpp) is selected — combined with `EMBEDDING_PROVIDER=local` it
+   * yields a deployment that makes no third-party calls at all.
+   *
+   * The egress allow-list applies to THIS host, not to api.openai.com — see
+   * `preFlight` below. `EGRESS_ALLOWED_HOSTS` must name it or every call
+   * throws `EgressError`.
+   *
+   * This does NOT relax `triPolicy`. A local-looking host is not verifiable
+   * as local, so the scan stays under explicit operator control.
+   */
+  baseURL?: string;
 }
 
 /**
@@ -369,7 +383,10 @@ export class OpenAIGenerator implements Generator {
   private readonly _egressPolicy: EgressPolicy;
 
   constructor(private readonly opts: GeneratorOptions) {
-    this.client = new OpenAI({ apiKey: opts.apiKey });
+    this.client = new OpenAI({
+      apiKey: opts.apiKey,
+      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+    });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
 
@@ -377,7 +394,9 @@ export class OpenAIGenerator implements Generator {
   private preFlight(prompt: string): void {
     runPreFlight(
       prompt,
-      "https://api.openai.com",
+      // The host actually being called. Passing a literal here would have the
+      // allow-list vouch for a host the client never contacts.
+      this.opts.baseURL ?? "https://api.openai.com",
       this._egressPolicy,
       this.opts.triPolicy ?? "warn",
       this.opts.onTriDetected,
@@ -437,6 +456,15 @@ export function createGenerator(
   const { provider, ...generatorOpts } = opts;
   switch (provider) {
     case "gemini":
+      if (generatorOpts.baseURL) {
+        // Fail loud. The Google SDK has no equivalent knob, so accepting this
+        // would leave an operator believing they are self-hosted while every
+        // prompt goes to generativelanguage.googleapis.com.
+        throw new Error(
+          "generation baseURL is supported by the 'openai' provider only; " +
+            "set GENERATION_PROVIDER=openai to use a self-hosted endpoint",
+        );
+      }
       return new GeminiGenerator(generatorOpts);
     case "openai":
       return new OpenAIGenerator(generatorOpts);
