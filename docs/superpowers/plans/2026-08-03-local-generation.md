@@ -10,6 +10,46 @@
 
 **Source spec:** [`../specs/2026-08-03-multi-vertical-rag-platform-design.md`](../specs/2026-08-03-multi-vertical-rag-platform-design.md) §5, §5.1, §5.2, §8 (slice 2).
 
+---
+
+## Corrections — four defects in this plan, found in review after implementation
+
+**Read this before reusing any pattern here in a later slice.** The implementers
+transcribed this plan faithfully; these were the plan's errors, not theirs. The
+shipped code is the truth — where it diverges from the task text below, the code
+is right. Corrected inline, but recorded here because the _class_ of mistake is
+what generalizes.
+
+1. **A conditional spread reopened the very bypass this plan existed to close.**
+   The plan specified `...(opts.baseURL ? { baseURL: opts.baseURL } : {})`.
+   Omitting a key is not the same as passing `undefined`: the OpenAI SDK
+   destructures `{ baseURL = readEnv('OPENAI_BASE_URL') }` (`openai/index.js:72`),
+   so the env var won while the pre-flight still asserted the hardcoded literal.
+   **Lesson: pass the security-relevant value unconditionally.** An option that
+   is sometimes absent is an option the SDK can default out from under you.
+
+2. **"The Google SDK has no equivalent knob" was false.** `@google/genai` exposes
+   `httpOptions.baseUrl` (`genai.d.ts:6096`) and reads `GOOGLE_GEMINI_BASE_URL`
+   from the environment — so the Gemini path had the same bypass. The guard was
+   right; the stated reason was invented. **Lesson: verify a capability claim
+   against the SDK's types before writing it into a security rationale.**
+
+3. **`EMBEDDING_API_KEY` does not exist in this codebase.** The plan named it in
+   an interface doc, in `env.example`, and — worst — in the operator-facing
+   reason logged when generation disables itself. The real variables are
+   `GEMINI_API_KEY` / `OPENAI_API_KEY`, selected by `EMBEDDING_PROVIDER`
+   (`packages/core/src/config.ts:539-544`).
+
+4. **The credential precedence forwarded a hosted vendor's key to a self-hosted
+   endpoint.** The plan ordered it explicit → inherited → placeholder, and pinned
+   that order with a test. Shipped order is explicit → placeholder-if-`baseURL` →
+   inherited. **Lesson: the spec's own §5.2 reasoning — "`localhost:11434` can be
+   an SSH tunnel" — applies to credentials, not just to `triPolicy`.**
+
+A fifth, lesser one: the empty-string config test specified in Task 3 Step 1
+passed vacuously (it omitted the variables rather than setting them to `""`), so
+it could not distinguish `||` from `??`. Fixed during implementation.
+
 ## Global Constraints
 
 - **The egress allow-list is a hard boundary and is not policy-tunable.** Any code path that reaches a network host must validate _that_ host. Never validate a stand-in.
@@ -226,7 +266,10 @@ export function createGenerator(
   switch (provider) {
     case "gemini":
       if (generatorOpts.baseURL) {
-        // Fail loud. The Google SDK has no equivalent knob, so accepting this
+        // CORRECTED (see Corrections #2): the original text here claimed the
+        // Google SDK has no equivalent knob. It does — httpOptions.baseUrl.
+        // Fail loud because self-hosted generation is supported through the
+        // `openai` provider only (one path, not two), so accepting this
         // would leave an operator believing they are self-hosted while every
         // prompt goes to generativelanguage.googleapis.com.
         throw new Error(
@@ -323,13 +366,17 @@ describe("resolveGenerationCredentials", () => {
     ).toEqual({ kind: "ok", apiKey: LOCAL_ENDPOINT_PLACEHOLDER_KEY });
   });
 
-  it("still prefers a real key over the placeholder when both apply", () => {
+  // CORRECTED (see Corrections #4). This test originally asserted
+  // `apiKey: "embed-key"` — pinning a precedence that leaked a hosted
+  // vendor's key to a self-hosted endpoint. DELIBERATE ORDER: do not
+  // "restore" inheritance ahead of the baseURL branch.
+  it("never forwards an inherited vendor key to a self-hosted endpoint", () => {
     expect(
       resolveGenerationCredentials({
         embeddingApiKey: "embed-key",
         baseURL: "http://127.0.0.1:11434/v1",
       }),
-    ).toEqual({ kind: "ok", apiKey: "embed-key" });
+    ).toEqual({ kind: "ok", apiKey: LOCAL_ENDPOINT_PLACEHOLDER_KEY });
   });
 
   it("disables generation when there is no key and no local endpoint", () => {
@@ -380,7 +427,7 @@ Create `packages/core/src/generation-credentials.ts`:
 export interface GenerationCredentialInput {
   /** `GENERATION_API_KEY` — explicit, wins over everything. */
   generationApiKey?: string | undefined;
-  /** `EMBEDDING_API_KEY` — inherited when generation has none of its own. */
+  /** `GEMINI_API_KEY`/`OPENAI_API_KEY` — inherited when generation has none. */
   embeddingApiKey?: string | undefined;
   /** `GENERATION_BASE_URL` — presence means a self-hosted endpoint. */
   baseURL?: string | undefined;
@@ -407,17 +454,22 @@ export function resolveGenerationCredentials(
   const explicit = clean(input.generationApiKey);
   if (explicit) return { kind: "ok", apiKey: explicit };
 
-  const inherited = clean(input.embeddingApiKey);
-  if (inherited) return { kind: "ok", apiKey: inherited };
-
+  // CORRECTED (see Corrections #4). This branch originally came AFTER
+  // inheritance, which sent a real GEMINI_API_KEY as a bearer token to
+  // whatever GENERATION_BASE_URL named. A self-hosted endpoint gets the
+  // placeholder, never a hosted vendor's key — "looks local" is not
+  // verifiable, the same reason triPolicy is not inferred from the endpoint.
   if (clean(input.baseURL)) {
     return { kind: "ok", apiKey: LOCAL_ENDPOINT_PLACEHOLDER_KEY };
   }
 
+  const inherited = clean(input.embeddingApiKey);
+  if (inherited) return { kind: "ok", apiKey: inherited };
+
   return {
     kind: "disabled",
     reason:
-      "no GENERATION_API_KEY, no EMBEDDING_API_KEY to inherit, and no GENERATION_BASE_URL",
+      "no GENERATION_API_KEY, no GEMINI_API_KEY/OPENAI_API_KEY to inherit from the embedding provider, and no GENERATION_BASE_URL",
   };
 }
 ```
@@ -765,10 +817,16 @@ misconfiguration that would reach a third party fail loudly.
 ## Gemini cannot be self-hosted this way
 
 `GENERATION_PROVIDER=gemini` with `GENERATION_BASE_URL` set **throws at
-startup**. The Google SDK has no equivalent option, so accepting the setting
-would leave you believing you were self-hosted while every prompt went to
-Google. Use `GENERATION_PROVIDER=openai` — that provider is a client for any
+startup**. Self-hosted generation is supported through the `openai` provider
+only — one path rather than two — so accepting the setting on the Gemini
+provider would leave you believing you were self-hosted while every prompt went
+to Google. Use `GENERATION_PROVIDER=openai`; that provider is a client for any
 OpenAI-compatible server, not only OpenAI's.
+
+_(Corrections #2: earlier text here claimed the Google SDK has no base-URL
+option. It has one — `httpOptions.baseUrl` — and the shipped `GeminiGenerator`
+now sets it explicitly so `GOOGLE_GEMINI_BASE_URL` cannot redirect the client
+behind the egress check.)_
 
 ## The TRI scan is not relaxed automatically
 
@@ -809,8 +867,10 @@ Insert after `GENERATION_MAX_OUTPUT_TOKENS=2048` (`env.example:309`):
 # See docs/LOCAL-GENERATION.md.
 # GENERATION_BASE_URL=http://127.0.0.1:11434/v1
 
-# API key for generation. Falls back to EMBEDDING_API_KEY when unset (the
-# single-vendor case), and is unnecessary for a self-hosted endpoint.
+# API key for generation. When unset it falls back to the embedding provider's
+# key (GEMINI_API_KEY or OPENAI_API_KEY, per EMBEDDING_PROVIDER) for the
+# single-vendor case, and is unnecessary for a self-hosted endpoint — which
+# receives a placeholder, never an inherited vendor key. See Corrections #3/#4.
 # GENERATION_API_KEY=
 ```
 
