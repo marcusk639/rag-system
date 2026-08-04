@@ -1,8 +1,28 @@
 # Deployment Target — Tenant #1
 
+> ## ⛔ SUPERSEDED — this is not what runs today (marked 2026-08-03)
+>
+> **The live deployment target is Railway**, not a single VM + docker-compose.
+> D1 below was resolved 2026-06-14 and overtaken by events; the correction has
+> been recorded in other documents since at least 2026-07-17 but had never been
+> written here, which is why readers arriving via
+> [`DEPLOYMENT.md`](./DEPLOYMENT.md) kept getting the stale answer.
+>
+> **What is actually true:** each app has a `railway.json`; `rag-worker` owns
+> migrations via its `preDeployCommand` and is the single migration owner;
+> `rag-api`, `rag-mcp`, and `rag-web` are deployed Railway services. See
+> [`DEPLOYMENT.md` § Migrations on deploy (Railway)](./DEPLOYMENT.md#migrations-on-deploy-railway),
+> [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md), and
+> [`superpowers/specs/2026-07-17-platform-tenancy-and-plugin-boundary.md`](./superpowers/specs/2026-07-17-platform-tenancy-and-plugin-boundary.md) §2.5.
+>
+> **What is still valid below:** `docker/compose.prod.yml` remains a working
+> self-host option, and the encryption-at-rest guidance (D4) and the
+> "when to move to K8s" reasoning still apply to that path. Read this document
+> for the self-host rationale — **not** as a description of the deployment.
+
 **Decision D1 (resolved 2026-06-14; recorded here per Phase 2.0 checklist).**
 
-## Chosen target: single VM + docker-compose
+## Chosen target (2026-06-14 decision): single VM + docker-compose
 
 **Rationale:**
 

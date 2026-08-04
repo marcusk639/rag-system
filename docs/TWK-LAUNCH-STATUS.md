@@ -1,14 +1,33 @@
 # TWK KB — Launch Status (current source of truth)
 
-**Updated:** 2026-07-31 (P0 gate #3 closed; P1 item 0 added). Engineering table
-last verified 2026-07-16.
+**Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
+material confirmed in the index); gate #3 is **partially closed**, not closed.
+Engineering table last verified 2026-07-16.
+
+> ⛔ **Read first (2026-08-03).** Two things supersede everything below them:
+>
+> 1. **The content audit ran and found client PII already in the live index.**
+>    This retires every "no client data" statement previously in this file. See
+>    [P0 gate #1](#p0--hard-gates-internalunapproved-pilot-only-until-done).
+> 2. **Closing gate #1 needs code**, not only firm judgment — connector
+>    exclude-paths, a citation/metadata fix, and an ingest-time gate. The
+>    "launch is gated on human/legal/infra work, not engineering" framing below
+>    is **no longer accurate** and is retained only as the record of what was
+>    believed on 2026-07-16.
+
 **Purpose:** One page that reflects what is _actually_ true right now, verified against the code — not what a plan's checkboxes claim. This project has a documented history of stale "resolved" claims creating false confidence; cross-check anything surprising against the tree before trusting it.
+
+> **On the dated blocks in this file.** `AMENDED` / `CORRECTED` / `UPDATED` all do
+> the same thing: quote the superseded claim, say why it was wrong, state what is
+> true now. Read the newest date as authoritative.
 
 ---
 
 ## One-line status
 
-**The code is done and merged; launch is gated on human/legal/infra work, not engineering.** All three staff surfaces (web app, MCP, Teams bot) are built, reviewed, and on `main`. What remains are the P0 gates and the Azure/Railway stand-up — none of it is code.
+⚠ **Superseded on two counts — see Read first, above.**
+
+**(As of 2026-07-16)** The code is done and merged; launch is gated on human/legal/infra work, not engineering. All three staff surfaces (web app, MCP, Teams bot) are built, reviewed, and on `main`. What remains are the P0 gates and the Azure/Railway stand-up — none of it is code.
 
 > ### ⚠ AMENDED 2026-08-01 — "not engineering" was too strong
 >
@@ -53,15 +72,18 @@ last verified 2026-07-16.
 
 ---
 
-## What remains for launch — the critical path (all human/infra/legal)
+## What remains for launch — the critical path (mostly human/infra/legal; gate #1 also needs code)
 
-Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
+Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. ⚠ **Corrected 2026-08-03:**
+this section previously read _"(all human/infra/legal) … Nothing here is a code
+task."_ That held until the content audit ran. Gates #2 and #3 are still purely
+human/infra/legal; **gate #1 is not** — see its entry.
 
 ### P0 — hard gates (internal/unapproved pilot only until done)
 
-- [ ] **1. Content audit** — eyeball every synced source for client-confidential material, _with Chris/Doug_. (Firm domain judgment.)
+- [ ] **1. Content audit** — ⚠ **IN PROGRESS WITH A FINDING (2026-08-03), not unstarted.** The deterministic client-identifier screen has now run against all 858 documents and found client-identifying material in the index (full correction **below**, under _Fastest defensible path_). ⛔ **Remediation has not started:** Phase 1 Task 1.1 — removing the flagged roster from the index — is an unchecked box, so assume it is still retrievable through the live deployment. Beyond that, closing this gate is **not** purely human work despite this file's "none of it is code" framing: it needs connector exclude-paths, a metadata/citation fix, and an ingest-time gate. The human half is a firm reviewer ruling on the residual. `superpowers/plans/2026-08-03-kb-content-boundary.md` sizes this at ~97 documents needing genuine review once structural folder exclusion removes the rest, and supplies the review instrument. Still firm domain judgment, still Chris/Doug, still not an attorney.
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
-- [x] **3. Backup/restore drill** — ✅ **DONE 2026-07-31, both legs.** Local:
+- [ ] 🟡 **3. Backup/restore drill — HALF-OPEN.** The _restore_ leg is proven; the _backup schedule_ is a stopgap and the off-Railway destination is blocked. `BACKUP-SCHEDULE-RUNBOOK.md` states it plainly: _"a restore has been watched succeed from an artifact **nobody took by hand**… Until then P0 gate #3 is half-open, whatever the checkbox says."_ Marking this `[x]` was exactly the stale-resolved-claim pattern this file exists to prevent. Open items are enumerated once, at the end of this entry. What **is** done, 2026-07-31, both legs: Local:
       fresh-instance restore + **88/88 e2e against restored data**. Production: real
       data (858 docs / 6,175 chunks) dumped and restored **entirely inside Railway**
       via `railway ssh` — nothing copied off their infrastructure — exit 0 in 4s,
@@ -69,15 +91,21 @@ Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. Nothing here is a code task.
       all 6,175 chunks. Production confirmed untouched; throwaway dropped.
       Full write-up: `docs/BACKUP-RESTORE-DRILL.md`. Setup procedure for the
       missing schedule: `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
-      ⚠ **A restore is proven; a backup _schedule_ is not.** Until one exists the
-      only backup is one a human remembers to take. Two layers are needed:
-      **(1)** Railway **volume backups** — available for our volume, dashboard-only
-      (service → Backups tab), Daily + Weekly can both run; do this now, it is
-      checkboxes. **(2)** a scheduled **`pg_dump` shipped off Railway** — volume
-      backups restore only into the same project + environment and are deleted if
-      the volume is wiped, so they do not cover project/account/provider loss.
-      Retention for `audit_log` is a **counsel** question (ties to P2 #8), not a
-      default: volume-backup retention tops out at 3 months.
+      ✅ **UPDATED 2026-08-03 — the schedule now exists.** This entry previously
+      read _"A restore is proven; a backup schedule is not,"_ and listed enabling
+      Railway volume backups as "do this now, it is checkboxes." Both have since
+      been done. Per
+      [`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md):
+      **(1)** Railway **volume backups** — ✅ enabled 2026-08-01 (Daily + Weekly).
+      **(2)** nightly **`pg_dump`** — 🟡 **LIVE as a stopgap** (`0 8 * * *` UTC),
+      landing in Railway's own bucket. The permanent, decorrelated off-Railway
+      destination is ⛔ **blocked on Chris's admin consent** — volume backups
+      restore only into the same project + environment, so they do not cover
+      project/account/provider loss.
+      Still open: a dead-man's-switch (`HEARTBEAT_URL` unset), a restore _from a
+      scheduled artifact_ (the drill restored a hand-taken dump), and the
+      `audit_log` retention window — a **counsel** question (ties to P2 #8), not a
+      default; volume-backup retention tops out at 3 months.
 
 ### ✅ LIVE 2026-08-01 — the web app is deployed and auth-gated
 
@@ -102,9 +130,22 @@ authentication entirely and issues every visitor one shared token — the firm's
 internal KB on an open URL. It exists as an emergency override; it is not a
 shortcut to launch.
 
-⚠ **Still pilot-scoped, and that is what keeps it defensible.** Named users only,
-Class A/B sources only, no client data. P0 #1 (the content audit) is unchanged and
-is still the real gate.
+⚠ **Still pilot-scoped — but scope is now doing more work than it was.** Named
+users only. **Corrected 2026-08-03:** this passage previously read _"Class A/B
+sources only, no client data. P0 #1 (the content audit) is unchanged and is still
+the real gate."_ Both halves are now wrong. Client-identifying material **is**
+present in the live index (see the correction under _Fastest defensible path_
+below and P0 gate #1 above), so "Class A/B only" is a remediation target rather
+than a description, and gate #1 is **not** unchanged — it is a live finding.
+
+⛔ **The exposure is live, not theoretical.** This deployment is auth-gated but
+serving named pilot users right now, and per
+[`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md)
+§0b a client-named document title reaches the UI as a **citation**, bypassing the
+model entirely — so the system prompt's do-not-repeat-client-names rule cannot
+stop it. Phase 1 Task 1.1 (removing the flagged roster from the index) is
+**still an unchecked box**. Until it is executed, assume the roster is
+retrievable.
 
 #### 🔌 Port gotcha — this will bite the next service too
 
@@ -140,11 +181,44 @@ options — full reasoning in
 | 4     | MCP only — **already live**                        | nothing                                                            | zero                  |
 
 **Verified 2026-08-01:** all 3 indexed sources are SharePoint, `data_class =
-general` (844 + 14 + 0 docs) — internal KB content, **no client files, no Onvio,
-no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none, which is
-why a scoped pilot is defensible without counsel sign-off. ⚠ But `general` is the
-ingestion _default_, not a verified judgment — **gate #1 below is the real
-compliance action**, and it needs Chris/Doug, not an attorney.
+general` (844 + 14 + 0 docs), and nothing is connected to Onvio, the Z Drive, or
+QuickBooks. That connection scope still holds and is still the strongest part of
+the compliance story.
+
+> ### ⛔ CORRECTED 2026-08-03 — "this corpus has none" was wrong
+>
+> This paragraph previously read _"internal KB content, **no client files, no
+> Onvio, no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none,
+> which is why a scoped pilot is defensible without counsel sign-off."_ **The
+> first and third claims are falsified.** The `no Onvio / no QuickBooks` half
+> stands — that is a connection fact. The `no client files` half does not.
+>
+> The client-identifier screen (`corpus-analysis/`) ran against the full
+> 858-document production corpus and found **355 documents carrying at least one
+> pattern hit**, including per-client billing and production analyses under
+> client-named folders, client fee/scope deliverables, engagement letters, and
+> **one indexed spreadsheet holding 522 SSN-shaped and 518 EIN-shaped values** —
+> a client roster. 17 documents carry SSN/EIN/bank-account hits.
+>
+> **The hedge below was right and the conclusion above was wrong.** `general` was
+> the ingestion default, nobody had checked, and when the check was finally run it
+> came back the other way. Note what this does _not_ change: the connection scope
+> is unchanged, and no client data reached a third-party model that was not
+> already reachable. What it changes is that **P0 gate #1 is now a live finding
+> with remediation in flight, not an unstarted formality** — and the sentence
+> "a scoped pilot is defensible without counsel sign-off" can no longer rest on
+> the corpus being clean.
+>
+> Remediation plan, including removal of the roster and structural folder
+> exclusion: [`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md).
+> The same premise appeared in four other documents. All four were corrected on
+> 2026-08-03: `PROTOTYPE-DELIVERY-OPTIONS.md`, `TWK-STAFF-BOT-ONE-PAGER.md`,
+> `PLAN-LAUNCH-READINESS.md`, and `DECISION-CPA-KB-RAG-CONVERGENCE.md`.
+
+⚠ `general` was the ingestion _default_, never a verified judgment — which is
+exactly why the screen was run, and why it came back the way it did. **Gate #1
+above is the real compliance action.** Its firm-judgment half needs Chris/Doug,
+not an attorney; its remediation half needs code.
 
 ### P1
 

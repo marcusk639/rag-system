@@ -1,5 +1,7 @@
 # Connectors
 
+**Status:** Current · **Updated:** 2026-08-03
+
 A **connector** is a class that knows how to enumerate documents from one external system. Connectors implement the `Connector` interface from `@rag/core`:
 
 ```ts
@@ -11,7 +13,9 @@ interface Connector {
 }
 ```
 
-The system ships four connectors out of the box: SharePoint, Google Drive, Gmail, Outlook. This document covers what each one needs to authenticate and what its source `config` JSON should look like.
+The system ships **six** connectors out of the box — SharePoint, Google Drive, Gmail, Outlook, Git Markdown, and eCFR Part 4 — plus a `custom` kind that must be constructed directly. This document covers what each one needs to authenticate and what its source `config` JSON should look like, in that order.
+
+The registered kinds are the `case` arms of `packages/connectors/src/factory.ts` and the values of `sourceKindEnum` in `packages/db/src/schema.ts`; those two must always agree.
 
 ---
 

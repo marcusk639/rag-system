@@ -1,6 +1,13 @@
 # Architecture
 
-This document explains how the RAG system fits together, why each piece exists, and the design tradeoffs that shape it.
+**Status:** Current · **Updated:** 2026-08-03
+
+This document explains how the RAG system fits together, why each piece exists, and the design tradeoffs that shape it. **It is the canonical architecture reference.**
+
+> [`RAG-ARCHITECTURE-GUIDE.md`](./RAG-ARCHITECTURE-GUIDE.md) covers overlapping
+> ground at greater length (repo layout, conventions, and non-obvious gotchas for
+> someone changing the code). Where the two disagree, **this file wins** — and
+> where either disagrees with the code, the code wins.
 
 ## System diagram
 
@@ -9,9 +16,11 @@ This document explains how the RAG system fits together, why each piece exists, 
                          │  Connectors          │
                          │  ─────────────       │
                          │  • SharePoint        │
-External       ────────► │  • Google Drive      │ ──────┐
-sources                  │  • Gmail             │       │
-                         │  • Outlook           │       │
+                         │  • Google Drive      │
+External       ────────► │  • Gmail             │ ──────┐
+sources                  │  • Outlook           │       │
+                         │  • git-markdown      │       │
+                         │  • eCFR Part 4       │       │
                          └──────────────────────┘       │
                                                         ▼
                                             ┌────────────────────────┐
@@ -141,7 +150,7 @@ TypeScript has reasonable PDF/DOCX libraries (`pdf-parse`, `mammoth`), but the l
 The embedding layer is provider-agnostic: `EMBEDDING_PROVIDER` selects the backend; all providers return the same `number[]` type to the rest of the pipeline.
 
 **`local` — `@huggingface/transformers` (ONNX runtime)**
-Default for CPA/§7216 deployments. All embedding computation runs on-process with zero network egress (satisfies CR-1 and CR-3).
+Not the code default (`gemini` is), but **required** for any deployment handling regulated data — it is forced on under `COMPLIANCE_MODE=client-data`. All embedding computation runs on-process with zero network egress, which is what satisfies controls **CR-1** (no taxpayer-return-information disclosure) and **CR-3** (US-located vendor) in [`CPA-COMPLIANCE-REQUIREMENTS.md`](./CPA-COMPLIANCE-REQUIREMENTS.md#control-matrix-requirement--control--verify).
 
 - Default model: `Xenova/bge-base-en-v1.5` — 768-d, MTEB competitive, ~430 MB on first startup.
 - Lazy-initialise: the ONNX pipeline downloads the model on first call and caches it to `HF_CACHE_DIR` (defaults to `~/.cache/huggingface`). Subsequent restarts read the cache; no download.
@@ -186,5 +195,5 @@ A naive recursive splitter happily slices through code fences and table rows. Th
 
 - **Not a chat platform.** It exposes search and grounded Q&A. Conversation memory, multi-turn refinement, and tool use beyond retrieval live in the consuming agent.
 - **Source-scoped, but not a full ACL system.** Retrieval enforces a per-token **sourceId** access boundary (see `@rag/core` `access-control.ts`): a plain `API_TOKENS` token is an admin/all-access principal, while a token in `API_PRINCIPALS` is enforced to only its `allowedSourceIds` (empty set ⇒ zero results, fail-closed). Enforcement is mandatory inside `Retriever.search`/`hybridSearch` and cannot be bypassed from the route layer; the optional caller `sourceIds` filter can only narrow _within_ the enforced scope. This is coarse-grained (per-source), not per-document or per-field — for finer-grained or per-end-user authz, wrap retrieval with your own layer.
-- **Not a reranker by default.** A cross-encoder reranking step would improve precision-at-k; the architecture has a clear extension point (in `Retriever.search`) but no shipped implementation. Add Cohere Rerank or `cross-encoder/ms-marco-MiniLM` when you need it.
+- **Reranking ships, but is off by default.** `Retriever.search` takes an optional `rerank` option: it over-fetches `poolMultiplier × topK` candidates, hands them to a `Reranker`, and degrades to plain RRF order (without failing the query) if the reranker errors. `HttpCrossEncoderReranker` speaks the Cohere/Jina REST shape. It is disabled by configuration — `RERANK_PROVIDER` defaults to `none` — **not absent**. Enable it with `RERANK_PROVIDER`/`RERANK_MODEL`/`RERANK_API_KEY` rather than building one.
 - **Not a generation framework.** The `/ask` endpoint does a single-shot RAG generation. For chain-of-thought, query decomposition, agentic tool use, or multi-hop reasoning, build that in your app on top of `/search`.

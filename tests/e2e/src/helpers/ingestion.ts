@@ -56,6 +56,11 @@ export async function runOneIngestion(
       chunker,
       embedder,
       logger,
+      // Layer 3 (2026-08-03): an undeclared source class now fails CLOSED to
+      // "D", so every document quarantines. Fixtures are synthetic public
+      // content, so declare Class A explicitly rather than relying on a
+      // permissive default — the implicit default is what this layer removed.
+      sourceDocClass: "A",
     },
   );
 }
