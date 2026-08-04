@@ -1,5 +1,7 @@
 # HTTP API Reference
 
+**Status:** Current · **Updated:** 2026-08-03
+
 Full reference for the `@rag/api` Fastify server. Companion to [`apps/api/README.md`](../apps/api/README.md), which has quick-start examples.
 
 ## Conventions

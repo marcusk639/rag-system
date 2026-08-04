@@ -315,7 +315,9 @@ Today the only idempotency gate is the content hash computed _after_ parse (`pip
 
 ## 9. 🔴 PII, access control & §7216 compliance (CPA-firm blockers)
 
-> **Process note:** this section is a point-in-time audit, not a static snapshot — revisit it whenever a PR referenced below merges or a listed item's real-world status changes (e.g. a DPA gets signed/renewed). The 2026-06-07 version of this section described P1/P2/H5 as unresolved for weeks after the code that resolved them had already shipped; that gap is exactly the confusion this note exists to prevent. See `docs/RAG-VALIDATION-REPORT.md` (2026-07-06) for the verification pass that caught the drift.
+> **Process note:** this section is a point-in-time audit, not a static snapshot — revisit it whenever a PR referenced below merges or a listed item's real-world status changes (e.g. a DPA gets signed/renewed). The 2026-06-07 version of this section described P1/P2/H5 as unresolved for weeks after the code that resolved them had already shipped; that gap is exactly the confusion this note exists to prevent.
+>
+> ⚠ **Broken citation, corrected 2026-08-03.** This note previously cited `docs/RAG-VALIDATION-REPORT.md` (2026-07-06) as "the verification pass that caught the drift." **That file has never existed in this repository** — `git log --all` finds no trace of it. The drift it describes is real and is independently documented in [`TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`](./TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md) §3, which should be read instead.
 
 This system is being stood up over a **CPA firm's** corpus — SharePoint engagement files, and Gmail/Outlook mailboxes that contain client tax data. That changes the risk profile entirely: the documents being embedded are **taxpayer return information** and client-confidential records, and the people who can query them are not all entitled to see every client. These were originally written as go/no-go blockers with none of the required controls in place; as of 2026-07-08, P1/P2/H5 are resolved and P3/P4 are partially resolved — see each item below for what's still open.
 

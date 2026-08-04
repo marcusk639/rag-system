@@ -14,6 +14,7 @@ import {
   type Parser,
   type SourceDocument,
 } from "@rag/core";
+import { classifyDocument } from "./classify-document.js";
 import { isExcludedPath, redactOrThrow, ContentSafetyError } from "@rag/core";
 import {
   type Db,
@@ -146,7 +147,11 @@ export async function runIngestion(
       "fetched page",
     );
 
-    const docClass: DocumentClass = deps.sourceDocClass ?? "A";
+    // Layer 3: no longer defaults to "A". An undeclared source class is the
+    // strongest possible reason NOT to treat content as public — the previous
+    // `?? "A"` answered "we don't know" with the most permissive class, which
+    // is how 858 unclassified documents were treated as public.
+    const docClass: DocumentClass = deps.sourceDocClass ?? "D";
     const limit = pLimit(opts.concurrency);
     const results = await Promise.allSettled(
       page.documents.map((doc) =>
@@ -308,6 +313,45 @@ async function ingestOne(
     );
   }
   parsed.markdown = redacted.text;
+
+  // 1c. Layer 3 — per-document classification gate. The source's declared class
+  //     is a CEILING, not a verdict: evidence from this document can only make
+  //     the classification stricter. A "general" source does not make a
+  //     document containing an SSN general, which is precisely the failure that
+  //     put 858 documents into a public-class index.
+  const classification = classifyDocument({
+    sourceClass: docClass,
+    redactionFindings: redacted.findings,
+    clientContextPath: isExcludedPath(source.metadata?.path).excluded,
+  });
+  if (classification.quarantine) {
+    // Redaction is damage limitation, not absolution — a document that
+    // CONTAINED an identifier is treated as client data even once masked,
+    // because masking cannot prove every value was recognised.
+    //
+    // ⚠ The audit event is not optional. Quarantining without a durable record
+    // would prevent the disclosure but destroy the evidence that the pipeline
+    // saw sensitive content — which is the half that matters under §7216 /
+    // Circular 230. A logger warning is not an audit trail.
+    const reason = `per-document classification escalated to ${classification.docClass} (${classification.reasons.join(", ")})`;
+    await logIngestEvent(deps.db, {
+      sourceId,
+      docId: null,
+      externalId: source.externalId,
+      docClass: classification.docClass,
+      action: "blocked",
+      rejectionReason: reason,
+    });
+    log.warn(
+      {
+        docClass: classification.docClass,
+        reasons: classification.reasons,
+        marker: "ingest.quarantined",
+      },
+      "quarantining document: " + reason,
+    );
+    return { chunksCreated: 0 };
+  }
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched
   //    documents (source updated metadata only) skip embedding work.

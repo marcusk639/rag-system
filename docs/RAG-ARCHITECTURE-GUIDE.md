@@ -1,12 +1,15 @@
 # Generic RAG System — Architecture & Engineering Guide
 
-> A single, self-contained reference for the architecture of this Retrieval-Augmented
-> Generation (RAG) service, how to apply it to a knowledge base of **any** domain, and
-> the non-obvious things an engineer must know before changing it.
+**Status:** Current (engineering companion) · **Updated:** 2026-08-03
+
+> An engineering-depth companion covering repo layout, conventions, and the
+> non-obvious things to know before changing the code.
 >
-> Authoritative sources: root `CLAUDE.md`, the package interfaces in `@rag/core`, and the
-> codebase itself. This document is a map — when a detail here disagrees with the code,
-> the code wins.
+> **[`ARCHITECTURE.md`](./ARCHITECTURE.md) is the canonical architecture
+> reference** — read it first for the system model, data flow, and design
+> tradeoffs. Where the two disagree, that file wins. Where either disagrees with
+> the code, **the code wins**; the package interfaces in `@rag/core` and the root
+> `CLAUDE.md` are the other authoritative sources.
 
 ---
 
@@ -21,10 +24,10 @@ engine rather than a single-purpose app.
 
 ### The mental model (end to end)
 
-1. **Connectors** pull files/messages from external sources (SharePoint, Google Drive, Gmail, Outlook, …).
+1. **Connectors** pull files/messages from external sources (SharePoint, Google Drive, Gmail, Outlook, git-markdown, eCFR Part 4).
 2. The **Python parser sidecar** converts every format (`.docx`, `.pdf`, `.xlsx`, `.html`, `.md`, `.doc`, …) to clean Markdown + structured metadata.
 3. The **chunker** splits Markdown into ~800-token chunks that respect headings, lists, code blocks, and tables.
-4. The **embedder** generates dense vectors (768-dim Gemini `text-embedding-004` by default).
+4. The **embedder** generates dense vectors (768-dim Gemini `gemini-embedding-001` by default; `local` ONNX and OpenAI also ship). ⚠ `text-embedding-004` is **retired**.
 5. **Postgres + pgvector** stores chunks, embeddings, and a `tsvector` index for hybrid (dense + sparse) retrieval.
 6. The **API** and **MCP server** expose `search`/`ask`. The MCP server is the agent-facing surface.
 7. The **worker** runs ingestion asynchronously via `pg-boss` jobs.
@@ -56,24 +59,24 @@ A pnpm + TypeScript monorepo (~13.7k lines / ~137 source files). **TypeScript is
 Python exists _only_ in `services/parser-py` because the document-parsing ecosystem there is
 materially better. Do not creep Python into other services.
 
-| Area                      | Path                                                                          | Role                                                                                                |
-| ------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Shared types/interfaces   | `packages/core/src/`                                                          | Every cross-package contract (Connector, EmbeddingProvider, Chunker, AuthProvider, Principal/Scope) |
-| Shared service layer      | `packages/services/src/`                                                      | Transport-agnostic business logic: search / ask / sources / documents                               |
-| Shared runtime graph      | `packages/runtime/src/index.ts`                                               | `buildCoreDeps()` wires DB pool, embedder, retriever, queue, optional generator                     |
-| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                 | Pluggable `AuthProvider`                                                                            |
-| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts` | env → config → provider                                                                             |
-| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                           | Typed queries; bootstrap + Drizzle migrations                                                       |
-| Embedding providers       | `packages/rag/src/embeddings/`                                                | Gemini and others; chosen by factory                                                                |
-| Chunking strategies       | `packages/rag/src/chunking/`                                                  | CompositeChunker + per-content strategies                                                           |
-| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                 | Dense + sparse, reciprocal-rank fusion                                                              |
-| Connectors                | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook}/`                  | External source adapters                                                                            |
-| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                          | parse → hash → chunk → embed → store                                                                |
-| HTTP routes               | `apps/api/src/routes/`                                                        | Fastify v5 endpoints                                                                                |
-| MCP tools                 | `apps/mcp/src/tools/`                                                         | Agent-facing tools                                                                                  |
-| Worker job handlers       | `apps/worker/src/handlers/`                                                   | pg-boss consumers                                                                                   |
-| Python parser             | `services/parser-py/app/main.py`                                              | FastAPI parsing sidecar                                                                             |
-| E2E + eval harness        | `tests/e2e/`                                                                  | End-to-end specs + retrieval evaluation                                                             |
+| Area                      | Path                                                                                 | Role                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Shared types/interfaces   | `packages/core/src/`                                                                 | Every cross-package contract (Connector, EmbeddingProvider, Chunker, AuthProvider, Principal/Scope) |
+| Shared service layer      | `packages/services/src/`                                                             | Transport-agnostic business logic: search / ask / sources / documents                               |
+| Shared runtime graph      | `packages/runtime/src/index.ts`                                                      | `buildCoreDeps()` wires DB pool, embedder, retriever, queue, optional generator                     |
+| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                        | Pluggable `AuthProvider`                                                                            |
+| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`        | env → config → provider                                                                             |
+| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                  | Typed queries; bootstrap + Drizzle migrations                                                       |
+| Embedding providers       | `packages/rag/src/embeddings/`                                                       | Gemini and others; chosen by factory                                                                |
+| Chunking strategies       | `packages/rag/src/chunking/`                                                         | CompositeChunker + per-content strategies                                                           |
+| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                        | Dense + sparse, reciprocal-rank fusion                                                              |
+| Connectors                | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4}/` | External source adapters                                                                            |
+| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                 | parse → hash → chunk → embed → store                                                                |
+| HTTP routes               | `apps/api/src/routes/`                                                               | Fastify v5 endpoints                                                                                |
+| MCP tools                 | `apps/mcp/src/tools/`                                                                | Agent-facing tools                                                                                  |
+| Worker job handlers       | `apps/worker/src/handlers/`                                                          | pg-boss consumers                                                                                   |
+| Python parser             | `services/parser-py/app/main.py`                                                     | FastAPI parsing sidecar                                                                             |
+| E2E + eval harness        | `tests/e2e/`                                                                         | End-to-end specs + retrieval evaluation                                                             |
 
 ---
 
@@ -140,7 +143,7 @@ update is reflected atomically with no window where a document has half its chun
 
 Four tables: `sources`, `documents`, `chunks`, `ingestion_jobs`.
 
-- `chunks.embedding` is `vector(768)` (Gemini `text-embedding-004`).
+- `chunks.embedding` is `vector(768)` (Gemini `gemini-embedding-001`, or the 768-d `local` ONNX model).
 - A **GIN** index on metadata + a **`tsvector`** column power sparse/full-text search.
 - An **HNSW** index (`chunks_embedding_hnsw_idx`) powers dense cosine-similarity search.
 - A trigger (`chunks_tsv_update`) populates the `tsvector` on write (callers may optionally
