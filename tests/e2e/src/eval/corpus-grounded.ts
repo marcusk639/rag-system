@@ -32,10 +32,21 @@
  */
 
 /**
- * A claim plus its provenance, as produced by claim extraction. Structurally a
- * subset of `ExtractedClaim` (@rag/rag) — declared here rather than imported so
- * the eval harness does not depend on the extraction pipeline's build to score
- * a claim set that has already been written to disk.
+ * A claim plus its provenance, as read back from the on-disk claims artefact.
+ *
+ * ⚠ **Not structurally compatible with `ExtractedClaim`** (@rag/rag), despite
+ * describing the same underlying thing. It ADDS `id`, which `ExtractedClaim`
+ * does not have at all, and omits that type's `distractorNote`, `ok`, `start`,
+ * `end`, `rung`, and `modelQuoteDiffered`.
+ *
+ * That matters for whoever wires extraction output into this harness: the
+ * serialization step must MINT the `id`, and TypeScript will not catch its
+ * absence if an `ExtractedClaim[]` is deserialized straight into
+ * `CorpusClaimRef[]`. Every `claimId` and `contradictedClaimIds` entry would
+ * then be `undefined` at runtime, silently.
+ *
+ * Declared here rather than imported so the eval harness does not depend on the
+ * extraction pipeline's build to score a claims file already written to disk.
  */
 export interface CorpusClaimRef {
   id: string;

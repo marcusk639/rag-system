@@ -26,11 +26,40 @@ const execFileAsync = promisify(execFile);
  * in its environment would ingest the wrong repo.
  *
  * Scrubbed as an explicit deny-list rather than dropping every `GIT_*` var,
- * because unrelated ones — `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`,
- * `GIT_TERMINAL_PROMPT` — are legitimate deployment configuration and are not
- * this function's business to discard.
+ * because unrelated ones — `GIT_SSH_COMMAND`, `GIT_TERMINAL_PROMPT`,
+ * `GIT_SSL_CAINFO` — are legitimate deployment configuration, and an
+ * allow-list that omitted one would fail at runtime in production rather than
+ * in tests.
+ *
+ * `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` are here while
+ * `GIT_CONFIG_GLOBAL` is not, which looks inconsistent but is not.
+ * `GIT_CONFIG_GLOBAL` only redirects which FILE is read as global config. The
+ * other two inject arbitrary config pairs directly from the environment —
+ * including `core.worktree`, which redirects the working tree, and
+ * `core.hooksPath`/`core.fsmonitor`, which name executables.
+ *
+ * They are two INDEPENDENT mechanisms, and covering only one leaves the hole
+ * open:
+ *   - `GIT_CONFIG_COUNT` + `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`
+ *     (git ≥ 2.31). Git reads only as many pairs as the count declares, so
+ *     removing it is sufficient; the indexed keys are removed anyway rather
+ *     than depending on that.
+ *   - `GIT_CONFIG_PARAMETERS`, which git uses internally to propagate `-c` to
+ *     subprocesses. Nothing stops it being set directly, and its name matches
+ *     neither prefix above. Verified injectable on git 2.55.
+ *
+ * Neither is exploitable through this connector's current argv (`rev-parse`,
+ * `ls-tree`, `diff --name-status`, `show` — all read-only plumbing that never
+ * touches the index, working tree, or hooks). They are scrubbed so that stays
+ * true if someone later adds a command where it would not be.
+ *
+ * Exported so the test fixture helper uses this list instead of a hand-copied
+ * duplicate — a security-relevant list maintained in two places drifts.
  */
-const REPO_LOCATION_ENV = [
+// `Object.freeze` rather than `as const` alone: the latter is compile-time
+// only, leaving a mutable singleton array that any importer could empty and
+// silently neuter the scrub for the whole process.
+export const REPO_LOCATION_ENV = Object.freeze([
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_INDEX_FILE",
@@ -40,12 +69,24 @@ const REPO_LOCATION_ENV = [
   "GIT_PREFIX",
   "GIT_NAMESPACE",
   "GIT_CEILING_DIRECTORIES",
-] as const;
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_PARAMETERS",
+] as const);
 
-/** `process.env` minus the vars that would override `cwd`. */
-function hermeticGitEnv(): NodeJS.ProcessEnv {
+/** `process.env` minus the vars that would override `cwd` or inject config. */
+export function hermeticGitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of REPO_LOCATION_ENV) delete env[key];
+  // GIT_CONFIG_KEY_<n> / GIT_CONFIG_VALUE_<n> are indexed, so they cannot be
+  // named in a fixed list. Removing GIT_CONFIG_COUNT above already neuters
+  // them; these go too so nothing is left for a future git to reinterpret.
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith("GIT_CONFIG_KEY_") ||
+      key.startsWith("GIT_CONFIG_VALUE_")
+    )
+      delete env[key];
+  }
   return env;
 }
 

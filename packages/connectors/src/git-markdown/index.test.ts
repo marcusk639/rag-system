@@ -4,33 +4,25 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { GitMarkdownConnector } from "./index.js";
+import { GitMarkdownConnector, hermeticGitEnv } from "./index.js";
 
 const LOGGER = pino({ level: "silent" });
 
 /**
- * Builds the fixture repos. Must scrub the same repo-location variables the
- * connector does: git hooks export `GIT_DIR`/`GIT_WORK_TREE`, and under a hook
- * these calls would otherwise commit the fixture files into the OUTER
- * repository instead of the temp one — which is what made the whole suite fail
- * during `git push` while passing when run directly.
+ * Builds the fixture repos. Reuses the connector's own `hermeticGitEnv()`
+ * rather than re-listing the variables: git hooks export
+ * `GIT_DIR`/`GIT_WORK_TREE`, and under a hook these calls would otherwise
+ * commit the fixture files into the OUTER repository instead of the temp one —
+ * which is what made the whole suite fail during `git push` while passing when
+ * run directly.
+ *
+ * Sharing the helper also means the scrub list cannot drift between the code
+ * and the fixture that is supposed to exercise it.
  */
 function git(repoPath: string, ...args: string[]): string {
-  const env = { ...process.env };
-  for (const key of [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_PREFIX",
-    "GIT_NAMESPACE",
-    "GIT_CEILING_DIRECTORIES",
-  ]) {
-    delete env[key];
-  }
-  return execFileSync("git", args, { cwd: repoPath, env }).toString().trim();
+  return execFileSync("git", args, { cwd: repoPath, env: hermeticGitEnv() })
+    .toString()
+    .trim();
 }
 
 describe("GitMarkdownConnector", () => {
@@ -243,5 +235,61 @@ describe("GitMarkdownConnector — ambient GIT_* environment", () => {
     const doc = await connector.fetch("real.md");
 
     expect(doc.content.toString()).toContain("# Real");
+  });
+});
+
+describe("hermeticGitEnv", () => {
+  it("removes the env-injected config mechanism, not just repo location", () => {
+    // GIT_CONFIG_COUNT + GIT_CONFIG_KEY_<n>/VALUE_<n> (git >= 2.31) inject
+    // arbitrary config from the environment — core.worktree redirects the
+    // working tree, core.hooksPath/core.fsmonitor name executables. Distinct
+    // mechanism from GIT_CONFIG_GLOBAL, which only picks a file.
+    const saved = { ...process.env };
+    try {
+      process.env.GIT_CONFIG_COUNT = "1";
+      process.env.GIT_CONFIG_KEY_0 = "core.worktree";
+      process.env.GIT_CONFIG_VALUE_0 = "/tmp/elsewhere";
+
+      const env = hermeticGitEnv();
+
+      expect(env.GIT_CONFIG_COUNT).toBeUndefined();
+      expect(env.GIT_CONFIG_KEY_0).toBeUndefined();
+      expect(env.GIT_CONFIG_VALUE_0).toBeUndefined();
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it("removes GIT_CONFIG_PARAMETERS, the second injection mechanism", () => {
+    // Independent of the COUNT/KEY/VALUE family and matching neither prefix.
+    // git uses it to propagate `-c` to subprocesses; nothing stops it being set
+    // directly. Verified injectable on git 2.55:
+    //   env GIT_CONFIG_PARAMETERS="'core.bare=true'" git config --get core.bare
+    const saved = { ...process.env };
+    try {
+      process.env.GIT_CONFIG_PARAMETERS = "'core.worktree=/tmp/elsewhere'";
+
+      expect(hermeticGitEnv().GIT_CONFIG_PARAMETERS).toBeUndefined();
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it("preserves unrelated deployment configuration", () => {
+    // An allow-list would drop these and fail in production rather than in
+    // tests. The deny-list keeps them on purpose.
+    const saved = { ...process.env };
+    try {
+      process.env.GIT_SSH_COMMAND = "ssh -i /key";
+      process.env.GIT_TERMINAL_PROMPT = "0";
+
+      const env = hermeticGitEnv();
+
+      expect(env.GIT_SSH_COMMAND).toBe("ssh -i /key");
+      expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(env.PATH).toBe(process.env.PATH);
+    } finally {
+      process.env = saved;
+    }
   });
 });

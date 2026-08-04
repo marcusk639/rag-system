@@ -262,6 +262,18 @@ describe("ScoringTier — tier1-corpus-grounded", () => {
     expect(issues[0]?.problem).toMatch(/corpus-grounded/i);
   });
 
+  it("rejects a corpus-grounded question carrying verifiedBy", () => {
+    // EVAL-CORPUS-GROUND-TRUTH.md §4: "expectedAnswer/verifiedBy stay untouched
+    // by this tier." Checking only expectedAnswer left half the contract
+    // unenforced — a corpus-grounded entry could carry a preparer's name while
+    // asserting nothing they signed for, which is the attribution problem the
+    // separate tier exists to prevent.
+    const issues = validateGoldSet([{ ...base, verifiedBy: "Someone" }]);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.problem).toMatch(/corpus-grounded/i);
+  });
+
   it("still requires expectedAnswer for the CPA tier", () => {
     // Guard against the new branch loosening the existing rule.
     const issues = validateGoldSet([{ ...base, tier: "tier2-cpa-verified" }]);

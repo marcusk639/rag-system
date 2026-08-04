@@ -148,11 +148,14 @@ export function validateGoldSet(
     // a document excerpt in the field reserved for a credentialed preparer's
     // determination — and `verifiedBy` would then attribute an attestation to
     // someone who signed for a different kind of claim entirely.
-    if (q.tier === "tier1-corpus-grounded" && q.expectedAnswer) {
+    if (
+      q.tier === "tier1-corpus-grounded" &&
+      (q.expectedAnswer || q.verifiedBy || q.verifiedOn)
+    ) {
       issues.push({
         id: q.id,
         problem:
-          "tier1-corpus-grounded must not set expectedAnswer — corpus claims live in their own file",
+          "tier1-corpus-grounded must not set expectedAnswer/verifiedBy/verifiedOn — corpus claims live in their own file",
       });
     }
   }
