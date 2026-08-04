@@ -168,7 +168,17 @@ export async function extractClaims(
     const quote = asString(r.quote);
     const distractorNote = asString(r.distractorNote);
 
-    if (!claim) continue;
+    if (!claim) {
+      // Counted, not dropped. A bare `continue` here lost the item from every
+      // total — `claims + rejected + droppedForShape` no longer summed to what
+      // the model returned, so a run could under-report its own failure rate
+      // and look cleaner than it was. The label stands in for the missing text.
+      droppedForShape.push({
+        claim: "(empty)",
+        reason: "no claim text — nothing to verify or score",
+      });
+      continue;
+    }
     if (!distractorNote) {
       droppedForShape.push({
         claim,
@@ -194,6 +204,21 @@ export async function extractClaims(
       distractorNote: asString(meta?.distractorNote),
     };
   });
+
+  // Conservation. Every claim the model returned must end up in exactly one of
+  // the three buckets. This is not a sanity check on arithmetic — the buckets
+  // are how a run reports its own quality, so an item lost between them makes
+  // the failure rate read lower than it is. Fail closed rather than return a
+  // result whose totals do not describe what happened.
+  const accounted =
+    claims.length + report.rejected.length + droppedForShape.length;
+  if (accounted !== raw.length) {
+    throw new Error(
+      `claim extraction lost claims for ${doc.externalId}: model returned ` +
+        `${raw.length}, but ${claims.length} verified + ${report.rejected.length} ` +
+        `rejected + ${droppedForShape.length} dropped = ${accounted}`,
+    );
+  }
 
   return {
     claims,

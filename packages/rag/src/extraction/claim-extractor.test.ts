@@ -100,6 +100,62 @@ describe("extractClaims", () => {
     expect(res.droppedForShape[0]!.reason).toMatch(/distractorNote/);
   });
 
+  it("COUNTS a claim with no claim text rather than silently dropping it", async () => {
+    // Until 2026-08-04 this returned an empty result with all three buckets at
+    // zero — the item vanished, and a run's reported failure rate was lower
+    // than the truth by however many of these the model emitted.
+    const res = await extractClaims(
+      stub({
+        claims: [{ claim: "", quote: "| 4868  | April 15 |", topic: "t" }],
+      }),
+      doc,
+    );
+
+    expect(res.claims).toHaveLength(0);
+    expect(res.rejected).toHaveLength(0);
+    expect(res.droppedForShape).toHaveLength(1);
+    expect(res.droppedForShape[0]!.reason).toMatch(/no claim text/);
+  });
+
+  it("conserves: every claim the model returned lands in exactly one bucket", async () => {
+    // One of each outcome, plus a duplicate claim string — the metadata lookup
+    // is keyed by claim text, so identical claims must still both be counted.
+    const res = await extractClaims(
+      stub({
+        claims: [
+          {
+            claim: "verified",
+            quote: "| 4868  | April 15 |",
+            topic: "t",
+            distractorNote: "d",
+          },
+          {
+            claim: "verified",
+            quote: "| 4868  | April 15 |",
+            topic: "t",
+            distractorNote: "d",
+          },
+          {
+            claim: "paraphrased",
+            quote: "Extensions are due sometime in April.",
+            topic: "t",
+            distractorNote: "d",
+          },
+          { claim: "no distractor", quote: "| 4868  | April 15 |", topic: "t" },
+          { claim: "", quote: "| 4868  | April 15 |", topic: "t" },
+        ],
+      }),
+      doc,
+    );
+
+    expect(res.claims).toHaveLength(2);
+    expect(res.rejected).toHaveLength(1);
+    expect(res.droppedForShape).toHaveLength(2);
+    expect(
+      res.claims.length + res.rejected.length + res.droppedForShape.length,
+    ).toBe(5);
+  });
+
   it("reports the rung distribution and strain", async () => {
     const res = await extractClaims(
       stub({
