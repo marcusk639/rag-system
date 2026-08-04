@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A generic Retrieval-Augmented Generation (RAG) service. The mental model:
 
-1. **Connectors** pull files/messages from external sources (SharePoint, Google Drive, Gmail, Outlook).
+1. **Connectors** pull files/messages from external sources (SharePoint, Google Drive, Gmail, Outlook, a local git markdown clone, and the eCFR bulk-XML mirror).
 2. The **Python parser sidecar** converts every format (`.docx`, `.pdf`, `.xlsx`, `.html`, `.md`, `.doc`, etc.) to clean markdown + structured metadata.
 3. The **chunker** splits markdown into ~800-token chunks respecting headings/lists/code blocks.
-4. The **embedder** generates 768-dim vectors (Gemini `text-embedding-004` by default).
+4. The **embedder** generates 768-dim vectors (Gemini `gemini-embedding-001` by default; `local` ONNX and OpenAI also ship). ⚠ `text-embedding-004` is **retired** — never configure it.
 5. **Postgres + pgvector** stores chunks, embeddings, and a tsvector index for hybrid (dense + sparse) retrieval.
 6. The **API** and **MCP server** expose search/ask endpoints. The MCP server is the agent-facing surface.
 7. The **worker** runs ingestion asynchronously via `pg-boss` jobs.
@@ -44,7 +44,7 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 - **TypeScript is primary.** Python lives only in `services/parser-py/` because the document-parsing ecosystem there is materially better. Do not creep Python into other services.
 - **All cross-package contracts live in `@rag/core`.** Connectors, parsers, embedders, and chunkers all implement interfaces defined there. Adding a provider = implement the interface, register it in the factory.
 - **Business logic is transport-agnostic in `@rag/services`.** The five service functions (`searchDocuments`, `askQuestion`, `triggerSync`, `listPublicSources`, `getDocumentById`) take a structural `ServiceDeps` and are shared by both the HTTP API and the MCP server — never duplicate search/ask logic in a route or tool.
-- **The shared dependency graph is built once via `@rag/runtime`.** `buildCoreDeps(config, logger)` wires the DB pool, embedder, retriever, queue, and optional generator (plus a hardened idempotent `close()`). The three backend apps (api/mcp/worker) build `CoreDeps` from it. The fourth app, `apps/web`, is a Next.js frontend that consumes the HTTP API instead — it never touches `CoreDeps`; see `apps/web/CLAUDE.md`.
+- **The shared dependency graph is built once via `@rag/runtime`.** `buildCoreDeps(config, logger)` wires the DB pool, embedder, retriever, queue, and optional generator (plus a hardened idempotent `close()`). The three backend apps (api/mcp/worker) build `CoreDeps` from it. The other two apps consume the HTTP API instead and never touch `CoreDeps`: `apps/web` (Next.js frontend — see `apps/web/CLAUDE.md`) and `apps/teams-bot` (Microsoft Teams bot, Entra SSO + Adaptive Cards, single-instance only because it uses `MemoryStorage` for the SSO exchange).
 - **Database access goes through `@rag/db`.** Apps and packages never import `pg`/`drizzle-orm` directly — they import typed query functions.
 - **Authentication is a pluggable `AuthProvider` in `@rag/core`.** Apps don't hand-roll token checks — they call `buildAuthProvider(config, logger)` (`@rag/runtime`), which returns an `AuthProvider` (`authenticate(credential) → Principal | null`). Strategies: `static-token`, `oidc`, `composite` (default; static tried first, then OIDC), selected via `AUTH_PROVIDER`. The downstream authorization contract (`Principal` → `AuthorizationScope` → scope-threaded retrieval) is unchanged — this sits in front of `resolvePrincipal`, it does not replace the scope machinery. The core has zero IdP-specific (e.g. Entra) code.
 - **Ingestion is always async via `pg-boss`.** The API enqueues jobs; the worker executes them. Never run a full source sync inside an HTTP request.
@@ -64,21 +64,24 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 | Embedding providers       | `packages/rag/src/embeddings/`                                                         |
 | Chunking strategies       | `packages/rag/src/chunking/`                                                           |
 | Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                          |
-| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook}/`                           |
+| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4}/`   |
+| Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)     |
 | Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                   |
 | HTTP routes               | `apps/api/src/routes/`                                                                 |
 | MCP tools                 | `apps/mcp/src/tools/`                                                                  |
 | Worker job handlers       | `apps/worker/src/handlers/`                                                            |
 | Python parser             | `services/parser-py/app/main.py`                                                       |
 | Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules |
+| Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)        |
 
 ## Adding a new connector
 
 1. Implement the `Connector` interface from `@rag/core` (`validate`, `list`, `fetch` methods; delta sync is driven by the `cursor` passed to `list()`, not a separate method).
 2. Add a subdirectory under `packages/connectors/src/<name>/`.
-3. Register it in `packages/connectors/src/index.ts`.
-4. Document OAuth/credential setup in `docs/CONNECTORS.md`.
-5. Add env vars to `env.example`.
+3. Add a `case` to `packages/connectors/src/factory.ts`. (Optionally also re-export the class from `packages/connectors/src/index.ts` — note `git-markdown` and `ecfr-part4` do not, and work fine, since callers go through `createConnector`.)
+4. Extend `sourceKindEnum` in `packages/db/src/schema.ts` **and** the matching migration.
+5. Document OAuth/credential setup in `docs/CONNECTORS.md`.
+6. Add env vars to `env.example`.
 
 ## Adding a new embedding provider
 
@@ -115,61 +118,28 @@ Repo-committed (every contributor gets these via `pnpm install` → husky):
 
 ---
 
-## Model Tier Policy (80/15/5 Rule)
+## Effort calibration for this repo
 
-### Tier A — Reasoning (5% of tasks) — Claude Opus / Sonnet full context
+Which changes need the most care. The general model-routing policy lives in
+user-level config, not here — this section only records what is
+_repo-specifically_ risky.
 
-Use ONLY for:
-
-- Cross-product architectural decisions affecting multiple modules
-- Security-critical code (auth, token handling, PII flows)
-- Complex bugs requiring deep multi-file causal reasoning
-- Final review of client-facing or legally sensitive output
-- Anything requiring genuine architectural judgment
-
-### Tier B — Planning (15% of tasks) — Claude Sonnet or OpenRouter Auto
-
-Use for:
-
-- Single-module feature implementation
-- Database schema changes and migrations
-- Code reviews of non-trivial PRs
-- Research synthesis and strategy document drafting
-- Debugging with a clear hypothesis
-
-### Tier C — Execution (80% of tasks) — OpenRouter DeepSeek V4 Flash or Haiku
-
-Use for:
-
-- Test stub generation and boilerplate
-- Repetitive file patches and linting fixes
-- Type annotation passes
-- Document reformatting and collateral variations
-- Firebase function scaffolding from established patterns
-- Content calendar generation, email drafts, standard templates
-
-### Anti-pattern guard
-
-NEVER use Tier A for tasks completable by Tier C.
-When in doubt, start at Tier C and escalate if output quality is insufficient.
-
-## RAG System Tier Calibration
-
-Tier A tasks:
+Highest care (cross-cutting, security-relevant, or expensive to get wrong):
 
 - Retrieval pipeline architecture changes (RRF weights, embedding strategy)
-- Auth provider changes (OIDC, JWT, composite)
+- Auth provider changes (OIDC, JWT, composite) and anything touching `access-control.ts`
+- The ingestion sensitivity gate (`pipeline.ts` `dataClass` / `ClassBlockedError`) — the enum collapses Class C and D, so any change that lets C through lets D through
 - pg-boss job handler orchestration
-- Cross-package API contract changes (@rag/core types)
+- Cross-package API contract changes (`@rag/core` types)
+- Drizzle migration authoring — migrations are **forward-only** and the journal's `when` must be strictly monotonic (this repo has hit a non-monotonic-timestamp bug before)
 
-Tier B tasks:
+Standard care (clear pattern to follow, real judgment calls):
 
-- New connector implementation (follow connector/ pattern)
-- New MCP tool (follow tools/ pattern)
-- Drizzle migration authoring
+- New connector implementation (follow the connector/ pattern; see the 6-step list above)
+- New MCP tool (follow the tools/ pattern)
 - Vitest e2e spec authoring
 
-Tier C tasks:
+Mechanical (a sibling exists to copy):
 
 - Zod schema boilerplate for new entities
 - Pino log statement additions

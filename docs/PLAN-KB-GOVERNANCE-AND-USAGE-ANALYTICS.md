@@ -1,5 +1,18 @@
 # Implementation Plan: Knowledge-Base Governance & Usage Analytics
 
+> ### ℹ Where this plan's source documents actually live (marked 2026-08-03)
+>
+> Both are cited below with a `docs/…` prefix, which is misleading — neither is in
+> this repository.
+>
+> - **`CPA_Firm_Operations_Consultant_Briefing.md` — exists, and the premise checks out.** It is at `~/dev/cpa-consulting/docs/marcus-onboarding/CPA_Firm_Operations_Consultant_Briefing.md`. Its §C is titled _"The knowledge base is foundational and currently unreliable,"_ and it contains all four quoted gaps verbatim. **This plan's premise is verified.** Cite it as `cpa-consulting/docs/marcus-onboarding/…`.
+> - **`CPA-CONSULTING-PLAN-REVIEW.md` — not found**, in this repo's history or under `~/dev/cpa-consulting`. The 2026-07-05 revision note cites it for five specific resolutions; each was re-derived from code at the time and is individually checkable, but the review document itself cannot be produced.
+>
+> ⚠ **This banner replaces an incorrect one.** An earlier version claimed both
+> documents "have never existed" and instructed the reader to re-establish the
+> premise before executing. That was wrong about the briefing — the check looked
+> only at this repository's git history for a path that was always cross-repo.
+
 > **Context:** `docs/CPA_Firm_Operations_Consultant_Briefing.md` (an operations-consulting
 > briefing for the CPA firm this system serves) repeatedly names the knowledge base as
 > "foundational but currently unreliable" and calls out specific governance gaps: _"who can

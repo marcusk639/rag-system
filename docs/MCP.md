@@ -1,5 +1,7 @@
 # MCP Reference
 
+**Status:** Current · **Updated:** 2026-08-03
+
 The `@rag/mcp` server exposes the RAG system as an [MCP](https://modelcontextprotocol.io) server — any MCP-capable client (Claude Desktop, Claude Code, Cline, Continue, etc.) can search and ask questions against the indexed corpus.
 
 ## Transports

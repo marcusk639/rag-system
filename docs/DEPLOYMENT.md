@@ -1,5 +1,7 @@
 # Deployment
 
+**Status:** Current · **Updated:** 2026-08-03 · **Live target:** Railway
+
 How to run the RAG system in production. Local dev is covered in the root README; this doc focuses on the production picture.
 
 ## Components to deploy
@@ -40,9 +42,11 @@ The Dockerfiles use `pnpm deploy --prod` in a pruner stage to produce a
 self-contained bundle (prod deps only, no other workspace apps). The parser image
 is at `services/parser-py/Dockerfile`.
 
-For a single-VM production stack use `docker/compose.prod.yml`. See
-`docs/DEPLOYMENT-TARGET.md` for the deployment-target rationale (D1) and
-provisioning steps.
+**The live deployment target is Railway** (see [Migrations on deploy](#migrations-on-deploy-railway)
+below). For a single-VM self-hosted stack use `docker/compose.prod.yml`;
+[`DEPLOYMENT-TARGET.md`](./DEPLOYMENT-TARGET.md) holds that path's rationale and
+provisioning steps — note it is **superseded as a description of what runs
+today** and carries a banner saying so.
 
 ## Database
 

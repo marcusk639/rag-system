@@ -81,6 +81,11 @@ function makeConnector(pages: FakePage[]) {
 }
 
 function makeDeps(): PipelineDeps {
+  // Layer 3 (2026-08-03) made an undeclared source class fail CLOSED to "D",
+  // so every document quarantines unless the caller declares a class. These
+  // tests previously relied on the implicit `?? "A"` public default — the same
+  // implicit default that let 858 unclassified documents into a public index.
+  // Declaring it here keeps the tests' intent and makes the dependency visible.
   const parser: Parser = {
     parse: vi.fn(async ({ filename }) => ({
       title: String(filename),
@@ -112,7 +117,14 @@ function makeDeps(): PipelineDeps {
     child: () => logger,
   } as unknown as Logger;
 
-  return { db: {} as PipelineDeps["db"], parser, chunker, embedder, logger };
+  return {
+    sourceDocClass: "A",
+    db: {} as PipelineDeps["db"],
+    parser,
+    chunker,
+    embedder,
+    logger,
+  };
 }
 
 const OPTS = { concurrency: 2, pageSize: 50 };
@@ -569,9 +581,17 @@ describe("document classification enforcement", () => {
 });
 
 describe("TRI compliance scanning at ingest", () => {
-  it("logs a tri-flagged event when parsed content contains an SSN", async () => {
+  it("BLOCKS a document containing an SSN rather than ingesting and flagging it", async () => {
+    // ⚠ Behaviour changed 2026-08-03 (Layer 3). This test previously asserted
+    // that SSN-bearing content was INGESTED and then flagged for review. That
+    // is exactly what allowed 858 documents — including a spreadsheet with 522
+    // SSN-shaped values — to be chunked, embedded, and sent to a third-party
+    // API. Flagging after the fact does not undo a disclosure.
+    //
+    // The document is now quarantined before any of that, AND a durable audit
+    // event is written: preventing the disclosure without recording that the
+    // pipeline saw sensitive content would destroy the compliance evidence.
     const deps = makeDeps();
-    // Override parser to return content containing a Social Security Number.
     (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
       title: "client-return",
       markdown: "Client SSN: 123-45-6789. Total income: $150,000.",
@@ -581,21 +601,23 @@ describe("TRI compliance scanning at ingest", () => {
     const { connector } = makeConnector([
       { documents: ["tax-return"], nextCursor: null, done: true },
     ]);
-    await runIngestion("src-id", connector, null, OPTS, deps);
+    const result = await runIngestion("src-id", connector, null, OPTS, deps);
 
-    // Both "ingested" and "tri-flagged" events must be logged.
-    expect(logIngestEventMock).toHaveBeenCalledTimes(2);
-    expect(logIngestEventMock).toHaveBeenCalledWith(
+    // Nothing was indexed.
+    expect(result.chunksCreated).toBe(0);
+    expect(logIngestEventMock).not.toHaveBeenCalledWith(
       deps.db,
       expect.objectContaining({ action: "ingested" }),
     );
+
+    // But the event is recorded, escalated to Class D by the identifier.
     expect(logIngestEventMock).toHaveBeenCalledWith(
       deps.db,
       expect.objectContaining({
         sourceId: "src-id",
-        docId: "doc-1",
-        action: "tri-flagged",
-        rejectionReason: expect.stringContaining("SSN"),
+        action: "blocked",
+        docClass: "D",
+        rejectionReason: expect.stringContaining("identifier-found"),
       }),
     );
   });

@@ -564,7 +564,7 @@ synthetic test.
 **But the report must never carry client data.** If it included document titles
 or chunk text and the client emailed it, that would be a disclosure — for a HIPAA
 or 42 CFR Part 2 client, a reportable one, caused by diagnostic tooling. This is
-concrete: TWK's own titles include entries like `Miller, Patrick & Breanna (2026 Package)`.
+concrete: ~30 of TWK's own document titles carry a personal name in `Surname, Firstname` form, 9 of them as `(YYYY Package)` client deliverables.
 
 **Design:** a differential test needing **no ground truth**. Run the same N
 questions before and after an upgrade against the same corpus, and report only

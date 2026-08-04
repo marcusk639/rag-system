@@ -1,8 +1,26 @@
 # CPA RAG Knowledge Base — Implementation & Compliance Spec
 
-> **The authoritative master plan** for a fully functional, regulation-compliant CPA firm knowledge
-> base built on `rag-system`. It defines WHAT must be true (requirements + compliance controls + a
-> compliant architecture) and sequences the FULL build. It composes three companion docs — read them
+> ## ⛔ HISTORICAL (marked 2026-08-03) — no longer the authoritative plan
+>
+> This document called itself _"the authoritative master plan."_ It was, on
+> 2026-06-08. It is not now, and three other documents have since made the same
+> claim over overlapping ground. **Current authority:**
+> [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) for what is true,
+> [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md)
+> for priority and sequencing, and
+> [`superpowers/specs/2026-08-03-multi-vertical-rag-platform-design.md`](./superpowers/specs/2026-08-03-multi-vertical-rag-platform-design.md)
+> for the platform direction.
+>
+> **Still valuable, and not superseded:** its requirements catalog (FR/NFR) and
+> its framing of §7216 as an architecture-shaping constraint rather than a
+> checklist item. **Known stale:** §1 says the `local` embedding provider
+> _"currently throws"_ — it shipped long ago, and under
+> `COMPLIANCE_MODE=client-data` it is not merely the default but **mandatory**:
+> `packages/rag/src/embeddings/factory.ts` throws if any other provider is
+> configured in that mode.
+
+> Defines WHAT must be true (requirements + compliance controls + a compliant architecture) and
+> sequences the FULL build. It composes three companion docs — read them
 > alongside:
 >
 > - `CPA-KB-ADOPTION-PLAN.md` — the functional build phases (cited here for step-level detail).

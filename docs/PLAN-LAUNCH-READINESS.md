@@ -1,6 +1,34 @@
 # PLAN: Launch Readiness (Reusable RAG Knowledge-Base Platform)
 
-**Status:** Draft — created 2026-06-14; recalibrated 2026-06-14 after data-sensitivity review.
+> ## ⛔ SUPERSEDED (marked 2026-08-03) — and one of its premises is falsified
+>
+> **Superseded for priority and sequencing** by
+> [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md),
+> which says so in its own header. Keep this file for its detailed
+> copy-the-pattern references; do not use it as the work queue.
+> For what is true right now, see [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md).
+>
+> ⚠ **`DECISION-CPA-KB-RAG-CONVERGENCE.md` still points new contributors here.**
+> That pointer is stale; it has been corrected in that file.
+>
+> ### The falsified premise
+>
+> The data-sensitivity posture immediately below reasons that _"Real client data
+> lives in **Onvio**, not the KB"_ and therefore _"§7216 is **not a launch gate**
+> for tenant #1."_ **The first clause is now known to be wrong.** A screen of all
+> 858 indexed documents found client-identifying material inside the SharePoint
+> KB itself — client billing files, engagement letters, and one spreadsheet with
+> 522 SSN-shaped values. Onvio is indeed not connected; the error was assuming
+> that meant the KB was clean.
+>
+> Everything in this plan that rests on "LOW–MODERATE sensitivity" — including
+> D1, D2, and the demotion of Phase G1 — inherits that error. See the correction
+> in [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) and the remediation in
+> [`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md).
+> Note D2a below — _"curate client examples out of scope"_ — was the right
+> instinct, and it is the one decision here that was never executed.
+
+**Status:** Superseded — created 2026-06-14; recalibrated 2026-06-14 after data-sensitivity review.
 **Goal:** Take the RAG system from "feature-complete + app-layer-hardened" to "safe to run in production as a reusable KB platform," launching first on the CPA firm's own SharePoint knowledge base.
 **Execution model:** Each phase below is self-contained and can be executed in a fresh chat context. Do the phases roughly in order. Effort is scaled to **data sensitivity** (see below) — not every phase is a blocker for the first launch.
 
