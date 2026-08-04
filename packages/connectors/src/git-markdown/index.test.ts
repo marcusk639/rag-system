@@ -151,3 +151,76 @@ describe("GitMarkdownConnector", () => {
     expect(result.documents[0]?.content.toString()).toContain("# Beta");
   });
 });
+
+describe("GitMarkdownConnector — ambient GIT_* environment", () => {
+  // Regression: `execFileAsync("git", args, { cwd })` inherits process.env, and
+  // git's repo-location variables OVERRIDE cwd. So an ambient GIT_DIR made the
+  // connector read whatever repo that pointed at instead of `repoPath` —
+  // silently, returning the wrong documents rather than erroring.
+  //
+  // Git hooks always export these, which is how the pre-push hook surfaced it.
+  // The production risk is the same shape: a worker running with GIT_DIR set in
+  // its environment would ingest the wrong repository.
+  let repoPath: string;
+  let decoyPath: string;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    repoPath = mkdtempSync(path.join(tmpdir(), "git-markdown-real-"));
+    git(repoPath, "init", "-q");
+    git(repoPath, "config", "user.email", "test@example.com");
+    git(repoPath, "config", "user.name", "Test");
+    writeFileSync(path.join(repoPath, "real.md"), "# Real\n");
+    git(repoPath, "add", ".");
+    git(repoPath, "commit", "-q", "-m", "real");
+
+    // A second, VALID repo with different content. Pointing GIT_DIR at a
+    // nonexistent path would only prove the connector errors; pointing it at a
+    // real repo proves it read the right one.
+    decoyPath = mkdtempSync(path.join(tmpdir(), "git-markdown-decoy-"));
+    git(decoyPath, "init", "-q");
+    git(decoyPath, "config", "user.email", "test@example.com");
+    git(decoyPath, "config", "user.name", "Test");
+    writeFileSync(path.join(decoyPath, "decoy.md"), "# Decoy\n");
+    git(decoyPath, "add", ".");
+    git(decoyPath, "commit", "-q", "-m", "decoy");
+
+    for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) {
+      saved[key] = process.env[key];
+    }
+    process.env.GIT_DIR = path.join(decoyPath, ".git");
+    process.env.GIT_WORK_TREE = decoyPath;
+  });
+
+  afterAll(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(repoPath, { recursive: true, force: true });
+    rmSync(decoyPath, { recursive: true, force: true });
+  });
+
+  it("reads repoPath, not the repo an ambient GIT_DIR points at", async () => {
+    const connector = new GitMarkdownConnector(
+      { repoPath, extensions: [".md"] },
+      LOGGER,
+    );
+
+    const result = await connector.list();
+
+    expect(result.documents.map((d) => d.externalId)).toEqual(["real.md"]);
+  });
+
+  it("fetch() also ignores the ambient GIT_DIR", async () => {
+    // Separate call path (gitBuffer), so it needs its own scrubbing.
+    const connector = new GitMarkdownConnector(
+      { repoPath, extensions: [".md"] },
+      LOGGER,
+    );
+
+    const doc = await connector.fetch("real.md");
+
+    expect(doc.content.toString()).toContain("# Real");
+  });
+});

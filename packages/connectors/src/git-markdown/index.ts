@@ -16,14 +16,51 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Git environment variables that select which repository a command operates on.
+ *
+ * These **override `cwd`**, so inheriting them silently redirects every command
+ * below at a different repository — returning the wrong documents rather than
+ * failing. Git hooks always export them (which is how a pre-push run surfaced
+ * this), but the production shape is the same: a worker started with `GIT_DIR`
+ * in its environment would ingest the wrong repo.
+ *
+ * Scrubbed as an explicit deny-list rather than dropping every `GIT_*` var,
+ * because unrelated ones — `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`,
+ * `GIT_TERMINAL_PROMPT` — are legitimate deployment configuration and are not
+ * this function's business to discard.
+ */
+const REPO_LOCATION_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_PREFIX",
+  "GIT_NAMESPACE",
+  "GIT_CEILING_DIRECTORIES",
+] as const;
+
+/** `process.env` minus the vars that would override `cwd`. */
+function hermeticGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of REPO_LOCATION_ENV) delete env[key];
+  return env;
+}
+
 async function git(repoPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd: repoPath });
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: repoPath,
+    env: hermeticGitEnv(),
+  });
   return stdout.trim();
 }
 
 async function gitBuffer(repoPath: string, args: string[]): Promise<Buffer> {
   const { stdout } = await execFileAsync("git", args, {
     cwd: repoPath,
+    env: hermeticGitEnv(),
     encoding: "buffer",
   } as Parameters<typeof execFileAsync>[2]);
   return stdout as unknown as Buffer;
