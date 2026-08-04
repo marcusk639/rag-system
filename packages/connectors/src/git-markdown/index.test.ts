@@ -8,8 +8,29 @@ import { GitMarkdownConnector } from "./index.js";
 
 const LOGGER = pino({ level: "silent" });
 
+/**
+ * Builds the fixture repos. Must scrub the same repo-location variables the
+ * connector does: git hooks export `GIT_DIR`/`GIT_WORK_TREE`, and under a hook
+ * these calls would otherwise commit the fixture files into the OUTER
+ * repository instead of the temp one — which is what made the whole suite fail
+ * during `git push` while passing when run directly.
+ */
 function git(repoPath: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: repoPath }).toString().trim();
+  const env = { ...process.env };
+  for (const key of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+  ]) {
+    delete env[key];
+  }
+  return execFileSync("git", args, { cwd: repoPath, env }).toString().trim();
 }
 
 describe("GitMarkdownConnector", () => {
