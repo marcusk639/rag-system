@@ -422,7 +422,13 @@ async function main(): Promise<void> {
 
       const claims: ExtractedClaim[] = [];
       let rejected = 0;
-      let dropped = 0;
+      // Shape drops are counted by reason, not lumped. They used to be
+      // reported wholesale as "missing distractor", which was true only while
+      // an empty claim was silently discarded upstream and never counted at
+      // all. Now that it is counted, one label for two causes would misname
+      // whichever one actually happened.
+      let droppedNoDistractor = 0;
+      let droppedEmptyClaim = 0;
       const rungTotals = { exact: 0, whitespace: 0, unicode: 0, markdown: 0 };
 
       for (const row of rows) {
@@ -438,7 +444,10 @@ async function main(): Promise<void> {
         });
         claims.push(...res.claims);
         rejected += res.rejected.length;
-        dropped += res.droppedForShape.length;
+        for (const d of res.droppedForShape) {
+          if (d.reason.startsWith("no claim text")) droppedEmptyClaim++;
+          else droppedNoDistractor++;
+        }
         for (const k of Object.keys(
           rungTotals,
         ) as (keyof typeof rungTotals)[]) {
@@ -461,7 +470,15 @@ async function main(): Promise<void> {
       console.log(
         `  ${rejected} claim(s) dropped — quote not locatable in the source`,
       );
-      console.log(`  ${dropped} dropped for shape (missing distractor)`);
+      console.log(
+        `  ${droppedNoDistractor} dropped for shape (missing distractor)`,
+      );
+      if (droppedEmptyClaim > 0) {
+        console.log(
+          `  ${droppedEmptyClaim} dropped for shape (empty claim text) — the ` +
+            "model emitted a claim object with nothing in it",
+        );
+      }
       console.log(
         `  rung mix: exact ${rungTotals.exact} · whitespace ${rungTotals.whitespace} ` +
           `· unicode ${rungTotals.unicode} · markdown ${rungTotals.markdown}`,
