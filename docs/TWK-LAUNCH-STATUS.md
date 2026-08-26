@@ -4,6 +4,34 @@
 material confirmed in the index); gate #3 is **partially closed**, not closed.
 Engineering table last verified 2026-07-16.
 
+> ✅ **Read first (updated 2026-08-04) — the index is EMPTY, by design.**
+>
+> The entire indexed corpus (858 documents / ~6,175 chunks) was **deliberately
+> purged on 2026-08-03** because it contained TRI. Production now holds **0
+> documents, 0 chunks, 3 sources** (cursors intact). Full account, with the
+> before/after evidence: [`PURGE-RECORD-2026-08-03.md`](./PURGE-RECORD-2026-08-03.md).
+>
+> Three consequences that change how the rest of this file reads:
+>
+> 1. **The exposure described below is closed.** Nothing client-identifying is
+>    retrievable, because nothing is retrievable. `audit_log` confirms **no user
+>    other than the operator ever queried the system.**
+> 2. ⛔ **A re-sync would restore all of it.** Cursors are intact and the
+>    ingest-time gates are unbuilt, so one `POST /sources/:id/sync` undoes the
+>    purge. Nothing triggers this automatically (verified — the only pg-boss
+>    schedules are the weekly digest and the hourly audit shipper). **Do not
+>    re-sync until content-boundary Phases 2 and 4 land.**
+> 3. **The pilot currently answers nothing.** `rag-web` is up and auth-gated, but
+>    every question retrieves zero chunks and returns the no-information response.
+>
+> The July disclosure is separately resolved: the Gemini key is **paid tier**
+> (Cloud Billing Tier 1, verified 2026-08-04), so the July 4 ingest ran under the
+> Cloud DPA with no-train and zero-retention — not free-tier terms. See
+> [`compliance/vendor-dpa-google-gemini.md`](./compliance/vendor-dpa-google-gemini.md).
+
+<details>
+<summary>Superseded — the 2026-08-03 warning this replaced (kept for the record)</summary>
+
 > ⛔ **Read first (2026-08-03).** Two things supersede everything below them:
 >
 > 1. **The content audit ran and found client PII already in the live index.**
@@ -14,6 +42,11 @@ Engineering table last verified 2026-07-16.
 >    "launch is gated on human/legal/infra work, not engineering" framing below
 >    is **no longer accurate** and is retained only as the record of what was
 >    believed on 2026-07-16.
+
+_(Point 2 still holds — those gates remain unbuilt, which is exactly why a
+re-sync is unsafe. Only point 1's "already in the live index" is superseded.)_
+
+</details>
 
 **Purpose:** One page that reflects what is _actually_ true right now, verified against the code — not what a plan's checkboxes claim. This project has a documented history of stale "resolved" claims creating false confidence; cross-check anything surprising against the tree before trusting it.
 
