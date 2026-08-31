@@ -229,7 +229,12 @@ export const Config = z
          * overrides this to `block` at wiring time** (packages/runtime) so a
          * client-data deployment can never run permissively by omission.
          */
-        triPolicy: z.enum(["block", "warn", "off"]).default("warn"),
+        // Default `block`, deliberately. The contextual patterns produce known
+        // false positives on an internal-SOP corpus, so `warn` is the right
+        // setting for many deployments — but it is a §7216 disclosure decision
+        // and must be made explicitly, not inherited by saying nothing. A
+        // deployment that never considered TRI gets the strict policy.
+        triPolicy: z.enum(["block", "warn", "off"]).default("block"),
       })
       .optional(),
 

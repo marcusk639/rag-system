@@ -316,3 +316,38 @@ describe("loadConfig — generation baseURL and apiKey", () => {
     ).toThrow();
   });
 });
+
+describe("loadConfig — generation TRI policy default", () => {
+  // The default is a compliance posture, not a convenience: a deployment that
+  // never mentions GENERATION_TRI_POLICY gets the strict policy, and leniency
+  // has to be asked for in writing. Pinned so a future schema edit has to argue
+  // with a test rather than quietly relax it.
+  it("defaults to block when GENERATION_TRI_POLICY is unset", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+    });
+    expect(cfg.generation?.triPolicy).toBe("block");
+  });
+
+  it("still honours an explicit warn", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+      GENERATION_TRI_POLICY: "warn",
+    });
+    expect(cfg.generation?.triPolicy).toBe("warn");
+  });
+
+  it("still honours an explicit off", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+      GENERATION_TRI_POLICY: "off",
+    });
+    expect(cfg.generation?.triPolicy).toBe("off");
+  });
+});

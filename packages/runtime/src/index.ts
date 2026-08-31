@@ -132,7 +132,7 @@ export function resolveTriPolicy(
   complianceMode: string | undefined,
   configured: TriPolicy | undefined,
 ): TriPolicy {
-  return complianceMode === "client-data" ? "block" : (configured ?? "warn");
+  return complianceMode === "client-data" ? "block" : (configured ?? "block");
 }
 
 export async function buildCoreDeps(

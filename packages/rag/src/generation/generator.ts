@@ -355,7 +355,7 @@ export class GeminiGenerator implements Generator {
       prompt,
       GEMINI_BASE_URL,
       this._egressPolicy,
-      this.opts.triPolicy ?? "warn",
+      this.opts.triPolicy ?? "block",
       this.opts.onTriDetected,
     );
   }
@@ -447,7 +447,7 @@ export class OpenAIGenerator implements Generator {
       // allow-list vouch for a host the client never contacts.
       this.effectiveBaseURL,
       this._egressPolicy,
-      this.opts.triPolicy ?? "warn",
+      this.opts.triPolicy ?? "block",
       this.opts.onTriDetected,
     );
   }

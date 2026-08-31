@@ -250,7 +250,7 @@ describe("TRI pre-flight policy", () => {
         expect(await preFlightOutcome(gen, sopChunk)).toBe("passed");
       });
 
-      it("blocks an SSN when triPolicy is omitted (default warn)", async () => {
+      it("blocks an SSN when triPolicy is omitted (default block)", async () => {
         const gen = make({
           apiKey: "test-key",
           model: "test-model",
@@ -286,7 +286,13 @@ describe("TRI pre-flight policy", () => {
         expect(seen).toHaveLength(0);
       });
 
-      it("defaults to warn when triPolicy is omitted", async () => {
+      it("defaults to block when triPolicy is omitted", async () => {
+        // The default is the conservative one: a caller that never thought
+        // about TRI gets the strict policy, and leniency must be asked for.
+        // A contextual-only match — an ordinary SOP chunk — is enough to stop
+        // the call, which is the whole difference from the previous `warn`
+        // default. `warn` remains available and is the right setting for an
+        // internal-SOP corpus; it just is not what you get by saying nothing.
         const gen = make({
           apiKey: "test-key",
           model: "test-model",
@@ -295,7 +301,7 @@ describe("TRI pre-flight policy", () => {
             "api.openai.com",
           ]),
         } as never);
-        expect(await preFlightOutcome(gen, sopChunk)).toBe("passed");
+        expect(await preFlightOutcome(gen, sopChunk)).toBe("blocked");
       });
     });
   }

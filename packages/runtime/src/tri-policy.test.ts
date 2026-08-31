@@ -34,9 +34,12 @@ describe("resolveTriPolicy", () => {
     expect(resolveTriPolicy("none", "block")).toBe("block");
   });
 
-  it("defaults to warn outside client-data when nothing is configured", () => {
-    expect(resolveTriPolicy("none", undefined)).toBe("warn");
-    expect(resolveTriPolicy(undefined, undefined)).toBe("warn");
+  it("defaults to block outside client-data when nothing is configured", () => {
+    // Matches the zod default in @rag/core and the generators' own fallback.
+    // All three have to agree, or the effective default depends on which
+    // construction path a caller happens to take.
+    expect(resolveTriPolicy("none", undefined)).toBe("block");
+    expect(resolveTriPolicy(undefined, undefined)).toBe("block");
   });
 
   // Fail-safe direction. An unrecognised compliance mode must not be treated as
