@@ -3,6 +3,7 @@ export { initMonitoring, captureException } from "./monitoring.js";
 import {
   EgressPolicy,
   createAuthProvider,
+  resolveGenerationCredentials,
   type AuditLogSink,
   type AuthProvider,
   type Config,
@@ -18,6 +19,7 @@ import {
   createObjectStore,
   createReranker,
   type Generator,
+  type TriPolicy,
 } from "@rag/rag";
 import type { Logger } from "pino";
 
@@ -112,6 +114,28 @@ export function buildAuthProvider(
   }
 }
 
+/**
+ * Resolve the effective TRI policy for generation.
+ *
+ * `client-data` compliance mode forces the strict policy regardless of
+ * GENERATION_TRI_POLICY. The permissive setting (`warn`, opt-in since the
+ * default moved to `block`) is calibrated for an
+ * internal-SOP corpus where the scan's contextual patterns are known false
+ * positives; a deployment that has declared real client data in scope must
+ * never inherit that leniency — not by omission, and not by an explicit
+ * `warn`/`off` that predates the compliance declaration.
+ *
+ * Exported for its own sake: this one decision is what several comments
+ * elsewhere point at when they argue a looser setting is safe, so it is the
+ * kind of rule that should fail a test rather than a deployment.
+ */
+export function resolveTriPolicy(
+  complianceMode: string | undefined,
+  configured: TriPolicy | undefined,
+): TriPolicy {
+  return complianceMode === "client-data" ? "block" : (configured ?? "block");
+}
+
 export async function buildCoreDeps(
   config: Config,
   logger: Logger,
@@ -177,26 +201,27 @@ export async function buildCoreDeps(
     shipAuditLogTz: config.auditSink.tz,
   });
 
-  // Generation reuses the embedding provider's API key — same vendor in
-  // practice (Gemini embedding + Gemini generation, OpenAI + OpenAI).
   let generator: Generator | null = null;
   if (config.generation) {
-    const apiKey = config.embedding.apiKey;
-    if (!apiKey) {
+    // Generation used to borrow the embedding provider's key outright, on the
+    // assumption of a single vendor. That assumption fails for the deployment
+    // this feature exists to serve: EMBEDDING_PROVIDER=local has no key, so a
+    // self-hosted generation endpoint would have disabled itself here.
+    const credentials = resolveGenerationCredentials({
+      generationApiKey: config.generation.apiKey,
+      embeddingApiKey: config.embedding.apiKey,
+      baseURL: config.generation.baseURL,
+    });
+    if (credentials.kind === "disabled") {
       logger.warn(
-        { provider: config.generation.provider },
-        "generation configured but no API key on embedding config — generation disabled",
+        { provider: config.generation.provider, reason: credentials.reason },
+        "generation configured but no usable API key — generation disabled",
       );
     } else {
-      // `client-data` compliance mode forces the strict TRI policy regardless of
-      // GENERATION_TRI_POLICY. The permissive default (`warn`) is calibrated for
-      // an internal-SOP corpus where the scan's contextual patterns are known
-      // false positives; a deployment that has declared real client data in
-      // scope must never inherit that leniency by omission.
-      const triPolicy =
-        config.complianceMode === "client-data"
-          ? "block"
-          : (config.generation.triPolicy ?? "warn");
+      const triPolicy = resolveTriPolicy(
+        config.complianceMode,
+        config.generation.triPolicy,
+      );
       if (triPolicy !== config.generation.triPolicy) {
         logger.info(
           { triPolicy, complianceMode: config.complianceMode },
@@ -206,8 +231,15 @@ export async function buildCoreDeps(
       generator = createGenerator({
         provider: config.generation.provider,
         model: config.generation.model,
-        apiKey,
+        apiKey: credentials.apiKey,
+        ...(config.generation.baseURL
+          ? { baseURL: config.generation.baseURL }
+          : {}),
         maxOutputTokens: config.generation.maxOutputTokens,
+        // The same shared policy the embedder, audit sink, and reranker use.
+        // Without it the generator built its own from the environment — same
+        // allow-list in practice, but nothing guaranteed it.
+        egressPolicy,
         triPolicy,
         onTriDetected: (patterns) =>
           logger.warn(
@@ -215,6 +247,31 @@ export async function buildCoreDeps(
             "TRI patterns detected in generation prompt; proceeding under triPolicy=warn",
           ),
       });
+      if (config.generation.baseURL) {
+        // An operator who believes they are air-gapped needs one line in the
+        // boot log confirming it — and that line must not affirm a belief we
+        // have not checked. A deployment whose EGRESS_ALLOWED_HOSTS omits this
+        // host boots clean and then 503s on every /ask; say so at boot instead.
+        //
+        // Logged, never thrown: api/mcp crash-looping on a config error is an
+        // existing deployment hazard (see CLAUDE.md), and retrieval still works
+        // without generation.
+        try {
+          egressPolicy.assertAllowed(config.generation.baseURL);
+          logger.info(
+            { baseURL: config.generation.baseURL },
+            "generation using a self-hosted endpoint",
+          );
+        } catch {
+          logger.error(
+            {
+              baseURL: config.generation.baseURL,
+              allowedHosts: egressPolicy.allowedHosts,
+            },
+            "GENERATION_BASE_URL host is not in EGRESS_ALLOWED_HOSTS — every /ask will fail with EGRESS_BLOCKED",
+          );
+        }
+      }
     }
   }
 

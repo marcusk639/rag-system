@@ -264,3 +264,90 @@ describe("loadConfig — DOCS_GAP_DIGEST_* (Phase 4 documentation-gap digest)", 
     ).toThrow();
   });
 });
+
+describe("loadConfig — generation baseURL and apiKey", () => {
+  it("reads GENERATION_BASE_URL and GENERATION_API_KEY into the generation block", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "openai",
+      GENERATION_MODEL: "llama3.1:8b",
+      GENERATION_BASE_URL: "http://127.0.0.1:11434/v1",
+      GENERATION_API_KEY: "gen-key",
+    });
+    expect(cfg.generation?.baseURL).toBe("http://127.0.0.1:11434/v1");
+    expect(cfg.generation?.apiKey).toBe("gen-key");
+  });
+
+  it("leaves both undefined when unset, rather than empty strings", () => {
+    // An empty string would defeat the "is a key present" check downstream.
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+    });
+    expect(cfg.generation?.baseURL).toBeUndefined();
+    expect(cfg.generation?.apiKey).toBeUndefined();
+  });
+
+  it("collapses empty-string GENERATION_BASE_URL and GENERATION_API_KEY to undefined", () => {
+    // `FOO=` in a .env yields "", which would read as "a value is present"
+    // downstream. This is what `|| undefined` is for, and what the
+    // omitted-variable test above cannot exercise.
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "openai",
+      GENERATION_MODEL: "llama3.1:8b",
+      GENERATION_BASE_URL: "",
+      GENERATION_API_KEY: "",
+    });
+    expect(cfg.generation?.baseURL).toBeUndefined();
+    expect(cfg.generation?.apiKey).toBeUndefined();
+  });
+
+  it("rejects a malformed GENERATION_BASE_URL rather than passing it to the SDK", () => {
+    // z.string().url() — a typo'd host should fail at boot, not at first query.
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        GENERATION_PROVIDER: "openai",
+        GENERATION_MODEL: "llama3.1:8b",
+        GENERATION_BASE_URL: "127.0.0.1:11434",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("loadConfig — generation TRI policy default", () => {
+  // The default is a compliance posture, not a convenience: a deployment that
+  // never mentions GENERATION_TRI_POLICY gets the strict policy, and leniency
+  // has to be asked for in writing. Pinned so a future schema edit has to argue
+  // with a test rather than quietly relax it.
+  it("defaults to block when GENERATION_TRI_POLICY is unset", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+    });
+    expect(cfg.generation?.triPolicy).toBe("block");
+  });
+
+  it("still honours an explicit warn", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+      GENERATION_TRI_POLICY: "warn",
+    });
+    expect(cfg.generation?.triPolicy).toBe("warn");
+  });
+
+  it("still honours an explicit off", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+      GENERATION_TRI_POLICY: "off",
+    });
+    expect(cfg.generation?.triPolicy).toBe("off");
+  });
+});

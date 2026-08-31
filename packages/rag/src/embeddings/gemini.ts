@@ -14,6 +14,13 @@ import { retryOnRateLimit } from "./retry.js";
  *
  * Docs: https://ai.google.dev/gemini-api/docs/embeddings
  */
+/**
+ * The host this provider dials, pinned. See the matching constant in
+ * `openai.ts` for why the client and the egress assertion must read the same
+ * value rather than each deciding for itself.
+ */
+const GEMINI_EMBEDDINGS_BASE_URL = "https://generativelanguage.googleapis.com";
+
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly name = "gemini";
   readonly model: string;
@@ -32,7 +39,23 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     if (!opts.apiKey) {
       throw new EmbeddingError("Gemini API key is required");
     }
-    this.client = new GoogleGenAI({ apiKey: opts.apiKey });
+    this.client = new GoogleGenAI({
+      apiKey: opts.apiKey,
+      // Passed explicitly, never omitted: the SDK falls back to
+      // `GOOGLE_GEMINI_BASE_URL` when this key is absent, which would let an
+      // environment variable redirect the client away from the host asserted
+      // against the allow-list below.
+      httpOptions: {
+        baseUrl: GEMINI_EMBEDDINGS_BASE_URL,
+        // NOTE: redirects are NOT refused on this path. @google/genai@1.52.0's
+        // public HttpOptions exposes no `redirect` option and no custom-fetch
+        // hook (only baseUrl/apiVersion/headers/timeout/extraBody/retryOptions),
+        // so the OpenAI path's `egressSafeFetch` has no equivalent here. The
+        // allow-list therefore validates the first hop only for Gemini. See
+        // NO_REDIRECT_INIT in @rag/core; closing this needs an SDK change or a
+        // hand-rolled transport.
+      },
+    });
     this.model = opts.model ?? "gemini-embedding-001";
     this.dimensions = opts.dimensions ?? 768;
     this.maxRetries = opts.maxRetries ?? 5;
@@ -68,9 +91,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   ): Promise<Embedding[]> {
     if (texts.length === 0) return [];
 
-    this._egressPolicy.assertAllowed(
-      "https://generativelanguage.googleapis.com",
-    );
+    this._egressPolicy.assertAllowed(GEMINI_EMBEDDINGS_BASE_URL);
 
     try {
       // Gemini's batch endpoint accepts up to 100 inputs per call.

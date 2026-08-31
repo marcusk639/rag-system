@@ -169,6 +169,31 @@ export const Config = z
         maxOutputTokens: z.number().int().positive().default(2048),
 
         /**
+         * Base URL for an OpenAI-compatible generation endpoint. Set this to
+         * run generation against a self-hosted model (Ollama, vLLM, LM Studio,
+         * llama.cpp) instead of a third-party API; combined with
+         * `EMBEDDING_PROVIDER=local` nothing leaves the client's network.
+         *
+         * `openai` provider only — `GENERATION_PROVIDER=gemini` with this set
+         * throws at generator construction rather than ignoring it.
+         *
+         * The egress allow-list applies to THIS host: add it to
+         * `EGRESS_ALLOWED_HOSTS` or every call throws `EgressError`.
+         *
+         * Set via `GENERATION_BASE_URL`.
+         */
+        baseURL: z.string().url().optional(),
+
+        /**
+         * API key for generation. Optional: falls back to the embedding
+         * provider's key (the single-vendor case), and is unnecessary
+         * altogether for a self-hosted endpoint, which ignores it.
+         *
+         * Set via `GENERATION_API_KEY`.
+         */
+        apiKey: z.string().optional(),
+
+        /**
          * What the generation-time TRI (Taxpayer Return Information) pre-flight
          * does when `scanForTRI` fires on the assembled prompt.
          *
@@ -204,7 +229,12 @@ export const Config = z
          * overrides this to `block` at wiring time** (packages/runtime) so a
          * client-data deployment can never run permissively by omission.
          */
-        triPolicy: z.enum(["block", "warn", "off"]).default("warn"),
+        // Default `block`, deliberately. The contextual patterns produce known
+        // false positives on an internal-SOP corpus, so `warn` is the right
+        // setting for many deployments — but it is a §7216 disclosure decision
+        // and must be made explicitly, not inherited by saying nothing. A
+        // deployment that never considered TRI gets the strict policy.
+        triPolicy: z.enum(["block", "warn", "off"]).default("block"),
       })
       .optional(),
 
@@ -635,6 +665,8 @@ export function loadConfig(
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
               : undefined,
+            baseURL: env.GENERATION_BASE_URL || undefined,
+            apiKey: env.GENERATION_API_KEY || undefined,
             triPolicy: env.GENERATION_TRI_POLICY as
               "block" | "warn" | "off" | undefined,
           }

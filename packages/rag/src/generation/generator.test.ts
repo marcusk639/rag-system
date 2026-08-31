@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 import {
   buildPrompt,
+  createGenerator,
   filterCitationsToAnswer,
   GeminiGenerator,
   OpenAIGenerator,
@@ -176,13 +177,47 @@ describe("TRI pre-flight policy", () => {
       "api.openai.com",
     ]),
     triPolicy,
+    // The OpenAI SDK captures its own `fetch`, so globalThis stubbing does not
+    // intercept it — this option is what actually keeps the suite offline.
+    fetch: stubFetch,
     ...(onTriDetected ? { onTriDetected } : {}),
   });
 
-  // `answer()` is driven far enough to run the pre-flight; the provider call
-  // that follows fails on the fake key. `preFlight` runs BEFORE that call, so a
-  // rejection carrying COMPLIANCE_VIOLATION proves the guard fired, and any
-  // other rejection proves it did not.
+  // The transport is stubbed for every test in this block.
+  //
+  // `answer()` has to be driven past the pre-flight to prove the guard fired,
+  // and for the `warn`/`off` cases the pre-flight does NOT throw — so the SDK
+  // call proceeded to a real HTTPS POST to api.openai.com and to Google,
+  // carrying the fixture prompt, on every `pnpm test`. In a suite about egress
+  // control that is the wrong default twice over.
+  //
+  // It also made the assertions dishonest: a firewalled runner's connection
+  // error was indistinguishable from "the pre-flight let it through", so those
+  // tests could never fail for the reason they exist. The OpenAI SDK's defaults
+  // (timeout 600000, maxRetries 2) meant a blackholing network hung for ~30
+  // minutes rather than failing fast.
+  //
+  // The stub rejects with a sentinel, so "the pre-flight passed and the sink
+  // was reached" is now a positive, offline-safe observation rather than an
+  // inference from an arbitrary failure.
+  const TRANSPORT_REACHED = "stubbed-transport-reached";
+
+  const stubFetch = (() =>
+    Promise.reject(new Error(TRANSPORT_REACHED))) as unknown as typeof fetch;
+
+  beforeEach(() => {
+    // Gemini's SDK reads globalThis.fetch, so stubbing it covers that path.
+    vi.stubGlobal("fetch", stubFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // `preFlight` runs BEFORE the provider call. A ComplianceError proves the
+  // guard fired; reaching the stubbed transport proves it did not. Anything
+  // else is a real failure and is reported as such rather than being silently
+  // counted as "passed".
   async function preFlightOutcome(
     gen: {
       answer: (q: string, c: RetrievalResult[]) => Promise<unknown>;
@@ -193,7 +228,18 @@ describe("TRI pre-flight policy", () => {
       await gen.answer("how do we review a return?", context);
       return "passed";
     } catch (err) {
-      return err instanceof ComplianceError ? "blocked" : "passed";
+      if (err instanceof ComplianceError) return "blocked";
+      // Reaching the stubbed transport is the positive signal that the
+      // pre-flight allowed the call through.
+      if (err instanceof Error && err.message.includes(TRANSPORT_REACHED)) {
+        return "passed";
+      }
+      // Some SDKs wrap the cause rather than the message.
+      const cause = (err as { cause?: unknown })?.cause;
+      if (cause instanceof Error && cause.message.includes(TRANSPORT_REACHED)) {
+        return "passed";
+      }
+      throw err;
     }
   }
 
@@ -249,7 +295,7 @@ describe("TRI pre-flight policy", () => {
         expect(await preFlightOutcome(gen, sopChunk)).toBe("passed");
       });
 
-      it("blocks an SSN when triPolicy is omitted (default warn)", async () => {
+      it("blocks an SSN when triPolicy is omitted (default block)", async () => {
         const gen = make({
           apiKey: "test-key",
           model: "test-model",
@@ -285,7 +331,13 @@ describe("TRI pre-flight policy", () => {
         expect(seen).toHaveLength(0);
       });
 
-      it("defaults to warn when triPolicy is omitted", async () => {
+      it("defaults to block when triPolicy is omitted", async () => {
+        // The default is the conservative one: a caller that never thought
+        // about TRI gets the strict policy, and leniency must be asked for.
+        // A contextual-only match — an ordinary SOP chunk — is enough to stop
+        // the call, which is the whole difference from the previous `warn`
+        // default. `warn` remains available and is the right setting for an
+        // internal-SOP corpus; it just is not what you get by saying nothing.
         const gen = make({
           apiKey: "test-key",
           model: "test-model",
@@ -294,7 +346,7 @@ describe("TRI pre-flight policy", () => {
             "api.openai.com",
           ]),
         } as never);
-        expect(await preFlightOutcome(gen, sopChunk)).toBe("passed");
+        expect(await preFlightOutcome(gen, sopChunk)).toBe("blocked");
       });
     });
   }
@@ -372,5 +424,194 @@ describe("filterCitationsToAnswer — grouped citation forms", () => {
   it("ignores an implausibly wide range rather than inflating the set", () => {
     // A year range in prose must not sweep in every citation.
     expect(kept("Applies to tax years [2019-2024].")).toEqual([]);
+  });
+});
+
+/**
+ * Read the base URL a generator's SDK client was actually constructed with.
+ *
+ * `client` is private on our generator classes, and `httpOptions` is private on
+ * `GoogleGenAI` — but the property under test IS the client's, not the
+ * pre-flight's. Every other test in this file can only prove the allow-list saw
+ * some string; these two prove the client points at that same host. Reaching
+ * through the type boundary is the point, not an accident.
+ */
+function openAIClientBaseURL(gen: OpenAIGenerator): string {
+  return (gen as unknown as { client: { baseURL: string } }).client.baseURL;
+}
+
+function geminiClientBaseURL(gen: GeminiGenerator): string | undefined {
+  return (gen as unknown as { client: { httpOptions?: { baseUrl?: string } } })
+    .client.httpOptions?.baseUrl;
+}
+
+describe("injected transport is still redirect-guarded", () => {
+  // The seam that lets tests supply a transport must not be a way to opt out of
+  // the egress guarantee. `opts.fetch ?? egressSafeFetch()` would have replaced
+  // the guard; composing wraps it instead.
+  it("forces redirect:error even when a custom fetch is supplied", async () => {
+    const inits: RequestInit[] = [];
+    const recording = (async (_i: unknown, init?: RequestInit) => {
+      inits.push(init ?? {});
+      throw new Error("recorded");
+    }) as unknown as typeof fetch;
+
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+      fetch: recording,
+    });
+
+    await expect(
+      gen.answer("q", [rr({ text: "safe body" })]),
+    ).rejects.toThrow();
+
+    expect(inits.length).toBeGreaterThan(0);
+    expect(inits[0]!.redirect).toBe("error");
+  });
+});
+
+describe("baseURL — self-hosted generation endpoints", () => {
+  const cleanChunk = [
+    rr({ text: "File the engagement letter in the client folder." }),
+  ];
+
+  afterEach(() => {
+    // These tests stub provider env vars that both SDKs read at construction.
+    // Leaking one would silently redirect every later test's client.
+    vi.unstubAllEnvs();
+  });
+
+  it("validates the effective host, not api.openai.com, when baseURL is set", async () => {
+    // The allow-list names OpenAI and nothing else. Pointing baseURL somewhere
+    // else must be blocked — otherwise the allow-list is approving a host the
+    // client is not calling, which is worse than having no allow-list at all.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+    });
+    await expect(gen.answer("q", cleanChunk)).rejects.toThrow(EgressError);
+  });
+
+  it("allows the effective host when the allow-list names it", async () => {
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+      triPolicy: "off",
+    });
+    // Reaching a connection error proves the pre-flight passed. Asserting "not
+    // EgressError" rather than a specific network error keeps this from
+    // depending on how the SDK surfaces ECONNREFUSED.
+    const err = await gen.answer("q", cleanChunk).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(EgressError);
+  });
+
+  it("still validates api.openai.com when baseURL is omitted", async () => {
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy([]),
+      triPolicy: "off",
+    });
+    await expect(gen.answer("q", cleanChunk)).rejects.toThrow(EgressError);
+  });
+
+  it("blocks an SSN through a local endpoint under the default policy", async () => {
+    // §5.2: a local endpoint does not relax the TRI gate. Nothing about
+    // "looks local" is verifiable — localhost can be a tunnel.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+    });
+    await expect(
+      gen.answer("q", [rr({ text: "Client SSN 123-45-6789 on file." })]),
+    ).rejects.toThrow(ComplianceError);
+  });
+
+  it("refuses baseURL under the gemini provider rather than ignoring it", async () => {
+    // Silently ignoring it would let an operator believe they are air-gapped
+    // while every prompt goes to Google.
+    expect(() =>
+      createGenerator({
+        provider: "gemini",
+        apiKey: "test-key",
+        model: "test-model",
+        baseURL: "http://127.0.0.1:9/v1",
+      }),
+    ).toThrow(/baseURL/);
+  });
+
+  it("refuses baseURL on direct construction, not only through the factory", () => {
+    // `GeminiGenerator` is exported. A caller who bypasses the factory must not
+    // get an instance that silently drops the setting on the floor.
+    expect(
+      () =>
+        new GeminiGenerator({
+          apiKey: "test-key",
+          model: "test-model",
+          baseURL: "http://127.0.0.1:9/v1",
+        }),
+    ).toThrow(/baseURL/);
+  });
+
+  it("constructs the OpenAI client with the configured baseURL, not just the pre-flight", () => {
+    // The other tests here only prove `preFlight` honors baseURL. They would
+    // all still pass if the client ignored it and called api.openai.com — which
+    // is the exact failure this feature exists to prevent, and no live-model run
+    // has ever exercised it.
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      baseURL: "http://127.0.0.1:9/v1",
+      egressPolicy: new EgressPolicy(["127.0.0.1"]),
+      triPolicy: "off",
+    });
+    expect(openAIClientBaseURL(gen)).toBe("http://127.0.0.1:9/v1");
+  });
+
+  it("neutralizes OPENAI_BASE_URL when no baseURL is configured", () => {
+    // REGRESSION. The OpenAI SDK constructor destructures
+    // `baseURL = readEnv("OPENAI_BASE_URL")`, so OMITTING the key is not the
+    // same as passing the default: the env var wins. The pre-flight meanwhile
+    // asserted the api.openai.com literal, so the allow-list approved one host
+    // while the client called another. Passing the effective URL unconditionally
+    // is what makes the two provably the same host.
+    vi.stubEnv("OPENAI_BASE_URL", "http://not-on-the-allow-list.example/v1");
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+    });
+    expect(openAIClientBaseURL(gen)).toBe("https://api.openai.com/v1");
+  });
+
+  it("neutralizes GOOGLE_GEMINI_BASE_URL on the Gemini client", () => {
+    // REGRESSION, same shape as the OpenAI case above: `@google/genai` falls
+    // back to GOOGLE_GEMINI_BASE_URL when `httpOptions.baseUrl` is absent, so
+    // an env var could redirect the client away from the one host
+    // `preFlight` asserts against the allow-list.
+    vi.stubEnv(
+      "GOOGLE_GEMINI_BASE_URL",
+      "http://not-on-the-allow-list.example",
+    );
+    const gen = new GeminiGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["generativelanguage.googleapis.com"]),
+      triPolicy: "off",
+    });
+    expect(geminiClientBaseURL(gen)).toBe(
+      "https://generativelanguage.googleapis.com",
+    );
   });
 });

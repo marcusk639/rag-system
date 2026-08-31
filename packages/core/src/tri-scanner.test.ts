@@ -301,7 +301,8 @@ describe("unformatted tax identifiers", () => {
   // The `SSN` pattern matches only FORMATTED identifiers, and its comment used
   // to justify that narrowness by saying unformatted 9-digit strings "are
   // caught by taxpayer+amount and tax-form+amount". Once those two moved to the
-  // contextual class — which the default `triPolicy = "warn"` does not block —
+  // contextual class — which `triPolicy = "warn"` does not block (the
+  // default has since moved to `block`, but `warn` remains available) —
   // that backstop was gone: an OCR'd return carrying `SSN 123456789` scanned as
   // contextual-only and was disclosed to a third-party model.
   //

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
-import { filterSchema } from "@rag/core";
+import { filterSchema, RagError } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
@@ -68,6 +68,37 @@ function auditAsk(
     topScore: retrieved[0]?.score ?? null,
     answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
+}
+
+/**
+ * What the SSE `error` event may say.
+ *
+ * This path writes its 200 header before generation begins, so it cannot use
+ * the status mapping in `error-handler.ts` — every failure used to flatten to
+ * "Generation failed.". That defeated the air-gap verification in
+ * `docs/LOCAL-GENERATION.md`: the documented signal is `EGRESS_BLOCKED`, and
+ * through `apps/web` (the only consumer of this stream) an operator saw the
+ * same string an unreachable model produces.
+ *
+ * Only these two codes are echoed. Both are server-side policy decisions about
+ * configuration rather than about the user's data, and their messages carry a
+ * hostname or TRI pattern labels — not document text. Anything else keeps the
+ * generic message, because an arbitrary error here can carry connection
+ * details. Adding a code to this set means auditing that error's message.
+ */
+const STREAMABLE_ERROR_CODES = new Set([
+  "EGRESS_BLOCKED",
+  "COMPLIANCE_VIOLATION",
+]);
+
+function streamErrorPayload(err: unknown): {
+  message: string;
+  code?: string;
+} {
+  if (err instanceof RagError && STREAMABLE_ERROR_CODES.has(err.code)) {
+    return { code: err.code, message: err.message };
+  }
+  return { message: "Generation failed." };
 }
 
 export async function registerAskRoute(
@@ -177,9 +208,7 @@ export async function registerAskRoute(
         // raw error (it may carry connection details). Log server-side instead.
         deps.logger.error({ err }, "ask/stream generation failed");
         raw.write(
-          `event: error\ndata: ${JSON.stringify({
-            message: "Generation failed.",
-          })}\n\n`,
+          `event: error\ndata: ${JSON.stringify(streamErrorPayload(err))}\n\n`,
         );
       } finally {
         raw.end();

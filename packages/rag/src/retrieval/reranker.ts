@@ -1,5 +1,5 @@
 import type { Config, Reranker, RetrievalResult } from "@rag/core";
-import { EgressPolicy, ValidationError } from "@rag/core";
+import { EgressPolicy, ValidationError, NO_REDIRECT_INIT } from "@rag/core";
 
 /**
  * Hosted cross-encoder reranker for the Cohere / Jina rerank REST APIs, which
@@ -66,6 +66,9 @@ export class HttpCrossEncoderReranker implements Reranker {
     this.egressPolicy.assertAllowed(this.opts.endpoint);
 
     const response = await fetch(this.opts.endpoint, {
+      // `assertAllowed` above saw the first hop only. Without this a redirect
+      // could carry the chunk texts to a host the allow-list never validated.
+      ...NO_REDIRECT_INIT,
       method: "POST",
       headers: {
         "content-type": "application/json",

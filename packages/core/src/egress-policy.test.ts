@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EgressError } from "./errors.js";
-import { EgressPolicy } from "./egress-policy.js";
+import { EgressPolicy, egressSafeFetch } from "./egress-policy.js";
 
 describe("EgressPolicy", () => {
   // ── Construction ──────────────────────────────────────────────────────────────
@@ -140,5 +140,52 @@ describe("EgressPolicy", () => {
       if (original === undefined) delete process.env["EGRESS_ALLOWED_HOSTS"];
       else process.env["EGRESS_ALLOWED_HOSTS"] = original;
     }
+  });
+});
+
+describe("egressSafeFetch", () => {
+  // The allow-list validates the URL we INTEND to dial. Following a redirect
+  // means the transport can end up somewhere the allow-list never saw, with the
+  // request body re-sent on 307/308 — for generation, that body is the prompt.
+  it("forces redirect:error on every request", async () => {
+    const calls: RequestInit[] = [];
+    const base = (async (_i: unknown, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return new Response("ok");
+    }) as typeof globalThis.fetch;
+
+    await egressSafeFetch(base)("https://example.test/x");
+
+    expect(calls[0]!.redirect).toBe("error");
+  });
+
+  it("overrides a caller that asked to follow redirects", async () => {
+    const calls: RequestInit[] = [];
+    const base = (async (_i: unknown, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return new Response("ok");
+    }) as typeof globalThis.fetch;
+
+    await egressSafeFetch(base)("https://example.test/x", {
+      redirect: "follow",
+    });
+
+    expect(calls[0]!.redirect).toBe("error");
+  });
+
+  it("preserves the caller's other request options", async () => {
+    const calls: RequestInit[] = [];
+    const base = (async (_i: unknown, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return new Response("ok");
+    }) as typeof globalThis.fetch;
+
+    await egressSafeFetch(base)("https://example.test/x", {
+      method: "POST",
+      body: "payload",
+    });
+
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.body).toBe("payload");
   });
 });
