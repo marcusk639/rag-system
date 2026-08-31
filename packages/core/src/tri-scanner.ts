@@ -32,12 +32,33 @@ const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "SSN",
     // Match dash-separated (123-45-6789) and space-separated (123 45 6789).
-    // Unformatted 9-digit strings are too broad (overlap with account numbers,
-    // phone digits, etc.) — those are caught by taxpayer+amount and
-    // tax-form+amount contextual patterns. ITIN (9XX-XX-XXXX) shares this
+    // A bare 9-digit run is deliberately NOT matched here: it overlaps account
+    // numbers, phone digits, and zip+4 badly enough that treating it as an
+    // identifier would block ordinary SOPs. The labelled unformatted form is
+    // handled by `SSN-unformatted` below. ITIN (9XX-XX-XXXX) shares this
     // format and is intentionally matched here; the audit label "SSN" covers
     // both identifiers since both are protected TRI under §7216.
     regex: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/,
+  },
+  {
+    label: "SSN-unformatted",
+    // A 9-digit run that an adjacent SSN/TIN/ITIN token identifies as a tax
+    // identifier — the form an OCR'd return usually carries, where the
+    // separators are lost but the field label survives.
+    //
+    // This exists because the `SSN` pattern above matches formatted values
+    // only, and that narrowness used to be justified by the contextual
+    // patterns (`taxpayer+amount`, `tax-form+amount`) catching the rest. Once
+    // those became policy-tunable via the identifying/contextual split, the
+    // backstop was gone at the `warn` default and an unformatted identifier
+    // could be disclosed to a third-party model. See `TRI_IDENTIFYING_LABELS`.
+    //
+    // Requiring the label token is what keeps this in the identifying class:
+    // the class's contract is "blocks regardless of policy", which is only
+    // defensible for a pattern that does not fire on ordinary prose.
+    // 's' flag (dotAll): the label and the value are on separate lines in
+    // most OCR output.
+    regex: /\b(?:SSN|SSNs|social\s+security|TIN|ITIN)\b.{0,40}?\b\d{9}\b/is,
   },
   {
     label: "EIN",
@@ -106,16 +127,29 @@ export const TRI_PATTERN_LABELS: readonly string[] = TRI_PATTERNS.map(
  * Treating those as a hard stop makes the assistant fail on exactly the
  * questions it exists to answer.
  *
- * `SSN` and `EIN` are not like that. They match a formatted identifier, and in
- * that same screen they hit 24 documents — one holding 260 distinct SSN-shaped
- * values, which is a client roster rather than a placeholder. No corpus-level
- * false-positive rate makes it safe to disclose those to a third party.
+ * `SSN`, `SSN-unformatted` and `EIN` are not like that. They match a specific
+ * identifier, and in that same screen they hit 24 documents — one holding 260
+ * distinct SSN-shaped values, which is a client roster rather than a
+ * placeholder. No corpus-level false-positive rate makes it safe to disclose
+ * those to a third party.
+ *
+ * `SSN-unformatted` is in this class rather than the contextual one for a
+ * reason worth keeping: it was added to close a gap this very split opened.
+ * The `SSN` regex matches formatted values only, and its narrowness was
+ * justified by `taxpayer+amount` / `tax-form+amount` catching the unformatted
+ * rest — which stopped being true the moment those became policy-tunable. A
+ * contextual `SSN-unformatted` would reopen the same hole at the `warn`
+ * default.
  *
  * So a single permissive policy must not cover both. Callers are expected to
  * treat an identifying match as a hard stop regardless of how lenient their
  * policy is for the contextual ones.
  */
-export const TRI_IDENTIFYING_LABELS: readonly string[] = ["SSN", "EIN"];
+export const TRI_IDENTIFYING_LABELS: readonly string[] = [
+  "SSN",
+  "SSN-unformatted",
+  "EIN",
+];
 
 const IDENTIFYING = new Set(TRI_IDENTIFYING_LABELS);
 

@@ -294,3 +294,63 @@ describe("identifyingTRIPatterns", () => {
     }
   });
 });
+
+describe("unformatted tax identifiers", () => {
+  // Regression guard for the gap the identifying/contextual split opened.
+  //
+  // The `SSN` pattern matches only FORMATTED identifiers, and its comment used
+  // to justify that narrowness by saying unformatted 9-digit strings "are
+  // caught by taxpayer+amount and tax-form+amount". Once those two moved to the
+  // contextual class — which the default `triPolicy = "warn"` does not block —
+  // that backstop was gone: an OCR'd return carrying `SSN 123456789` scanned as
+  // contextual-only and was disclosed to a third-party model.
+  //
+  // The pattern added to close it is context-gated on purpose. A bare 9-digit
+  // run overlaps account numbers, phone digits, and zip+4, which is the
+  // false-positive problem the original comment worried about; requiring an
+  // adjacent SSN/TIN/ITIN token keeps the identifying class precise enough that
+  // "blocks regardless of policy" stays a defensible rule.
+
+  it("treats a labelled unformatted SSN as identifying", () => {
+    const { detected, patterns } = scanForTRI("SSN 123456789");
+
+    expect(detected).toBe(true);
+    expect(patterns).toContain("SSN-unformatted");
+    expect(identifyingTRIPatterns(patterns)).toContain("SSN-unformatted");
+  });
+
+  it.each([
+    ["social security", "Social Security Number: 123456789"],
+    ["TIN", "TIN 123456789 on file"],
+    ["ITIN", "ITIN: 912345678"],
+    ["cross-line OCR output", "SSN\n123456789"],
+  ])("matches the %s form", (_label, text) => {
+    expect(identifyingTRIPatterns(scanForTRI(text).patterns)).toContain(
+      "SSN-unformatted",
+    );
+  });
+
+  // The OCR'd-1040 scenario end to end: before the fix this scanned as
+  // contextual-only, so a "warn" policy let the whole chunk through.
+  it("blocks an OCR'd return that carries no formatted identifier", () => {
+    const chunk = "SSN 123456789\nForm 1040 line 15: $80,000";
+    const { patterns } = scanForTRI(chunk);
+
+    expect(patterns).not.toContain("SSN");
+    expect(identifyingTRIPatterns(patterns).length).toBeGreaterThan(0);
+  });
+
+  it("does not fire on a bare 9-digit run with no identifier context", () => {
+    const { patterns } = scanForTRI("Account 123456789 was reconciled.");
+
+    expect(patterns).not.toContain("SSN-unformatted");
+  });
+
+  it("does not fire on an SOP that names the field without a value", () => {
+    const { patterns } = scanForTRI(
+      "Enter the client's SSN in the engagement record before filing.",
+    );
+
+    expect(patterns).not.toContain("SSN-unformatted");
+  });
+});

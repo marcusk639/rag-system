@@ -157,6 +157,12 @@ describe("TRI pre-flight policy", () => {
     rr({ text: "Client record on file: SSN 123-45-6789, filed 2025-03-14." }),
   ];
   const einChunk = [rr({ text: "Entity EIN 12-3456789 per IRS records." })];
+  // The OCR shape: separators lost, field label survives. Carries a contextual
+  // match (`tax-form+amount`) as well, which is what made it look safe under a
+  // lenient policy before `SSN-unformatted` existed.
+  const ocrReturnChunk = [
+    rr({ text: "SSN 123456789\nForm 1040 line 15: $80,000" }),
+  ];
 
   const opts = (
     triPolicy: "block" | "warn" | "off",
@@ -220,6 +226,16 @@ describe("TRI pre-flight policy", () => {
         // A block IS the audit signal; the warn hook must not also fire, or the
         // log would read as "proceeded".
         expect(seen).toHaveLength(0);
+      });
+
+      it("blocks an OCR'd return whose identifier lost its separators", async () => {
+        // Regression guard. The `SSN` pattern matches formatted values only,
+        // and the unformatted case used to be covered by `tax-form+amount` —
+        // which this PR's identifying/contextual split made non-blocking at
+        // the `warn` default. For a window, this exact chunk scanned as
+        // contextual-only and was disclosed to a third-party model.
+        const gen = make(opts("warn") as never);
+        expect(await preFlightOutcome(gen, ocrReturnChunk)).toBe("blocked");
       });
 
       it("blocks an EIN under triPolicy=warn", async () => {
