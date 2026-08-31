@@ -445,6 +445,34 @@ function geminiClientBaseURL(gen: GeminiGenerator): string | undefined {
     .client.httpOptions?.baseUrl;
 }
 
+describe("injected transport is still redirect-guarded", () => {
+  // The seam that lets tests supply a transport must not be a way to opt out of
+  // the egress guarantee. `opts.fetch ?? egressSafeFetch()` would have replaced
+  // the guard; composing wraps it instead.
+  it("forces redirect:error even when a custom fetch is supplied", async () => {
+    const inits: RequestInit[] = [];
+    const recording = (async (_i: unknown, init?: RequestInit) => {
+      inits.push(init ?? {});
+      throw new Error("recorded");
+    }) as unknown as typeof fetch;
+
+    const gen = new OpenAIGenerator({
+      apiKey: "test-key",
+      model: "test-model",
+      egressPolicy: new EgressPolicy(["api.openai.com"]),
+      triPolicy: "off",
+      fetch: recording,
+    });
+
+    await expect(
+      gen.answer("q", [rr({ text: "safe body" })]),
+    ).rejects.toThrow();
+
+    expect(inits.length).toBeGreaterThan(0);
+    expect(inits[0]!.redirect).toBe("error");
+  });
+});
+
 describe("baseURL — self-hosted generation endpoints", () => {
   const cleanChunk = [
     rr({ text: "File the engagement letter in the client folder." }),

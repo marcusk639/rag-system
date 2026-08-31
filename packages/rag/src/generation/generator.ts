@@ -241,7 +241,7 @@ export interface GeneratorOptions {
   model: string;
   maxOutputTokens?: number;
   egressPolicy?: EgressPolicy;
-  /** Defaults to `warn`. `complianceMode=client-data` forces `block` upstream. */
+  /** Defaults to `block`. `complianceMode=client-data` forces `block` upstream. */
   triPolicy?: TriPolicy;
   /**
    * Invoked instead of throwing when `triPolicy === "warn"`. This is the audit
@@ -454,7 +454,10 @@ export class OpenAIGenerator implements Generator {
       // Injectable so tests can supply a transport: this SDK captures its own
       // `fetch`, so stubbing `globalThis.fetch` does not intercept it — which
       // is why this suite used to make real calls to api.openai.com.
-      fetch: (opts.fetch ?? egressSafeFetch()) as unknown as OpenAI["fetch"],
+      // Composed, NOT `opts.fetch ?? egressSafeFetch()`: an injected transport
+      // must still refuse redirects, or the seam added for tests would be a way
+      // to opt out of the guarantee this class exists to make.
+      fetch: egressSafeFetch(opts.fetch) as unknown as OpenAI["fetch"],
     });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }

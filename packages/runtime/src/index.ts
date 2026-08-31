@@ -118,7 +118,8 @@ export function buildAuthProvider(
  * Resolve the effective TRI policy for generation.
  *
  * `client-data` compliance mode forces the strict policy regardless of
- * GENERATION_TRI_POLICY. The permissive default (`warn`) is calibrated for an
+ * GENERATION_TRI_POLICY. The permissive setting (`warn`, opt-in since the
+ * default moved to `block`) is calibrated for an
  * internal-SOP corpus where the scan's contextual patterns are known false
  * positives; a deployment that has declared real client data in scope must
  * never inherit that leniency — not by omission, and not by an explicit
