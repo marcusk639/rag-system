@@ -1,12 +1,12 @@
-# TWK Readiness — Automatable Fixes Implementation Plan
+# Pilot Readiness — Automatable Fixes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close every code/test/config-automatable gap identified in `docs/TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`, so the platform's technical controls actually match what the compliance and business documentation already claims.
+**Goal:** Close every code/test/config-automatable gap identified in `docs/CPA-READINESS-ASSESSMENT-2026-07-08.md`, so the platform's technical controls actually match what the compliance and business documentation already claims.
 
 **Architecture:** Seventeen mostly-independent tasks across `packages/core`, `packages/db`, `packages/ingestion`, `packages/rag`, `apps/worker`, `apps/mcp`, `apps/web`. Ordered so schema-touching work lands before dependent code, and so the two highest-severity compliance gates (data-class wiring, MCP audit logging) come first.
 
-**Companion document:** `docs/TWK-MANUAL-RUNBOOK.md` — every item here that required a human/business/legal decision was deliberately excluded from this plan and lives there instead. Several tasks below reference specific decision points from that runbook; do not silently resolve those decisions in code.
+**Companion document:** `docs/PILOT-MANUAL-RUNBOOK.md` — every item here that required a human/business/legal decision was deliberately excluded from this plan and lives there instead. Several tasks below reference specific decision points from that runbook; do not silently resolve those decisions in code.
 
 ## Global Constraints
 
@@ -16,7 +16,7 @@
 - Migrations in this repo are **forward-only** — no `down` migrations exist anywhere in `packages/db/drizzle/`. Do not author one. To correct a bad migration, ship a new corrective migration; never hand-edit an already-committed journal entry to remove or "undo" it.
 - Only `env.example` is editable — `.env` file writes are hook-blocked in this environment (see this repo's `CLAUDE.md`). Tasks 3, 7, 8, 14 all touch env documentation; confirm you're editing `env.example`, never a real `.env` file.
 - Do not silently retain raw question text or any reversible derivative of it anywhere — this is a deliberate, repeatedly-documented privacy design decision (`packages/db/src/queries.ts:773-778,785-792`, `apps/worker/src/handlers/docs-gap-digest.ts:33-36,103-106`). Task 13 in this plan is explicitly scoped to NOT cross this line (see its own anti-pattern guard).
-- Do not build the type/class AI classifier (assessment doc P2 item 16) — it is gated on an unresolved firm "build vs. buy" business decision (`~/dev/cpa-consulting/docs/rag/evaluations/document-classification-automation.md`) and is out of scope for this plan; it is tracked in `docs/TWK-MANUAL-RUNBOOK.md` as a decision gate instead.
+- Do not build the type/class AI classifier (assessment doc P2 item 16) — it is gated on an unresolved firm "build vs. buy" business decision (`~/dev/cpa-consulting/docs/rag/evaluations/document-classification-automation.md`) and is out of scope for this plan; it is tracked in `docs/PILOT-MANUAL-RUNBOOK.md` as a decision gate instead.
 - Follow this repo's established provider-factory pattern (interface in `packages/core/src/interfaces.ts`, concrete implementation in the relevant package, a `create<X>` factory switching on a config `provider` enum, wired once in `packages/runtime/src/index.ts`) for any new pluggable integration (Task 14).
 - This repo standardizes on the `uuid-ossp` extension's `uuid_generate_v4()` for every UUID primary-key default (`0000_init.sql`, `0006_client_assignments.sql`, `schema.ts`'s existing tables) — **not** `gen_random_uuid()`/`pgcrypto`, which is not installed. Any new migration in this plan (Tasks 9, 13) must use `uuid_generate_v4()` to match the Drizzle schema default it's paired with, or `drizzle-kit generate` will see the DB default and the schema-declared default disagree and emit a spurious diff.
 - Every task that touches `apps/worker`'s real production ingestion path must have its regression test exercise that REAL path — not `tests/e2e/src/helpers/ingestion.ts`'s `runOneIngestion` bypass helper, which calls `runIngestion` directly and skips the worker handler entirely. This exact bypass is why the data-class gate went unnoticed for as long as it did (see Task 1).
@@ -87,7 +87,7 @@
    * the pipeline level today (`pipeline.ts:245`), so this distinction has no
    * behavioral effect yet. This C-vs-D semantic assignment is a provisional
    * engineering default, NOT a ratified compliance-classification decision —
-   * see docs/TWK-MANUAL-RUNBOOK.md item 9, which flags it for confirmation
+   * see docs/PILOT-MANUAL-RUNBOOK.md item 9, which flags it for confirmation
    * against the firm's actual data-classification policy before any
    * D-specific behavior is ever built on top of it.
    *
@@ -245,7 +245,7 @@
   git commit -m "docs: correct inaccurate DPA-signed and dataClass-gate claims
 
   Both claims were verified false against current code/docs as of
-  2026-07-08 (see docs/TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md section
+  2026-07-08 (see docs/CPA-READINESS-ASSESSMENT-2026-07-08.md section
   3) — the same stale-doc-creates-false-confidence failure mode this
   file's own prior revisit was supposed to prevent."
   ```
@@ -614,7 +614,7 @@
 
 **Interfaces:** consumes `LocalEmbeddingProvider` (`packages/rag/src/embeddings/local.ts`) as a drop-in replacement for `FakeEmbedder` in the harness — requires no API key, no egress, no cost/quota risk (confirmed by the RAG-architecture review this assessment is based on).
 
-**Anti-pattern guard:** this task does NOT include writing 30-50 real CPA-domain questions — that requires Doug's domain expertise and is a manual-runbook item (`docs/TWK-MANUAL-RUNBOOK.md`). This task only proves the harness CAN run against a real embedder and records what the EXISTING 14-doc/17-question synthetic corpus shows under it — clearly labeled as still-synthetic, not a real quality baseline.
+**Anti-pattern guard:** this task does NOT include writing 30-50 real CPA-domain questions — that requires Doug's domain expertise and is a manual-runbook item (`docs/PILOT-MANUAL-RUNBOOK.md`). This task only proves the harness CAN run against a real embedder and records what the EXISTING 14-doc/17-question synthetic corpus shows under it — clearly labeled as still-synthetic, not a real quality baseline.
 
 - [ ] **Step 1: Read `run-eval.ts` in full** to confirm exactly how `FakeEmbedder` is currently constructed/injected (line ~109 per prior research) and what the harness's embedder-provider interface expects.
 
@@ -629,7 +629,7 @@
 
   Expect a first-run delay while the ONNX model downloads (~430 MB, per this repo's own documentation); subsequent runs use the disk cache.
 
-- [ ] **Step 4: Record the results in a new `docs/EVAL-BASELINE.md`**, explicitly labeled: "Run against the LOCAL embedding provider (real semantic embeddings, not FakeEmbedder) but STILL against the existing 14-document/17-question synthetic corpus (Postgres/Docker/espresso/sailing/gardening) — this proves the harness works end-to-end with a real embedder and gives a real (if not yet domain-relevant) recall/nDCG/MRR number. It is NOT yet a CPA-domain quality baseline — that requires the real question set tracked in `docs/TWK-MANUAL-RUNBOOK.md`." Include the actual numbers produced, and the weight-sweep table (confirm whether it's now meaningfully varied across dense/sparse blends, unlike the previous flat FakeEmbedder sweep — report whatever it actually shows, do not assume).
+- [ ] **Step 4: Record the results in a new `docs/EVAL-BASELINE.md`**, explicitly labeled: "Run against the LOCAL embedding provider (real semantic embeddings, not FakeEmbedder) but STILL against the existing 14-document/17-question synthetic corpus (Postgres/Docker/espresso/sailing/gardening) — this proves the harness works end-to-end with a real embedder and gives a real (if not yet domain-relevant) recall/nDCG/MRR number. It is NOT yet a CPA-domain quality baseline — that requires the real question set tracked in `docs/PILOT-MANUAL-RUNBOOK.md`." Include the actual numbers produced, and the weight-sweep table (confirm whether it's now meaningfully varied across dense/sparse blends, unlike the previous flat FakeEmbedder sweep — report whatever it actually shows, do not assume).
 
 - [ ] **Step 5: Update the two files that reference a nonexistent `EVAL-BASELINE.md`** (`docs/DEPLOYMENT.md`, `docs/ISSUES-AND-OPTIMIZATIONS.md`) to point at the real, now-existing file.
 
@@ -1018,7 +1018,7 @@
 
 **Interfaces:** consumes the existing, already-computed `DocsGapDigestSummary` shape from `aggregateWeakResultEvents` (`docs-gap-digest.ts:22-28,63-94`) — this task persists that exact aggregate, unchanged, rather than introducing any new data collection.
 
-**Anti-pattern guard — read this before starting:** this task is explicitly Tier 1 only. Do NOT retain raw question text, a paraphrase of it, or any other reversible derivative anywhere in this task — the aggregate already deliberately excludes `questionHash` (`docs-gap-digest.ts:33-36,103-106`), and this task must preserve that. The "top question was X" feature the partner-facing proposal describes requires retaining question content in some form — that is a policy decision, tracked as a decision gate in `docs/TWK-MANUAL-RUNBOOK.md`, and is explicitly OUT OF SCOPE here. If you find yourself adding any field that could reconstruct what was asked, stop and re-read this guard.
+**Anti-pattern guard — read this before starting:** this task is explicitly Tier 1 only. Do NOT retain raw question text, a paraphrase of it, or any other reversible derivative anywhere in this task — the aggregate already deliberately excludes `questionHash` (`docs-gap-digest.ts:33-36,103-106`), and this task must preserve that. The "top question was X" feature the partner-facing proposal describes requires retaining question content in some form — that is a policy decision, tracked as a decision gate in `docs/PILOT-MANUAL-RUNBOOK.md`, and is explicitly OUT OF SCOPE here. If you find yourself adding any field that could reconstruct what was asked, stop and re-read this guard.
 
 - [ ] **Step 1: Confirm Task 9 has already merged and the actual current highest migration number is `0012`.** Per Global Constraints, this task must run strictly after Task 9, never in parallel with it.
 
@@ -1086,7 +1086,7 @@
   already computed today (counts by endpoint/source-group), with no
   new privacy surface -- it deliberately does not retain question text.
   Actual push delivery (Teams/email) and a 'top question was X' feature
-  both require decisions tracked in docs/TWK-MANUAL-RUNBOOK.md, not
+  both require decisions tracked in docs/PILOT-MANUAL-RUNBOOK.md, not
   resolved here."
   ```
 
@@ -1173,7 +1173,7 @@
   that already governs LLM egress, applied here for the first time to
   audit-log shipping. Defaults to 'none' -- which specific vendor/
   destination to actually point this at is a decision tracked in
-  docs/TWK-MANUAL-RUNBOOK.md, not made here."
+  docs/PILOT-MANUAL-RUNBOOK.md, not made here."
   ```
 
 ---
@@ -1322,7 +1322,7 @@ This task bundles five independent test-only additions — split into sub-steps,
   1. `.dockerignore` fully excluded `apps/web`, with a stale comment claiming its deps "aren't in the root lockfile yet" — disproven by this session's many successful workspace-wide `pnpm install` runs. Fixed by removing the exclusion.
   2. **`.dockerignore` never excluded `*.tsbuildinfo`** — a real, repo-wide latent bug (affects `api`/`mcp`/`worker`'s existing Dockerfiles too, not just this one). A developer's local TypeScript incremental-build cache (gitignored, but present on disk) got copied verbatim into every Docker build's context; stale/mismatched buildinfo made `tsc` silently skip real compilation — `@rag/core`/`@rag/db` emitted only `.d.ts` files, or nothing, with zero error message. Reproduced and confirmed locally too (moving the stale `tsconfig.tsbuildinfo` aside made a genuinely clean rebuild emit `.js` files correctly). Fixed by adding `**/*.tsbuildinfo` to `.dockerignore` — this protects every app's Docker build, not just `apps/web`'s.
 
-  The Azure AD app registration and `RAG-Admins` security group creation remain human/infra actions — tracked in `docs/TWK-MANUAL-RUNBOOK.md` item 4, not this task.
+  The Azure AD app registration and `RAG-Admins` security group creation remain human/infra actions — tracked in `docs/PILOT-MANUAL-RUNBOOK.md` item 4, not this task.
 
 - [ ] **Step 5: Commit**
 
@@ -1349,5 +1349,5 @@ This task bundles five independent test-only additions — split into sub-steps,
 - [ ] Re-run `E2E_SKIP_DOCKER_UP=1 pnpm --filter @rag/e2e test -- data-class-ingestion-gate` specifically, since it's the single highest-severity item this plan closes
 - [ ] Grep for any remaining reference to `sourceDocClass ?? "A"` defaulting logic to confirm Task 1's fix is the only path now setting this value in production code
 - [ ] Confirm `docs/ISSUES-AND-OPTIMIZATIONS.md` no longer contains the two false claims Task 2 corrected
-- [ ] Confirm `docs/TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`'s P0/P1/P2 items 2, 4, 5(partial-code-side), 6, 7, 9, 10, 11, 13, 14(harness-side), 15, 17, 18, 19(mechanism), 20 are each closeable/closed by a specific commit from this plan — cross-reference before declaring this plan complete
-- [ ] Update `docs/TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`'s reconciliation table (or add a new dated addendum section) marking each closed item resolved with a commit citation, following this session's own established pattern of correcting prior audit documents rather than leaving them stale
+- [ ] Confirm `docs/CPA-READINESS-ASSESSMENT-2026-07-08.md`'s P0/P1/P2 items 2, 4, 5(partial-code-side), 6, 7, 9, 10, 11, 13, 14(harness-side), 15, 17, 18, 19(mechanism), 20 are each closeable/closed by a specific commit from this plan — cross-reference before declaring this plan complete
+- [ ] Update `docs/CPA-READINESS-ASSESSMENT-2026-07-08.md`'s reconciliation table (or add a new dated addendum section) marking each closed item resolved with a commit citation, following this session's own established pattern of correcting prior audit documents rather than leaving them stale

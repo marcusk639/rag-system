@@ -1,7 +1,7 @@
-# Plan: TWK KB — Autonomous E2E Testing, Answer-Quality Gate, and Feedback Loop
+# Plan: the knowledge base — Autonomous E2E Testing, Answer-Quality Gate, and Feedback Loop
 
 **Created:** 2026-07-16. **Revised:** 2026-07-16 (post plan-review — resolved C1/C2/C3 + notes). **Repo:** `rag-system`.
-**Goal:** Make the TWK knowledge base a fully usable, trustworthy self-serve tool — queryable from the web app or MS Teams, producing accurate/substantive/helpful answers with correct, downloadable citations — and stand up an **autonomous agent that builds, runs, and fixes end-to-end tests** so quality stays high. Add a **feedback mechanism** (Helpful / Not Helpful) that feeds improvement.
+**Goal:** Make the firm's knowledge base a fully usable, trustworthy self-serve tool — queryable from the web app or MS Teams, producing accurate/substantive/helpful answers with correct, downloadable citations — and stand up an **autonomous agent that builds, runs, and fixes end-to-end tests** so quality stays high. Add a **feedback mechanism** (Helpful / Not Helpful) that feeds improvement.
 
 **Execution model:** Phased; each phase is self-contained and runnable in a fresh chat context. Do them in order (later phases depend on earlier). Every phase cites exact files to COPY patterns from — do not invent APIs.
 
@@ -199,7 +199,7 @@ Firm-SOP content (Class A/B, non-return-information) is **already accepted to fl
 
 1. **LLM-as-judge** (`tests/e2e/src/eval/judge.ts` + `run-answer-eval.ts`, modeled on `run-real-eval.ts`): per gold question → `POST /ask` → Claude judge scores **groundedness** (claims supported by cited chunks), **citation-correctness** (each `[N]`'s chunk supports its sentence), **substance/helpfulness**, **completeness**. Aggregate → `docs/EVAL-ANSWER-BASELINE.md`.
 2. **Judge calibration FIRST (plan-review):** before treating any threshold as a ship-gate, hand-label ~10 answers (grounded / not, correct-cite / not) and confirm the judge agrees with the human labels (report the agreement rate). A judge that disagrees with humans isn't a gate. Only then set thresholds.
-3. **Gold corpus** (`tests/e2e/src/eval/corpus.ts`): grow toward 30–50 CPA questions. **Real questions need Doug** (`docs/TWK-MANUAL-RUNBOOK.md` item 7); turning his list into corpus entries is mechanical. Until then seed realistic _fictional_ CPA SOP questions + near-neighbor distractors. **Keep seeded (fictional) and real (Doug) sets in physically separate files, seeded loudly labeled**, so a synthetic question can never be mistaken for a validated firm question in a shipped baseline (plan-review #5).
+3. **Gold corpus** (`tests/e2e/src/eval/corpus.ts`): grow toward 30–50 CPA questions. **Real questions need Doug** (`docs/PILOT-MANUAL-RUNBOOK.md` item 7); turning his list into corpus entries is mechanical. Until then seed realistic _fictional_ CPA SOP questions + near-neighbor distractors. **Keep seeded (fictional) and real (Doug) sets in physically separate files, seeded loudly labeled**, so a synthetic question can never be mistaken for a validated firm question in a shipped baseline (plan-review #5).
 4. **Thresholds** (post-calibration): e.g. ≥0.9 grounded, zero unsupported citations — record baseline, ratchet. Retrieval-side regressions → `retrieval-eval-runner`.
 5. **Wire into the autopilot** as a runnable check (a low groundedness score = an app/retrieval bug to investigate, not a test to relax).
 
@@ -216,9 +216,9 @@ Firm-SOP content (Class A/B, non-return-information) is **already accepted to fl
 
 ---
 
-## Phase 6 — Real TWK SharePoint corpus (GATED — human/infra prerequisites)
+## Phase 6 — Real the tenant's SharePoint corpus (GATED — human/infra prerequisites)
 
-### Prerequisites (human/infra — see `docs/TWK-MANUAL-RUNBOOK.md` + `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`)
+### Prerequisites (human/infra — see `docs/PILOT-MANUAL-RUNBOOK.md` + `docs/AZURE-DEPLOY-RUNBOOK.md`)
 
 - [ ] **P0 content audit** (runbook item 1) — confirm the libraries are firm SOPs, not client files, _with Chris/Doug_.
 - [ ] **Azure app** (`Sites.Read.All`+`Files.Read.All` + admin consent) → `MS_TENANT_ID`/`MS_CLIENT_ID`/`MS_CLIENT_SECRET` on the worker.
@@ -242,7 +242,7 @@ Firm-SOP content (Class A/B, non-return-information) is **already accepted to fl
 
 ---
 
-## Phase 7 — Final verification + "optimal for TWK"
+## Phase 7 — Final verification + "optimal for the tenant"
 
 ### Full green gate
 
@@ -252,7 +252,7 @@ Firm-SOP content (Class A/B, non-return-information) is **already accepted to fl
 - [ ] Feedback loop end-to-end on web (👍/👎 → `answer_feedback` → `getFeedbackStats`); Teams when that follow-up lands.
 - [ ] Downloadable citations verified.
 
-### "Optimal for TWK" checklist
+### "Optimal for the tenant" checklist
 
 - [ ] **Compliance:** `EMBEDDING_PROVIDER=local` for client-adjacent content; the practitioner-review disclaimer on every answer (web + Teams); per-user scope enforced (**validated by the backend vitest suite — the UI suite tests a single principal**); every query audited with the asker's `oid`; Class C/D never sent to any external model.
 - [ ] **Usability/value:** a staff member asks in plain English on either surface and gets an accurate, cited, downloadable answer without asking a colleague.
@@ -271,7 +271,7 @@ P0 (facts) ─► P0.5 (walking-skeleton E2E spike — de-risks C1) ─► P1 (a
 P1 ─► P2 (feedback UI web + test-ids; Teams = follow-up) ─► P3 (full Playwright E2E) ─► P4 (autopilot agent)
 P1/P3 ─► P5 (answer-quality judge; seeded now, Doug's gold set later)
                     ▼
-P6 (real TWK SharePoint — GATED: P0 content audit + Azure creds) ─► P7 (final verify + optimal-for-TWK)
+P6 (real the tenant's SharePoint — GATED: P0 content audit + Azure creds) ─► P7 (final verify + optimal-for-the firm)
 ```
 
 P0.5→P4 (+ P5 harness on seeded corpus) are buildable now; P5's real gold set needs Doug; P6 needs the firm gates. None of the buildable-now work is blocked on the gated parts.

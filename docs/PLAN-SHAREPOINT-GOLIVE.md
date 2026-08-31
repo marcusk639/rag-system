@@ -150,7 +150,7 @@ curl -fsS -X POST "$API_URL/sources" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "TWK SharePoint",
+    "name": "the tenant's SharePoint",
     "kind": "sharepoint",
     "config": {
       "siteId": "'"$SITE_ID"'"
@@ -277,7 +277,7 @@ curl -fsS -X POST "$API_URL/ask" \
   -H "Authorization: Bearer $MARCUS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "What tax return types does TWK prepare?",
+    "question": "What tax return types does the firm prepare?",
     "allowedSourceIds": ["'"$SOURCE_ID"'"]
   }' | jq '{answer: .answer, citations: [.citations[] | {title, url, downloadable}]}'
 ```

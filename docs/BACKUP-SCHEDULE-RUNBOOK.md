@@ -1,10 +1,10 @@
-# Backup Schedule — TWK Internal SharePoint KB
+# Backup Schedule — Internal SharePoint KB
 
 **Status:** 🟡 **Stopgap LIVE since 2026-08-01** — nightly backups are running to
 Railway's own bucket. The permanent, decorrelated destination (SharePoint) is
 **blocked on Chris's admin consent**. See
 [Where this actually stands](#where-this-actually-stands).
-**Closes:** the open half of P0 gate #3 in [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md).
+**Closes:** the open half of P0 gate #3 in [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md).
 **Prerequisite reading:** [`BACKUP-RESTORE-DRILL.md`](./BACKUP-RESTORE-DRILL.md) — a
 restore is already proven to work on real production data. What is missing is a
 backup to restore _from_.
@@ -18,7 +18,7 @@ backup to restore _from_.
 
 ## What is actually being protected
 
-The database holds TWK's internal SharePoint knowledge base after ingestion.
+The database holds the firm's internal SharePoint knowledge base after ingestion.
 Most of it is **re-derivable** — but not all of it, and the difference is what
 sets the schedule.
 
@@ -81,13 +81,13 @@ see the tenant check below.
 
 **Decision: SharePoint, via an app registration scoped `Sites.Selected`.**
 Azure Blob was the original recommendation and is the better-shaped tool, but it
-is unreachable: TWK has no Azure subscription, and creating one is a purchasing
+is unreachable: the firm has no Azure subscription, and creating one is a purchasing
 decision. SharePoint needs only admin consent — no spend, no PO — and folds into
 the Entra consent conversation Chris must have anyway for the web app and Teams
 bot.
 
 ⚠ **Do not ship these dumps to a personal cloud account.** It is the same
-problem already flagged for `docs/TWK SOPs/` in the consulting repo: firm data in
+problem already flagged for `docs/the firm's SOPs/` in the consulting repo: firm data in
 an individual's account, outside firm control, surviving past any engagement.
 The convenience is real and the exposure is worse. Marcus's _firm_ OneDrive is
 not the same thing as a personal account — but it is still tied to one person's
@@ -96,11 +96,11 @@ identity and dies with their deprovisioning, so it is not the answer either.
 ### ✅ Tenant reality, checked 2026-08-01 — this changes the recommendation
 
 Verified against the live tenant with `az`, signed in as
-`marcus@twk-cpafirm.com`:
+`<admin>@<tenant-domain>`:
 
 | Check                             | Result                                                   |
 | --------------------------------- | -------------------------------------------------------- |
-| Tenant                            | **TWK CPA** `b49c5690-ccd1-4336-9f66-52780215c4ec`       |
+| Tenant                            | **the firm CPA** `b49c5690-ccd1-4336-9f66-52780215c4ec`  |
 | Azure **subscriptions** reachable | **None.** `ERROR: No subscriptions found`                |
 | Marcus's directory roles          | **None** — standard user, group memberships only         |
 | Billing accounts visible          | None                                                     |
@@ -123,7 +123,7 @@ Chris. But they need _different_ things from him, and the sizes are not close:
 
 SharePoint wins on friction, not on elegance. Azure Blob is the better-shaped
 tool. But Chris **already has to consent to Entra app registrations** for the web
-app and Teams bot ([`TWK-AZURE-DEPLOY-RUNBOOK.md`](./TWK-AZURE-DEPLOY-RUNBOOK.md)),
+app and Teams bot ([`AZURE-DEPLOY-RUNBOOK.md`](./AZURE-DEPLOY-RUNBOOK.md)),
 so the backup app folds into a conversation that must happen regardless — and it
 carries no purchase order.
 
@@ -181,7 +181,7 @@ project, production environment.
 | Credentials    | Railway **reference variables**, no literals |
 
 First run 2026-08-01: dumped **35,551,090 bytes**, gzip verified, uploaded
-`twk-kb-2026-08-01T051051Z.sql.gz` (**33.9 MiB** confirmed present in the
+`kb-2026-08-01T051051Z.sql.gz` (**33.9 MiB** confirmed present in the
 bucket), container exited **Completed**.
 
 ⚠ **Two settings here look wrong and are not.** `restartPolicyType: NEVER`,
@@ -206,7 +206,7 @@ registration; only an administrator can consent to it.**
 
 ### 2a. What to ask for
 
-> An app registration in the TWK CPA tenant needs **admin consent** for a single
+> An app registration in the firm's tenant needs **admin consent** for a single
 > Microsoft Graph application permission — **`Sites.Selected`** — plus write
 > access granted to **one** SharePoint site used only for KB backups. No Azure
 > subscription, no cost, nothing else in the tenant becomes reachable.
@@ -220,7 +220,7 @@ Why this framing works, and why it is honest:
   agreeing.
 - **It bundles.** Chris already has to consent to Entra app registrations for
   the web app and the Teams bot
-  ([`TWK-AZURE-DEPLOY-RUNBOOK.md`](./TWK-AZURE-DEPLOY-RUNBOOK.md)). This is one
+  ([`AZURE-DEPLOY-RUNBOOK.md`](./AZURE-DEPLOY-RUNBOOK.md)). This is one
   more item in a conversation that must happen, not a new one.
 - **It costs nothing.** Worth saying explicitly and early — "we need somewhere
   to put backups" sounds like a procurement request, and this one is not.
@@ -234,7 +234,7 @@ only a container SAS). It is offered as his choice, not argued against.
 Tenant policy allows it — `allowedToCreateApps: True`, verified 2026-08-01.
 
 ```bash
-az ad app create --display-name "TWK KB Backup" --sign-in-audience AzureADMyOrg
+az ad app create --display-name "the knowledge base Backup" --sign-in-audience AzureADMyOrg
 az ad sp create --id <appId>                    # service principal
 az ad app credential reset --id <appId> --years 1   # capture the secret ONCE
 ```
@@ -245,7 +245,7 @@ lapsed SAS, and Step 4 is what catches it.
 
 ### 2c. What Chris does (two clicks, needs Global Admin or Privileged Role Admin)
 
-1. Entra admin centre → **App registrations** → **TWK KB Backup** → **API
+1. Entra admin centre → **App registrations** → **the knowledge base Backup** → **API
    permissions** → add **Microsoft Graph → Application permissions →
    `Sites.Selected`** → **Grant admin consent**
 2. Grant the app write access to the one backup site — via Graph:
@@ -287,8 +287,8 @@ Expected, in order:
 [backup] start <stamp> -> sharepoint
 [backup] dump complete: ~35500000 bytes
 [backup] gzip integrity OK
-[backup] encrypted -> twk-kb-<stamp>.sql.gz.age
-[backup] uploaded twk-kb-<stamp>.sql.gz.age -> sharepoint/kb-backups
+[backup] encrypted -> kb-<stamp>.sql.gz.age
+[backup] uploaded kb-<stamp>.sql.gz.age -> sharepoint/kb-backups
 [backup] heartbeat sent
 [backup] done
 ```
@@ -383,7 +383,7 @@ it, following the production procedure in
 
 ```bash
 # decrypt first if AGE_RECIPIENT was used
-age -d -i twk-kb-backup.key twk-kb-<stamp>.sql.gz.age > twk-kb-<stamp>.sql.gz
+age -d -i kb-backup.key kb-<stamp>.sql.gz.age > kb-<stamp>.sql.gz
 
 railway ssh --service rag-postgres "createdb -U \$POSTGRES_USER rag_restore_drill"
 # ... stream the dump in, then run the verification queries from the drill doc

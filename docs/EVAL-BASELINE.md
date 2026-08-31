@@ -95,7 +95,7 @@ every time. There is no semantic difficulty for an embedding model to resolve.
 | ----------------------------------------------------------------- | --------------------------------------------------------- |
 | The pipeline works end to end with a real embedding provider      | ✅ **Yes** — this is the real value of the run            |
 | Gemini embeddings are correctly wired, dimensioned, and queryable | ✅ Yes — 768-dim, no insert failures                      |
-| Retrieval quality on TWK's knowledge base                         | ❌ **No.** Nothing here speaks to that                    |
+| Retrieval quality on the firm's knowledge base                    | ❌ **No.** Nothing here speaks to that                    |
 | Dense vs sparse weighting is correctly tuned                      | ❌ **No** — the corpus cannot distinguish any setting     |
 | Reranking would or would not help                                 | ❌ **No** — unmeasurable on a corpus already at MRR 1.000 |
 

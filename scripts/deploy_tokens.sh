@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
-# deploy_tokens.sh — Generate principals for marcus + chris and deploy to Railway.
+# deploy_tokens.sh — generate principals and deploy them to Railway.
 #
-# Source UUIDs (from GET /sources — run gen-principals.sh to refresh):
-#   52bb403e-2e59-472b-935a-c83f2eee7e4c  TWK CPA Firm
-#   d3461cbe-b99f-4253-aded-b3610afe56de  TWK RAGTestSite
-#   44ad7a50-c717-4646-87bb-a26acd44aacc  TWK SharePoint — Knowledge Base (recreated 2026-07-04
-#                                         a second time, now with the setDocumentStorage SQL
-#                                         bug fixed, to get 100% storage_key coverage; prior ids
-#                                         b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14 and
-#                                         770e4016-d157-4968-87c9-cbb350ecd6bc both deleted)
+# Usage:
+#   ./scripts/deploy_tokens.sh "<user>:<sourceId>[,<sourceId>...]" [more users...]
 #
-# Both users get all sources. service-admin gets unrestricted access.
+# Example:
+#   ./scripts/deploy_tokens.sh \
+#     "alice:11111111-1111-1111-1111-111111111111" \
+#     "bob:11111111-1111-1111-1111-111111111111"
+#
+# Source UUIDs come from GET /sources (run gen-principals.sh to refresh). They
+# are deployment-specific and are NOT hard-coded here: this script is generic
+# tooling, and a live deployment's source ids and staff names do not belong in
+# the repository.
+#
+# A "service-admin" principal with unrestricted access is always appended.
 # TOKEN MAP is printed to stderr — save it before this terminal closes.
 
 set -euo pipefail
 
-PRINCIPALS=$(./scripts/gen-tokens.sh \
-  "marcus:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,44ad7a50-c717-4646-87bb-a26acd44aacc" \
-  "chris:52bb403e-2e59-472b-935a-c83f2eee7e4c,d3461cbe-b99f-4253-aded-b3610afe56de,44ad7a50-c717-4646-87bb-a26acd44aacc" \
-  "service-admin::isAdmin")
+if [ "$#" -eq 0 ]; then
+  echo "usage: $0 \"<user>:<sourceId>[,<sourceId>...]\" [more users...]" >&2
+  exit 1
+fi
+
+PRINCIPALS=$(./scripts/gen-tokens.sh "$@" "service-admin::isAdmin")
 
 echo "Setting API_PRINCIPALS on rag-api..." >&2
 railway variables --service rag-api --set "API_PRINCIPALS=$PRINCIPALS"

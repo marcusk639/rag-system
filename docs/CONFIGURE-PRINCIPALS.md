@@ -80,10 +80,10 @@ Use `gen-tokens.sh` to generate cryptographic tokens and produce the final
 
 **Current registered sources** (run `./scripts/gen-principals.sh` to refresh):
 
-| UUID                                   | Name            |
-| -------------------------------------- | --------------- |
-| `52bb403e-2e59-472b-935a-c83f2eee7e4c` | TWK CPA Firm    |
-| `d3461cbe-b99f-4253-aded-b3610afe56de` | TWK RAGTestSite |
+| UUID                                   | Name                   |
+| -------------------------------------- | ---------------------- |
+| `52bb403e-2e59-472b-935a-c83f2eee7e4c` | the operating tenant   |
+| `d3461cbe-b99f-4253-aded-b3610afe56de` | the tenant's test site |
 
 ```bash
 # alice sees CPA Firm only; bob sees both; service-admin is unrestricted

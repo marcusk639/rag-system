@@ -1,9 +1,9 @@
 # apps/teams-bot — Microsoft Teams KB Bot Design
 
 **Status:** Approved design — 2026-07-16.
-**Goal:** Let TWK firm staff ask the knowledge base a question from inside Microsoft Teams — by DMing the bot or @mentioning it in a channel — and get an answer as an adaptive card with citations and the "AI-generated draft, requires review" disclaimer, while preserving the exact per-user access scoping and audit logging the web/API/MCP surfaces already enforce.
+**Goal:** Let firm staff ask the knowledge base a question from inside Microsoft Teams — by DMing the bot or @mentioning it in a channel — and get an answer as an adaptive card with citations and the "AI-generated draft, requires review" disclaimer, while preserving the exact per-user access scoping and audit logging the web/API/MCP surfaces already enforce.
 
-**Relationship to existing work:** Greenfield app (no existing Teams code). Reuses the rag-system backend unchanged. The Azure Bot resource + bot Entra app registration are human/infra steps (like `apps/web`'s Entra registration in `docs/TWK-MANUAL-RUNBOOK.md` item 4) and are documented in the companion Azure deploy runbook, not built here.
+**Relationship to existing work:** Greenfield app (no existing Teams code). Reuses the rag-system backend unchanged. The Azure Bot resource + bot Entra app registration are human/infra steps (like `apps/web`'s Entra registration in `docs/PILOT-MANUAL-RUNBOOK.md` item 4) and are documented in the companion Azure deploy runbook, not built here.
 
 ---
 

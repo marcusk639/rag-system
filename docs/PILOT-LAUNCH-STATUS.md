@@ -1,4 +1,4 @@
-# TWK KB — Launch Status (current source of truth)
+# Pilot — Launch Status (current source of truth)
 
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
 material confirmed in the index); gate #3 is **partially closed**, not closed.
@@ -107,7 +107,7 @@ re-sync is unsafe. Only point 1's "already in the live index" is superseded.)_
 
 ## What remains for launch — the critical path (mostly human/infra/legal; gate #1 also needs code)
 
-Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`. ⚠ **Corrected 2026-08-03:**
+Tracked in detail in `docs/PILOT-MANUAL-RUNBOOK.md`. ⚠ **Corrected 2026-08-03:**
 this section previously read _"(all human/infra/legal) … Nothing here is a code
 task."_ That held until the content audit ran. Gates #2 and #3 are still purely
 human/infra/legal; **gate #1 is not** — see its entry.
@@ -148,12 +148,12 @@ an unauthenticated `POST /api/chat` returns **307, not 200** (no unauthenticated
 data path). `rag-api` redeployed from current `main` and now runs the feedback
 route against the migration applied earlier.
 
-Entra objects created in the TWK tenant (within the permissions the tenant
+Entra objects created in the firm's tenant (within the permissions the tenant
 already grants Marcus — no admin action needed):
 
 | Object           | Value                                                                                                                                                                           |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App registration | `TWK KB Assistant (Web)` · `c885331a-8e73-47c0-9dff-263756a81942`                                                                                                               |
+| App registration | `the knowledge base Assistant (Web)` · `c885331a-8e73-47c0-9dff-263756a81942`                                                                                                   |
 | Security group   | `RAG-Admins` · `33cdedd4-61cb-465e-afe2-f37045cf243c`                                                                                                                           |
 | Sign-in scopes   | `openid profile email offline_access` — **user-consentable**                                                                                                                    |
 | Group claims     | `groupMembershipClaims=SecurityGroup` — ids arrive **inline in the token**, so the admin gate does **not** need the app-only Graph fallback (which would require admin consent) |
@@ -245,7 +245,7 @@ the compliance story.
 > Remediation plan, including removal of the roster and structural folder
 > exclusion: [`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md).
 > The same premise appeared in four other documents. All four were corrected on
-> 2026-08-03: `PROTOTYPE-DELIVERY-OPTIONS.md`, `TWK-STAFF-BOT-ONE-PAGER.md`,
+> 2026-08-03: `PROTOTYPE-DELIVERY-OPTIONS.md`, `STAFF-BOT-ONE-PAGER.md`,
 > `PLAN-LAUNCH-READINESS.md`, and `DECISION-CPA-KB-RAG-CONVERGENCE.md`.
 
 ⚠ `general` was the ingestion _default_, never a verified judgment — which is
@@ -269,14 +269,14 @@ not an attorney; its remediation half needs code.
 
 - [ ] **4. Deploy web + Teams bot** — ⛔ **NEW BLOCKER (2026-08-01): the Teams bot
       needs an Azure subscription the firm does not have.** Verified against the
-      tenant — `az` returns `No subscriptions found` for `marcus@twk-cpafirm.com`.
+      tenant — `az` returns `No subscriptions found` for `<admin>@<tenant-domain>`.
       An **Azure Bot is an Azure _resource_** (runbook §3: "Create a resource →
       Azure Bot"), so it needs a subscription with a payment method. The free F0
       tier means **cost is not the obstacle; the absent subscription is.** The web
       app is unaffected — Entra app registrations live in the tenant and are free.
       ⚠ Unverified whether no subscription exists or Marcus merely has no role on
       one; only an admin can distinguish them. Raised with Chris via the issue
-      register (Conflicts #11). Azure/Entra registrations + Railway + Teams packaging. **See `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
+      register (Conflicts #11). Azure/Entra registrations + Railway + Teams packaging. **See `docs/AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
 - [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.
 - [ ] **6. Baseline diary** — capture Chris's "interrupt" baseline _before_ anyone uses the bot.
 
@@ -288,7 +288,7 @@ not an attorney; its remediation half needs code.
       dense/sparse sweep is _flat_, identical even at `dense=0` where embeddings
       contribute nothing. Every tuning decision (reranking, weights, chunking,
       models) is therefore **unfalsifiable** until this exists. Instrument is
-      built and waiting: `tests/e2e/src/eval/twk-gold-set.ts` (empty by design,
+      built and waiting: `tests/e2e/src/eval/gold-set.ts` (empty by design,
       validated, references real production docs) + a 90-minute session guide,
       `docs/EVAL-GOLD-SET-GUIDE.md`. Original note follows — — the gold set that unblocks reranker/tuning decisions (harness already runs against a real embedder; questions are the missing input).
 - [ ] **8. Audit-log off-host destination + retention window** — decision, then small config.
@@ -301,15 +301,15 @@ not an attorney; its remediation half needs code.
 
 The Teams bot added one deployment input beyond the web app's Entra setup:
 
-- **`BOT_OAUTH_CONNECTION_NAME`** — the Azure Bot **OAuth connection setting** name (distinct from the SSO scope URI). Without it configured (and passing its **Test Connection** in the Azure portal), the bot authenticates no one and replies with a sign-in card to every message. Fully covered in `docs/TWK-AZURE-DEPLOY-RUNBOOK.md` §4.
+- **`BOT_OAUTH_CONNECTION_NAME`** — the Azure Bot **OAuth connection setting** name (distinct from the SSO scope URI). Without it configured (and passing its **Test Connection** in the Azure portal), the bot authenticates no one and replies with a sign-in card to every message. Fully covered in `docs/AZURE-DEPLOY-RUNBOOK.md` §4.
 - The bot must run **single-instance** (it uses `MemoryStorage` for the SSO exchange) — fine for a firm-scale pilot.
 
 ---
 
 ## Doc-accuracy corrections (truth-up)
 
-- **`docs/DEPLOYMENT-TARGET.md` is stale.** It records "single VM + docker-compose" (a 2026-06-14 decision), but the system actually runs on **Railway** (per `docs/TWK-MANUAL-RUNBOOK.md` items 3–4 and the `railway.json` deploy configs on each app). Treat Railway as the live target; the VM+compose file (`docker/compose.prod.yml`) remains a valid self-host option but is not what's deployed.
-- **Plan checkboxes are not a status source.** `PLAN-TWK-READINESS-AUTOMATABLE.md` and `PLAN-LAUNCH-READINESS.md` have mostly-unchecked boxes despite the work being complete — they were execution guides, not trackers. **This file is the status source; the manual runbook is the remaining-work source.**
+- **`docs/DEPLOYMENT-TARGET.md` is stale.** It records "single VM + docker-compose" (a 2026-06-14 decision), but the system actually runs on **Railway** (per `docs/PILOT-MANUAL-RUNBOOK.md` items 3–4 and the `railway.json` deploy configs on each app). Treat Railway as the live target; the VM+compose file (`docker/compose.prod.yml`) remains a valid self-host option but is not what's deployed.
+- **Plan checkboxes are not a status source.** `PLAN-PILOT-READINESS-AUTOMATABLE.md` and `PLAN-LAUNCH-READINESS.md` have mostly-unchecked boxes despite the work being complete — they were execution guides, not trackers. **This file is the status source; the manual runbook is the remaining-work source.**
 
 ---
 
@@ -317,8 +317,8 @@ The Teams bot added one deployment input beyond the web app's Entra setup:
 
 | Concern                                        | Doc                                                                        |
 | ---------------------------------------------- | -------------------------------------------------------------------------- |
-| Remaining human/legal/infra work               | `docs/TWK-MANUAL-RUNBOOK.md`                                               |
-| How to deploy (Azure + Railway, both surfaces) | `docs/TWK-AZURE-DEPLOY-RUNBOOK.md`                                         |
-| Staff-facing "how to use the bot"              | `docs/TWK-STAFF-BOT-ONE-PAGER.md`                                          |
+| Remaining human/legal/infra work               | `docs/PILOT-MANUAL-RUNBOOK.md`                                             |
+| How to deploy (Azure + Railway, both surfaces) | `docs/AZURE-DEPLOY-RUNBOOK.md`                                             |
+| Staff-facing "how to use the bot"              | `docs/STAFF-BOT-ONE-PAGER.md`                                              |
 | Teams bot design + plan                        | `docs/superpowers/{specs,plans}/2026-07-16-teams-bot*`                     |
 | Architecture / connectors / API                | `docs/ARCHITECTURE.md`, `docs/CONNECTORS.md`, `docs/API.md`, `docs/MCP.md` |

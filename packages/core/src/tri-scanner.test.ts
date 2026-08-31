@@ -250,7 +250,8 @@ describe("scanForTRI", () => {
 });
 
 describe("identifyingTRIPatterns", () => {
-  // Why this split exists: a screen of the TWK corpus (858 documents) flagged
+  // Why this split exists: a screen of a representative accounting-firm SOP
+  // corpus (858 documents) flagged
   // 41% of it, but the classes are not alike. `tax-form+amount` matched 316
   // documents and its hits are what a procedure explaining how to review a
   // return looks like. `SSN`/`EIN` matched 24, one of which held 260 distinct

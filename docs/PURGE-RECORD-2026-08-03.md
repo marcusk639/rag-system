@@ -6,7 +6,7 @@ production database because it contained taxpayer return information (TRI).
 
 > **Why this file exists.** The purge was intentional and correct, but it left no
 > trace in `ingest_log`, no `screen-signoff.json`, and no changelog entry. The
-> only artifact was a manifest filename. `TWK-MANUAL-RUNBOOK.md` item 1 asks for
+> only artifact was a manifest filename. `PILOT-MANUAL-RUNBOOK.md` item 1 asks for
 > exactly this: _"Write down, in one page, exactly what you found… it's the honest
 > record you'd want to have if this question ever comes up later."_ Reconstructed
 > from the pre-purge manifest and a read-only query of production on 2026-08-04.

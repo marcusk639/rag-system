@@ -1,5 +1,5 @@
 /**
- * TWK gold set — the real evaluation corpus.
+ * Gold set — the real evaluation corpus for the operating tenant.
  *
  * ⚠ THIS FILE IS INTENTIONALLY EMPTY OF QUESTIONS. That is not an oversight.
  *
@@ -29,7 +29,7 @@
  *
  * ── How to fill it ─────────────────────────────────────────────────────────
  *
- * Append entries below. Nothing else in the harness changes — `pnpm eval:twk`
+ * Append entries below. Nothing else in the harness changes — `pnpm eval:gold`
  * picks them up automatically and refuses to run while the set is empty.
  */
 
@@ -40,8 +40,8 @@ export type ScoringTier =
   /** Substantive CPA correctness. Requires a credentialed reviewer. */
   | "tier2-cpa-verified";
 
-export interface TwkGoldQuestion {
-  /** Stable id, e.g. "twk-q-001". Never renumber — results are keyed on it. */
+export interface GoldQuestion {
+  /** Stable id, e.g. "gold-q-001". Never renumber — results are keyed on it. */
   id: string;
 
   /** The question, phrased the way a staff member would actually type it. */
@@ -90,7 +90,7 @@ export interface TwkGoldQuestion {
  * Target: 30–50 questions, of which a meaningful share carry a
  * `distractorNote`. Thirty easy questions are worth less than ten hard ones.
  */
-export const TWK_GOLD_QUESTIONS: TwkGoldQuestion[] = [];
+export const GOLD_QUESTIONS: GoldQuestion[] = [];
 
 /** Validation failure describing one malformed gold-set entry. */
 export interface GoldSetIssue {
@@ -104,7 +104,7 @@ export interface GoldSetIssue {
  * guesses, at which point every number downstream is fiction.
  */
 export function validateGoldSet(
-  questions: readonly TwkGoldQuestion[] = TWK_GOLD_QUESTIONS,
+  questions: readonly GoldQuestion[] = GOLD_QUESTIONS,
 ): GoldSetIssue[] {
   const issues: GoldSetIssue[] = [];
   const seen = new Set<string>();
@@ -141,7 +141,7 @@ export function validateGoldSet(
 
 /** True when the gold set has content and no structural problems. */
 export function isGoldSetUsable(
-  questions: readonly TwkGoldQuestion[] = TWK_GOLD_QUESTIONS,
+  questions: readonly GoldQuestion[] = GOLD_QUESTIONS,
 ): boolean {
   return questions.length > 0 && validateGoldSet(questions).length === 0;
 }
