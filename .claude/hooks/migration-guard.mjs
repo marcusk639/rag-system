@@ -33,7 +33,9 @@ process.stdin.on("end", () => {
 
   // 1. Lockfile — generated, never hand-edited.
   if (/(^|\/)pnpm-lock\.yaml$/.test(fp)) {
-    block("pnpm-lock.yaml is generated — run `pnpm install`/`pnpm add` instead of editing it.");
+    block(
+      "pnpm-lock.yaml is generated — run `pnpm install`/`pnpm add` instead of editing it.",
+    );
   }
 
   // 2. Committed migration — immutable once applied.

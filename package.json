@@ -51,7 +51,7 @@
     "vitest": "^2.1.8"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx,json,md,css,yml,yaml}": "prettier --write",
+    "*.{ts,tsx,js,jsx,mjs,cjs,json,md,css,yml,yaml}": "prettier --write",
     "*.{ts,tsx}": "eslint --fix --no-warn-ignored"
   }
 }
