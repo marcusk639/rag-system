@@ -37,7 +37,10 @@ process.stdin.on("end", () => {
   // --- Regex rules (each tested against the whole command string) ---
   const rules = [
     // A. Filesystem destruction
-    [new RegExp(`\\brm\\b${SEG}\\s-[a-zA-Z]*r`, "i"), "recursive rm (rm -r / -rf) deletes directory trees"],
+    [
+      new RegExp(`\\brm\\b${SEG}\\s-[a-zA-Z]*r`, "i"),
+      "recursive rm (rm -r / -rf) deletes directory trees",
+    ],
     [/\brm\b[^\n|;&]*--recursive/i, "recursive rm (--recursive)"],
     [/\bfind\b[^\n|;&]*-delete\b/i, "find -delete performs bulk deletion"],
     [/\bfind\b[^\n|;&]*-exec\s+rm\b/i, "find -exec rm performs bulk deletion"],
@@ -46,26 +49,83 @@ process.stdin.on("end", () => {
     [/\bshred\b/i, "shred irreversibly destroys files"],
     [/\btruncate\b[^\n|;&]*-s\s*0\b/i, "truncate -s 0 empties a file"],
     // NOTE: -R is case-sensitive (recursive); a lowercase -r is not chmod/chown's recursive flag.
-    [new RegExp(`\\bch(mod|own)\\b${SEG}\\s-[a-zA-Z]*R`), "recursive chmod/chown -R"],
+    [
+      new RegExp(`\\bch(mod|own)\\b${SEG}\\s-[a-zA-Z]*R`),
+      "recursive chmod/chown -R",
+    ],
     // B. Destructive SQL (unambiguous DDL, or any destructive verb through psql)
-    [/\bdrop\s+(database|schema|table|index|column)\b/i, "SQL DROP (database/schema/table/index/column)"],
+    [
+      /\bdrop\s+(database|schema|table|index|column)\b/i,
+      "SQL DROP (database/schema/table/index/column)",
+    ],
     // C. Destructive docker
-    [new RegExp(`\\bdocker(-compose)?\\b${SEG}\\bdown\\b${SEG}(-v\\b|--volumes)`, "i"), "docker down -v removes volumes (your DB data)"],
-    [/\bdocker\s+volume\s+(rm|prune)\b/i, "docker volume rm/prune deletes volume data"],
-    [/\bdocker\s+system\s+prune/i, "docker system prune bulk-deletes resources"],
-    [new RegExp(`\\bdocker\\b${SEG}\\brm\\b${SEG}\\s-[a-zA-Z]*f`, "i"), "docker rm -f force-removes a container"],
+    [
+      new RegExp(
+        `\\bdocker(-compose)?\\b${SEG}\\bdown\\b${SEG}(-v\\b|--volumes)`,
+        "i",
+      ),
+      "docker down -v removes volumes (your DB data)",
+    ],
+    [
+      /\bdocker\s+volume\s+(rm|prune)\b/i,
+      "docker volume rm/prune deletes volume data",
+    ],
+    [
+      /\bdocker\s+system\s+prune/i,
+      "docker system prune bulk-deletes resources",
+    ],
+    [
+      new RegExp(`\\bdocker\\b${SEG}\\brm\\b${SEG}\\s-[a-zA-Z]*f`, "i"),
+      "docker rm -f force-removes a container",
+    ],
     // D. History / work-destroying git (git-guard.mjs owns the commit/add-flag cases)
-    [new RegExp(`\\bgit\\b${SEG}\\breset\\b${SEG}--hard`, "i"), "git reset --hard discards commits/worktree"],
-    [new RegExp(`\\bgit\\b${SEG}\\bclean\\b${SEG}\\s-[a-zA-Z]*f`, "i"), "git clean -f deletes untracked files (incl. scratch/ledger)"],
-    [/\bgit\s+checkout\s+(--\s+)?\.(\s|$)/i, "git checkout . discards all worktree changes"],
-    [/\bgit\s+checkout\s+--\s+\S/i, "git checkout -- <path> discards worktree changes"],
+    [
+      new RegExp(`\\bgit\\b${SEG}\\breset\\b${SEG}--hard`, "i"),
+      "git reset --hard discards commits/worktree",
+    ],
+    [
+      new RegExp(`\\bgit\\b${SEG}\\bclean\\b${SEG}\\s-[a-zA-Z]*f`, "i"),
+      "git clean -f deletes untracked files (incl. scratch/ledger)",
+    ],
+    [
+      /\bgit\s+checkout\s+(--\s+)?\.(\s|$)/i,
+      "git checkout . discards all worktree changes",
+    ],
+    [
+      /\bgit\s+checkout\s+--\s+\S/i,
+      "git checkout -- <path> discards worktree changes",
+    ],
     // -D (uppercase, case-sensitive) is force-delete; -d is the safe merged-only delete — allow -d.
-    [new RegExp(`\\bgit\\s+branch\\b${SEG}\\s-D\\b`), "git branch -D force-deletes a branch"],
-    [new RegExp(`\\bgit\\s+branch\\b${SEG}--delete${SEG}--force`, "i"), "git branch --delete --force"],
-    [new RegExp(`\\bgit\\s+worktree\\s+remove\\b${SEG}(\\s-f\\b|--force)`, "i"), "git worktree remove --force"],
-    [/\bgit\s+stash\s+(clear|drop)\b/i, "git stash clear/drop deletes stashed work"],
-    [new RegExp(`\\bgit\\b${SEG}\\bpush\\b${SEG}(--force(?!-with-lease)|\\s-f\\b)`, "i"), "git push --force/-f rewrites remote history (use --force-with-lease)"],
-    [/\bgit\s+filter-(branch|repo)\b/i, "git filter-branch/filter-repo rewrites history"],
+    [
+      new RegExp(`\\bgit\\s+branch\\b${SEG}\\s-D\\b`),
+      "git branch -D force-deletes a branch",
+    ],
+    [
+      new RegExp(`\\bgit\\s+branch\\b${SEG}--delete${SEG}--force`, "i"),
+      "git branch --delete --force",
+    ],
+    [
+      new RegExp(
+        `\\bgit\\s+worktree\\s+remove\\b${SEG}(\\s-f\\b|--force)`,
+        "i",
+      ),
+      "git worktree remove --force",
+    ],
+    [
+      /\bgit\s+stash\s+(clear|drop)\b/i,
+      "git stash clear/drop deletes stashed work",
+    ],
+    [
+      new RegExp(
+        `\\bgit\\b${SEG}\\bpush\\b${SEG}(--force(?!-with-lease)|\\s-f\\b)`,
+        "i",
+      ),
+      "git push --force/-f rewrites remote history (use --force-with-lease)",
+    ],
+    [
+      /\bgit\s+filter-(branch|repo)\b/i,
+      "git filter-branch/filter-repo rewrites history",
+    ],
   ];
   for (const [re, msg] of rules) {
     if (re.test(cmd)) block(msg);
@@ -75,8 +135,13 @@ process.stdin.on("end", () => {
 
   // Any destructive verb reaching Postgres via psql (covers `docker exec … psql`,
   // `psql $DATABASE_URL -c "…"`). Read-only psql (\d, SELECT) passes.
-  if (/\bpsql\b/i.test(cmd) && /\b(drop|truncate|delete\s+from|alter\s+table\b[\s\S]*\bdrop)\b/i.test(cmd)) {
-    block("destructive SQL (DROP/TRUNCATE/DELETE/ALTER…DROP) executed through psql");
+  if (
+    /\bpsql\b/i.test(cmd) &&
+    /\b(drop|truncate|delete\s+from|alter\s+table\b[\s\S]*\bdrop)\b/i.test(cmd)
+  ) {
+    block(
+      "destructive SQL (DROP/TRUNCATE/DELETE/ALTER…DROP) executed through psql",
+    );
   }
 
   // `git restore` of the WORKTREE discards changes. Allow only staged-restore
@@ -84,7 +149,9 @@ process.stdin.on("end", () => {
   if (/\bgit\s+restore\b/i.test(cmd)) {
     const stagedOnly = /--staged/i.test(cmd) && !/--worktree/i.test(cmd);
     if (!stagedOnly) {
-      block("git restore of the worktree discards changes (only 'git restore --staged' to unstage is allowed)");
+      block(
+        "git restore of the worktree discards changes (only 'git restore --staged' to unstage is allowed)",
+      );
     }
   }
 });

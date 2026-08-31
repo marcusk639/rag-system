@@ -39,9 +39,15 @@ const BLOCK = [
   ["chown -R root .", "chown -R"],
   ["git branch -D feat/unmerged", "git branch -D (force)"],
   // B. SQL
-  [`docker exec rag-postgres psql -U rag -d postgres -c "${DROPDB}"`, "psql DROP DATABASE"],
+  [
+    `docker exec rag-postgres psql -U rag -d postgres -c "${DROPDB}"`,
+    "psql DROP DATABASE",
+  ],
   [`psql "$DATABASE_URL" -c "${TRUNC}"`, "psql TRUNCATE"],
-  [`docker exec rag-postgres psql -U rag -d rag -c "DELETE FROM audit_log"`, "psql DELETE FROM"],
+  [
+    `docker exec rag-postgres psql -U rag -d rag -c "DELETE FROM audit_log"`,
+    "psql DELETE FROM",
+  ],
   ["psql -c 'DROP TABLE chunks'", "DROP TABLE"],
   // C. docker
   ["docker compose -f docker/docker-compose.yml down -v", "docker down -v"],
@@ -85,8 +91,14 @@ const ALLOW = [
   ["pnpm --filter @rag/db test", "filtered test"],
   ["npm run build", "npm run"],
   // read-only psql
-  ['docker exec rag-postgres psql -U rag -d rag -c "\\d answer_feedback"', "psql describe"],
-  ['docker exec rag-postgres psql -U rag -d rag -c "SELECT count(*) FROM audit_log"', "psql select"],
+  [
+    'docker exec rag-postgres psql -U rag -d rag -c "\\d answer_feedback"',
+    "psql describe",
+  ],
+  [
+    'docker exec rag-postgres psql -U rag -d rag -c "SELECT count(*) FROM audit_log"',
+    "psql select",
+  ],
   // safe git
   ["git status", "git status"],
   ["git checkout main", "git checkout branch"],
@@ -124,11 +136,17 @@ for (const [cmd, label] of ALLOW) {
 }
 // malformed stdin fails open (exit 0)
 try {
-  execFileSync("node", [HOOK], { input: "not json", stdio: ["pipe", "ignore", "ignore"] });
+  execFileSync("node", [HOOK], {
+    input: "not json",
+    stdio: ["pipe", "ignore", "ignore"],
+  });
 } catch {
   console.error("FAIL: malformed stdin should fail OPEN (exit 0)");
   fail = 1;
 }
 
-if (!fail) console.log(`ok — ${BLOCK.length} block cases + ${ALLOW.length} allow cases + fail-open all pass`);
+if (!fail)
+  console.log(
+    `ok — ${BLOCK.length} block cases + ${ALLOW.length} allow cases + fail-open all pass`,
+  );
 process.exit(fail);
