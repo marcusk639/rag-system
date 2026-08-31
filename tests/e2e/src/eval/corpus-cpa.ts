@@ -1,6 +1,99 @@
+/**
+ * CPA-representative labeled retrieval-eval corpus — entirely SYNTHETIC.
+ *
+ * ## Purpose
+ *
+ * Measures retrieval quality against language that looks like the real
+ * knowledge base, rather than against the generic technical prose in
+ * `corpus.ts`. Same shape, same harness, different difficulty.
+ *
+ * ## Why this is separate from `corpus.ts`
+ *
+ * `corpus.ts` is deliberately a STARTER set: its documents are
+ * vocabulary-distinctive (pgvector, RRF, WAL archiving), so a bag-of-words
+ * `FakeEmbedder` can separate them on keyword overlap alone. `run-real-eval.ts`
+ * says so in its own report header — treat those numbers as a floor, not a
+ * ceiling.
+ *
+ * This corpus removes that cushion. Firm SOPs share vocabulary heavily: several
+ * documents say "client," "engagement," "Karbon," "time entry." A retriever
+ * that scored well on the starter set can still fail here, which is the point —
+ * a score that cannot go down measures nothing.
+ *
+ * ## Contents
+ *
+ * - `EVAL_DOCS_CPA` — 7 documents (BOI filing, time coding, K-1 treatment,
+ *   1040 intake, catch-up bookkeeping, Karbon templates, staff onboarding).
+ * - `EVAL_QUESTIONS_CPA` — 20 positives, each labeled with the `externalId`(s)
+ *   that should answer it.
+ * - `EVAL_NEGATIVES_CPA` — 8 out-of-corpus questions with `relevant: []`.
+ *   Nothing in the corpus answers them (R&D credit, 1031 exchange, FBAR...).
+ *   These exist because precision/recall alone cannot catch a system that
+ *   answers everything confidently. A negative FAILS when the retriever returns
+ *   a high-scoring hit that a generator would then cite. `corpus.ts` has no
+ *   equivalent, so this is the only place that failure mode is measurable.
+ *
+ * ## Usage
+ *
+ * `runRetrievalEval` already accepts questions, so the positives drop straight
+ * in:
+ *
+ * ```ts
+ * import { EVAL_DOCS_CPA, EVAL_QUESTIONS_CPA } from "./corpus-cpa.js";
+ *
+ * const idMap = await seedEvalCorpus(db, sourceId, embedder);
+ * const report = await runRetrievalEval(db, idMap, {
+ *   weights: { dense: 0.7, sparse: 0.3 },
+ *   questions: EVAL_QUESTIONS_CPA,
+ *   embedder,
+ * });
+ * console.log(formatReport(report));
+ * ```
+ *
+ * ⚠ **`seedEvalCorpus` does NOT take a document set yet** — it is hardcoded to
+ * `EVAL_DOCS` from `corpus.ts`. Running the snippet above as written evaluates
+ * CPA questions against the WRONG corpus and every metric reads ~0. Until
+ * `seedEvalCorpus` grows a `docs` parameter, seed directly:
+ *
+ * ```ts
+ * const connector = new FakeConnector(
+ *   EVAL_DOCS_CPA.map((d) =>
+ *     plainTextDoc({ externalId: d.externalId, title: d.title, text: d.text }),
+ *   ),
+ * );
+ * await runOneIngestion(db, sourceId, connector, { embedder });
+ * ```
+ *
+ * For the negatives, assert on the scores rather than on rank position — a
+ * miss here means "returned something confident," not "ranked it low."
+ *
+ * ## Two constraints that produce silently wrong numbers
+ *
+ * 1. **Use one embedder instance for both seeding and querying.** Different
+ *    instances mean dense scores compare vectors from two embedding spaces, and
+ *    the run still completes — it just reports nonsense.
+ * 2. **`poolK` must be >= the largest `k`.** Otherwise recall@k is capped by
+ *    fetch depth and you are measuring the pool size, not the retriever.
+ *
+ * ## Content safety
+ *
+ * Every document is fabricated. No real firm SOP, no client identifier, no
+ * taxpayer data. Every title carries a `SYNTHETIC SAMPLE` marker so it is
+ * recognizable as fixture material if it ever surfaces in a retrieval result or
+ * a generated answer during debugging.
+ */
 import type { EvalDoc, EvalQuestion } from "./corpus.js";
 
-// SYNTHETIC SAMPLE content — fabricated for retrieval evaluation. Not real firm SOPs.
+/**
+ * The corpus under test. Seven documents that deliberately share vocabulary —
+ * "client," "engagement," "Karbon," "time entry" recur across several — so
+ * near-neighbor discrimination is actually exercised rather than assumed.
+ *
+ * `externalId` is the ground-truth key: it is what `EVAL_QUESTIONS_CPA.relevant`
+ * refers to and what the connector ingests as its external id. Renaming one
+ * without updating every reference silently drops those questions to zero
+ * recall, because a label that matches nothing simply never scores.
+ */
 export const EVAL_DOCS_CPA: EvalDoc[] = [
   {
     externalId: "boi-filing",
@@ -39,6 +132,14 @@ export const EVAL_DOCS_CPA: EvalDoc[] = [
   },
 ];
 
+/**
+ * Positives: 20 questions phrased the way staff would actually ask them, each
+ * labeled with the document(s) that genuinely answer it.
+ *
+ * Questions are worded to avoid quoting their source document verbatim. A
+ * question that copies its answer's phrasing measures string matching, not
+ * retrieval, and would score well even on a broken retriever.
+ */
 export const EVAL_QUESTIONS_CPA: EvalQuestion[] = [
   {
     id: "cpa-q01",
@@ -146,6 +247,16 @@ export const EVAL_QUESTIONS_CPA: EvalQuestion[] = [
 ];
 
 // Out-of-corpus: nothing here should be answered with a confident citation.
+/**
+ * Negatives: plausible CPA questions that this corpus genuinely cannot answer.
+ * `relevant: []` is the assertion — the correct behavior is to retrieve nothing
+ * worth citing and, downstream, to decline rather than improvise.
+ *
+ * Scored inversely to the positives: a hit here is a FAILURE. Standard
+ * recall/precision cannot express that, which is why these live in their own
+ * export rather than mixed into `EVAL_QUESTIONS_CPA` — averaging them together
+ * would let a confident wrong answer cancel out a correct one.
+ */
 export const EVAL_NEGATIVES_CPA: EvalQuestion[] = [
   {
     id: "cpa-n01",
