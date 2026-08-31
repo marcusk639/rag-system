@@ -25,6 +25,13 @@ vi.mock("@rag/services", async (importOriginal) => {
 
 const ADMIN_TOKEN = "admin-token-aaaaaaaa";
 
+// All real answerIds are randomUUID() uuids (FeedbackBody.answerId enforces
+// this via z.string().uuid()) — use fixed valid uuids for test fixtures
+// instead of the previous non-uuid literals ("a1", "a2", ...).
+const ANSWER_ID_1 = "11111111-1111-4111-8111-111111111111";
+const ANSWER_ID_2 = "22222222-2222-4222-8222-222222222222";
+const ANSWER_ID_3 = "33333333-3333-4333-8333-333333333333";
+
 function makeDeps(): Deps {
   return {
     db: {} as Deps["db"],
@@ -79,17 +86,62 @@ describe("POST /feedback", () => {
         method: "POST",
         url: "/feedback",
         headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
-        payload: { answerId: "a1", rating: "helpful" },
+        payload: { answerId: ANSWER_ID_1, rating: "helpful" },
       });
       expect(res.statusCode).toBe(204);
       expect(res.body).toBe("");
       expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          answerId: "a1",
+          answerId: ANSWER_ID_1,
           rating: "helpful",
           channel: "web",
         }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("attributes channel: 'teams' when X-RAG-Channel: teams is present (Teams bot BFF)", async () => {
+    submitAnswerFeedbackMock.mockClear();
+    submitAnswerFeedbackMock.mockResolvedValue(undefined);
+    const app = await buildApp(staticConfig);
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/feedback",
+        headers: {
+          authorization: `Bearer ${ADMIN_TOKEN}`,
+          "x-rag-channel": "teams",
+        },
+        payload: { answerId: ANSWER_ID_1, rating: "helpful" },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ channel: "teams" }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("defaults to channel: 'web' when X-RAG-Channel is absent", async () => {
+    submitAnswerFeedbackMock.mockClear();
+    submitAnswerFeedbackMock.mockResolvedValue(undefined);
+    const app = await buildApp(staticConfig);
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/feedback",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { answerId: ANSWER_ID_1, rating: "helpful" },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ channel: "web" }),
       );
     } finally {
       await app.close();
@@ -113,7 +165,7 @@ describe("POST /feedback", () => {
         // there is no such field in the schema, but assert the service is
         // called with the SERVER-resolved subject regardless of body content.
         payload: {
-          answerId: "a2",
+          answerId: ANSWER_ID_2,
           rating: "not_helpful",
           comment: "not accurate",
         },
@@ -122,7 +174,7 @@ describe("POST /feedback", () => {
       expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          answerId: "a2",
+          answerId: ANSWER_ID_2,
           rating: "not_helpful",
           comment: "not accurate",
           principalSubject: "aad-oid-feedback-1",
@@ -143,7 +195,7 @@ describe("POST /feedback", () => {
         method: "POST",
         url: "/feedback",
         headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
-        payload: { answerId: "a3", rating: "helpful" },
+        payload: { answerId: ANSWER_ID_3, rating: "helpful" },
       });
       expect(res.statusCode).toBe(204);
       expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
@@ -163,7 +215,7 @@ describe("POST /feedback", () => {
         method: "POST",
         url: "/feedback",
         headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
-        payload: { answerId: "a1", rating: "meh" },
+        payload: { answerId: ANSWER_ID_1, rating: "meh" },
       });
       expect(res.statusCode).toBe(400);
       expect(submitAnswerFeedbackMock).not.toHaveBeenCalled();
@@ -181,7 +233,7 @@ describe("POST /feedback", () => {
         url: "/feedback",
         headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
         payload: {
-          answerId: "a1",
+          answerId: ANSWER_ID_1,
           rating: "helpful",
           comment: "x".repeat(1001),
         },
@@ -210,6 +262,44 @@ describe("POST /feedback", () => {
     }
   });
 
+  it("400s on a non-uuid answerId (all real answerIds are randomUUID())", async () => {
+    submitAnswerFeedbackMock.mockClear();
+    const app = await buildApp(staticConfig);
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/feedback",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { answerId: "not-a-uuid", rating: "helpful" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(submitAnswerFeedbackMock).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("accepts a valid uuid answerId", async () => {
+    submitAnswerFeedbackMock.mockClear();
+    submitAnswerFeedbackMock.mockResolvedValue(undefined);
+    const app = await buildApp(staticConfig);
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/feedback",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+        payload: { answerId: ANSWER_ID_1, rating: "helpful" },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(submitAnswerFeedbackMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ answerId: ANSWER_ID_1 }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects an unauthenticated request (401, service untouched)", async () => {
     submitAnswerFeedbackMock.mockClear();
     const app = await buildApp(staticConfig);
@@ -217,7 +307,7 @@ describe("POST /feedback", () => {
       const res = await app.inject({
         method: "POST",
         url: "/feedback",
-        payload: { answerId: "a1", rating: "helpful" },
+        payload: { answerId: ANSWER_ID_1, rating: "helpful" },
       });
       expect(res.statusCode).toBe(401);
       expect(submitAnswerFeedbackMock).not.toHaveBeenCalled();
