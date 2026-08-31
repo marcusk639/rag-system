@@ -49,6 +49,7 @@ export {
   filterCitationsToAnswer,
   type Generator,
   type GenerationResult,
+  type TriPolicy,
 } from "./generation/generator.js";
 
 // Claim extraction (corpus-grounded eval)

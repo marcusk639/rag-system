@@ -19,6 +19,7 @@ import {
   createObjectStore,
   createReranker,
   type Generator,
+  type TriPolicy,
 } from "@rag/rag";
 import type { Logger } from "pino";
 
@@ -113,6 +114,27 @@ export function buildAuthProvider(
   }
 }
 
+/**
+ * Resolve the effective TRI policy for generation.
+ *
+ * `client-data` compliance mode forces the strict policy regardless of
+ * GENERATION_TRI_POLICY. The permissive default (`warn`) is calibrated for an
+ * internal-SOP corpus where the scan's contextual patterns are known false
+ * positives; a deployment that has declared real client data in scope must
+ * never inherit that leniency — not by omission, and not by an explicit
+ * `warn`/`off` that predates the compliance declaration.
+ *
+ * Exported for its own sake: this one decision is what several comments
+ * elsewhere point at when they argue a looser setting is safe, so it is the
+ * kind of rule that should fail a test rather than a deployment.
+ */
+export function resolveTriPolicy(
+  complianceMode: string | undefined,
+  configured: TriPolicy | undefined,
+): TriPolicy {
+  return complianceMode === "client-data" ? "block" : (configured ?? "warn");
+}
+
 export async function buildCoreDeps(
   config: Config,
   logger: Logger,
@@ -195,15 +217,10 @@ export async function buildCoreDeps(
         "generation configured but no usable API key — generation disabled",
       );
     } else {
-      // `client-data` compliance mode forces the strict TRI policy regardless of
-      // GENERATION_TRI_POLICY. The permissive default (`warn`) is calibrated for
-      // an internal-SOP corpus where the scan's contextual patterns are known
-      // false positives; a deployment that has declared real client data in
-      // scope must never inherit that leniency by omission.
-      const triPolicy =
-        config.complianceMode === "client-data"
-          ? "block"
-          : (config.generation.triPolicy ?? "warn");
+      const triPolicy = resolveTriPolicy(
+        config.complianceMode,
+        config.generation.triPolicy,
+      );
       if (triPolicy !== config.generation.triPolicy) {
         logger.info(
           { triPolicy, complianceMode: config.complianceMode },
