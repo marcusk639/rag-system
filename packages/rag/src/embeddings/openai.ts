@@ -11,6 +11,18 @@ import { retryOnRateLimit } from "./retry.js";
  * column dimension in the `chunks` table and re-embed everything.
  * See packages/db/drizzle/0000_init.sql for the migration recipe.
  */
+/**
+ * The host this provider dials, pinned.
+ *
+ * Both the SDK client and the egress assertion below read this one value, which
+ * is the whole point: when they were allowed to disagree — a hardcoded literal
+ * in the assertion, an env-derived default in the client — the allow-list
+ * approved `api.openai.com` while the client called somewhere else entirely.
+ * An embedding call carries the whole corpus, so that divergence was the
+ * broadest egress hole in the codebase.
+ */
+const OPENAI_EMBEDDINGS_BASE_URL = "https://api.openai.com/v1";
+
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly name = "openai";
   readonly model: string;
@@ -27,7 +39,14 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     egressPolicy?: EgressPolicy;
   }) {
     if (!opts.apiKey) throw new EmbeddingError("OpenAI API key is required");
-    this.client = new OpenAI({ apiKey: opts.apiKey });
+    this.client = new OpenAI({
+      apiKey: opts.apiKey,
+      // Passed explicitly, never omitted. The SDK constructor destructures
+      // `baseURL = readEnv("OPENAI_BASE_URL")`, so an ABSENT key is not the
+      // same as the default — the environment variable wins, and would redirect
+      // the client away from the very host `assertAllowed` vouches for below.
+      baseURL: OPENAI_EMBEDDINGS_BASE_URL,
+    });
     this.model = opts.model ?? "text-embedding-3-small";
     this.dimensions = opts.dimensions ?? 1536;
     this.maxRetries = opts.maxRetries ?? 5;
@@ -42,7 +61,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   async embedBatch(texts: string[]): Promise<Embedding[]> {
     if (texts.length === 0) return [];
-    this._egressPolicy.assertAllowed("https://api.openai.com");
+    this._egressPolicy.assertAllowed(OPENAI_EMBEDDINGS_BASE_URL);
     try {
       const results: Embedding[] = [];
       const batchSize = 2048; // OpenAI limit
