@@ -329,17 +329,23 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
       expect(res.statusCode).toBe(200);
 
       const expectedHash = createHash("sha256").update(question).digest("hex");
-      const [row] = await db
-        .execute<{
-          principal_subject: string | null;
-          principal_kind: string;
-        }>(
-          sql`SELECT principal_subject, principal_kind FROM audit_log WHERE question_hash = ${expectedHash}`,
-        )
-        .then((r) => r.rows);
+      // The route audits with `void logAskEvent(...)` (apps/api/src/routes/ask.ts),
+      // so the row is written AFTER the response is sent. Querying straight
+      // after `inject` resolves is a race the CI runner loses under load —
+      // hence waitForAuditRow, same as the two tests below.
+      const row = await waitForAuditRow(() =>
+        db
+          .execute<{
+            principal_subject: string | null;
+            principal_kind: string;
+          }>(
+            sql`SELECT principal_subject, principal_kind FROM audit_log WHERE question_hash = ${expectedHash}`,
+          )
+          .then((r) => r.rows[0]),
+      );
 
-      expect(row?.principal_kind).toBe("scoped");
-      expect(row?.principal_subject).toBe(subject);
+      expect(row.principal_kind).toBe("scoped");
+      expect(row.principal_subject).toBe(subject);
     } finally {
       await closeApi();
     }
