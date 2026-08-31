@@ -53,7 +53,7 @@ function makeDeps(thrown: Error): Deps {
     answer: async () => {
       throw thrown;
     },
-     
+
     answerStream: async function* () {
       throw thrown;
     },
