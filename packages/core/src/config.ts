@@ -167,6 +167,44 @@ export const Config = z
          * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
          */
         maxOutputTokens: z.number().int().positive().default(2048),
+
+        /**
+         * What the generation-time TRI (Taxpayer Return Information) pre-flight
+         * does when `scanForTRI` fires on the assembled prompt.
+         *
+         * **This governs the CONTEXTUAL patterns only.** `SSN` and `EIN` are
+         * identifying and block regardless of this setting — see
+         * `TRI_IDENTIFYING_LABELS` in tri-scanner.ts. One knob covering both
+         * classes is what let a permissive default apply to a real identifier.
+         *
+         * The contextual patterns (`tax-form+amount`, `W2+amount`, …) match any
+         * text naming an IRS form within ~50 characters of a dollar figure —
+         * which is what a *procedure describing how to prepare that form* looks
+         * like. Measured by a full screen of the TWK corpus (858 documents,
+         * 2026-08-01): **`tax-form+amount` matched 316 documents (36.8%) and the
+         * inspected hits were SOPs.** Because one prompt bundles ~12 chunks, a
+         * topically-clustered tax question reliably pulls in a tripping chunk,
+         * so blocking on these makes the assistant fail on the questions it
+         * exists to answer.
+         *
+         * That same screen matched `SSN`/`EIN` on 24 documents — 21 of them
+         * chunked and retrievable — one holding 260 distinct SSN-shaped values.
+         * No corpus-level false-positive rate makes that safe to disclose, which
+         * is why the identifying patterns are not tunable here.
+         *
+         * - `block` — throw `ComplianceError` on any match; no provider call.
+         *   Correct when real client tax documents are in the corpus.
+         * - `warn` — proceed for contextual matches, invoking `onTriDetected` so
+         *   the hit is logged/audited. Identifying matches still throw.
+         * - `off` — skip the scan entirely, which disables the identifier guard
+         *   too. Only correct where no third-party disclosure occurs (e.g.
+         *   self-hosted generation).
+         *
+         * Set via `GENERATION_TRI_POLICY`. **`complianceMode=client-data`
+         * overrides this to `block` at wiring time** (packages/runtime) so a
+         * client-data deployment can never run permissively by omission.
+         */
+        triPolicy: z.enum(["block", "warn", "off"]).default("warn"),
       })
       .optional(),
 
@@ -597,6 +635,8 @@ export function loadConfig(
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
               : undefined,
+            triPolicy: env.GENERATION_TRI_POLICY as
+              "block" | "warn" | "off" | undefined,
           }
         : undefined,
     monitoring: env.SENTRY_DSN ? { sentryDsn: env.SENTRY_DSN } : undefined,
