@@ -63,6 +63,15 @@ const TRI_PATTERNS: TRIPattern[] = [
   {
     label: "EIN",
     // Match dash-separated (12-3456789) and space-separated (12 3456789).
+    //
+    // KNOWN GAP: this matches any two digits, a separator, and seven digits —
+    // a vendor account number or an OCR'd figure can trip it. Because the
+    // identifying class blocks regardless of policy, and `off` (the only
+    // escape) disables SSN detection too, a single false positive can make
+    // every question that retrieves that chunk fail permanently. Adding a
+    // proximity requirement here, or a per-label exemption, needs a decision
+    // and a corpus measurement first:
+    // docs/superpowers/plans/2026-08-31-tri-identifying-pattern-exemptions.md
     regex: /\b\d{2}[-\s]\d{7}\b/,
   },
   {
