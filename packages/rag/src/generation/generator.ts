@@ -5,6 +5,7 @@ import {
   EgressPolicy,
   identifyingTRIPatterns,
   scanForTRI,
+  egressSafeFetch,
 } from "@rag/core";
 import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
 
@@ -262,6 +263,11 @@ export interface GeneratorOptions {
    * as local, so the scan stays under explicit operator control.
    */
   baseURL?: string;
+  /**
+   * Transport override. Present so tests can run without network access; in
+   * production this is left unset and a redirect-refusing wrapper is used.
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -344,7 +350,16 @@ export class GeminiGenerator implements Generator {
       // `GOOGLE_GEMINI_BASE_URL` when this key is absent, which would let an
       // environment variable redirect the client away from the very host
       // `preFlight` asserts against the allow-list.
-      httpOptions: { baseUrl: GEMINI_BASE_URL },
+      httpOptions: {
+        baseUrl: GEMINI_BASE_URL,
+        // NOTE: redirects are NOT refused on this path. @google/genai@1.52.0's
+        // public HttpOptions exposes no `redirect` option and no custom-fetch
+        // hook (only baseUrl/apiVersion/headers/timeout/extraBody/retryOptions),
+        // so the OpenAI path's `egressSafeFetch` has no equivalent here. The
+        // allow-list therefore validates the first hop only for Gemini. See
+        // NO_REDIRECT_INIT in @rag/core; closing this needs an SDK change or a
+        // hand-rolled transport.
+      },
     });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }
@@ -435,6 +450,11 @@ export class OpenAIGenerator implements Generator {
       // client would call a host the pre-flight never checked while the
       // allow-list approved api.openai.com.
       baseURL: this.effectiveBaseURL,
+      // Redirect-refusing by default (the allow-list only sees the first hop).
+      // Injectable so tests can supply a transport: this SDK captures its own
+      // `fetch`, so stubbing `globalThis.fetch` does not intercept it — which
+      // is why this suite used to make real calls to api.openai.com.
+      fetch: (opts.fetch ?? egressSafeFetch()) as unknown as OpenAI["fetch"],
     });
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
   }

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
-import { EgressPolicy, EmbeddingError } from "@rag/core";
+import { EgressPolicy, EmbeddingError, egressSafeFetch } from "@rag/core";
 import { retryOnRateLimit } from "./retry.js";
 
 /**
@@ -46,6 +46,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       // same as the default — the environment variable wins, and would redirect
       // the client away from the very host `assertAllowed` vouches for below.
       baseURL: OPENAI_EMBEDDINGS_BASE_URL,
+      // The allow-list only ever sees the first hop; refuse to follow a 3xx
+      // that would carry the batch somewhere it never validated.
+      fetch: egressSafeFetch() as unknown as OpenAI["fetch"],
     });
     this.model = opts.model ?? "text-embedding-3-small";
     this.dimensions = opts.dimensions ?? 1536;

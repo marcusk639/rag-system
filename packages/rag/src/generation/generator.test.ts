@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 import {
   buildPrompt,
@@ -177,13 +177,47 @@ describe("TRI pre-flight policy", () => {
       "api.openai.com",
     ]),
     triPolicy,
+    // The OpenAI SDK captures its own `fetch`, so globalThis stubbing does not
+    // intercept it — this option is what actually keeps the suite offline.
+    fetch: stubFetch,
     ...(onTriDetected ? { onTriDetected } : {}),
   });
 
-  // `answer()` is driven far enough to run the pre-flight; the provider call
-  // that follows fails on the fake key. `preFlight` runs BEFORE that call, so a
-  // rejection carrying COMPLIANCE_VIOLATION proves the guard fired, and any
-  // other rejection proves it did not.
+  // The transport is stubbed for every test in this block.
+  //
+  // `answer()` has to be driven past the pre-flight to prove the guard fired,
+  // and for the `warn`/`off` cases the pre-flight does NOT throw — so the SDK
+  // call proceeded to a real HTTPS POST to api.openai.com and to Google,
+  // carrying the fixture prompt, on every `pnpm test`. In a suite about egress
+  // control that is the wrong default twice over.
+  //
+  // It also made the assertions dishonest: a firewalled runner's connection
+  // error was indistinguishable from "the pre-flight let it through", so those
+  // tests could never fail for the reason they exist. The OpenAI SDK's defaults
+  // (timeout 600000, maxRetries 2) meant a blackholing network hung for ~30
+  // minutes rather than failing fast.
+  //
+  // The stub rejects with a sentinel, so "the pre-flight passed and the sink
+  // was reached" is now a positive, offline-safe observation rather than an
+  // inference from an arbitrary failure.
+  const TRANSPORT_REACHED = "stubbed-transport-reached";
+
+  const stubFetch = (() =>
+    Promise.reject(new Error(TRANSPORT_REACHED))) as unknown as typeof fetch;
+
+  beforeEach(() => {
+    // Gemini's SDK reads globalThis.fetch, so stubbing it covers that path.
+    vi.stubGlobal("fetch", stubFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // `preFlight` runs BEFORE the provider call. A ComplianceError proves the
+  // guard fired; reaching the stubbed transport proves it did not. Anything
+  // else is a real failure and is reported as such rather than being silently
+  // counted as "passed".
   async function preFlightOutcome(
     gen: {
       answer: (q: string, c: RetrievalResult[]) => Promise<unknown>;
@@ -194,7 +228,18 @@ describe("TRI pre-flight policy", () => {
       await gen.answer("how do we review a return?", context);
       return "passed";
     } catch (err) {
-      return err instanceof ComplianceError ? "blocked" : "passed";
+      if (err instanceof ComplianceError) return "blocked";
+      // Reaching the stubbed transport is the positive signal that the
+      // pre-flight allowed the call through.
+      if (err instanceof Error && err.message.includes(TRANSPORT_REACHED)) {
+        return "passed";
+      }
+      // Some SDKs wrap the cause rather than the message.
+      const cause = (err as { cause?: unknown })?.cause;
+      if (cause instanceof Error && cause.message.includes(TRANSPORT_REACHED)) {
+        return "passed";
+      }
+      throw err;
     }
   }
 

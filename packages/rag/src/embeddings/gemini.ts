@@ -45,7 +45,16 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       // `GOOGLE_GEMINI_BASE_URL` when this key is absent, which would let an
       // environment variable redirect the client away from the host asserted
       // against the allow-list below.
-      httpOptions: { baseUrl: GEMINI_EMBEDDINGS_BASE_URL },
+      httpOptions: {
+        baseUrl: GEMINI_EMBEDDINGS_BASE_URL,
+        // NOTE: redirects are NOT refused on this path. @google/genai@1.52.0's
+        // public HttpOptions exposes no `redirect` option and no custom-fetch
+        // hook (only baseUrl/apiVersion/headers/timeout/extraBody/retryOptions),
+        // so the OpenAI path's `egressSafeFetch` has no equivalent here. The
+        // allow-list therefore validates the first hop only for Gemini. See
+        // NO_REDIRECT_INIT in @rag/core; closing this needs an SDK change or a
+        // hand-rolled transport.
+      },
     });
     this.model = opts.model ?? "gemini-embedding-001";
     this.dimensions = opts.dimensions ?? 768;

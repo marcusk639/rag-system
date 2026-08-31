@@ -1,4 +1,5 @@
 import type { AuditLogRecord, AuditLogSink, EgressPolicy } from "@rag/core";
+import { NO_REDIRECT_INIT } from "@rag/core";
 
 /**
  * Vendor-agnostic HTTPS-webhook audit-log sink. Works identically with
@@ -37,6 +38,9 @@ export class HttpWebhookAuditLogSink implements AuditLogSink {
     }
 
     const response = await fetch(this.opts.url, {
+      // Audit rows must not be re-sent to a redirect target the allow-list
+      // never validated.
+      ...NO_REDIRECT_INIT,
       method: "POST",
       headers,
       body: JSON.stringify(rows),
