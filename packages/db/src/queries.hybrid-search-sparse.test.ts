@@ -61,6 +61,14 @@ function stripComments(sql: string): string {
     .join("\n");
 }
 
+/** The retrieval statement's SQL with comments stripped — what every assertion
+ * here must run against. The SQL explains the fix in prose that names
+ * `to_tsvector`, `quote_literal`, `NULLIF` and the no-match sentinel, so an
+ * assertion against the raw text passes even after a full revert. */
+function codeOf(captured: string[]): string {
+  return stripComments(retrievalSql(captured));
+}
+
 /** The retrieval statement, as opposed to the `SET LOCAL` that precedes it. */
 function retrievalSql(captured: string[]): string {
   const found = captured.find((s) => s.includes("WITH params"));
@@ -84,13 +92,11 @@ describe("hybridSearch — sparse arm uses OR semantics", () => {
 
     // The transaction issues `SET LOCAL hnsw.ef_search` first; the retrieval
     // CTE is the one that carries the tsquery.
-    const sql = retrievalSql(captured);
+    const code = codeOf(captured);
 
     // The OR join is the fix.
-    expect(sql).toContain("' | '");
-    // The AND-semantics builders are what the fix replaced. Checked against the
-    // comment-stripped SQL, since the comment explains what it replaced.
-    const code = stripComments(sql);
+    expect(code).toContain("' | '");
+    // The AND-semantics builders are what the fix replaced.
     expect(code).not.toContain("plainto_tsquery");
     expect(code).not.toContain("websearch_to_tsquery");
   });
@@ -101,8 +107,8 @@ describe("hybridSearch — sparse arm uses OR semantics", () => {
     const captured: string[] = [];
     await hybridSearch(capturingDb(captured), baseOpts);
 
-    expect(retrievalSql(captured)).toContain("tsvector_to_array");
-    expect(retrievalSql(captured)).toContain("to_tsvector");
+    expect(codeOf(captured)).toContain("tsvector_to_array");
+    expect(codeOf(captured)).toContain("to_tsvector");
   });
 
   it("quotes each lexeme so operator characters cannot be parsed as tsquery syntax", async () => {
@@ -116,7 +122,7 @@ describe("hybridSearch — sparse arm uses OR semantics", () => {
       query: "see https://example.com/a?b=1&c=2 for the AR & AP process",
     });
 
-    expect(retrievalSql(captured)).toContain("quote_literal");
+    expect(codeOf(captured)).toContain("quote_literal");
   });
 
   it("degrades to a deliberate no-match tsquery for an all-stop-word question", async () => {
@@ -128,7 +134,7 @@ describe("hybridSearch — sparse arm uses OR semantics", () => {
       query: "how do I do it",
     });
 
-    expect(retrievalSql(captured)).toContain("NULLIF");
-    expect(retrievalSql(captured)).toContain("zzzznomatchzzzz");
+    expect(codeOf(captured)).toContain("NULLIF");
+    expect(codeOf(captured)).toContain("zzzznomatchzzzz");
   });
 });

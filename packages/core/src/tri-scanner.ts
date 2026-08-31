@@ -127,19 +127,24 @@ export const TRI_PATTERN_LABELS: readonly string[] = TRI_PATTERNS.map(
  * Treating those as a hard stop makes the assistant fail on exactly the
  * questions it exists to answer.
  *
- * `SSN`, `SSN-unformatted` and `EIN` are not like that. They match a specific
- * identifier, and in that same screen they hit 24 documents — one holding 260
- * distinct SSN-shaped values, which is a client roster rather than a
- * placeholder. No corpus-level false-positive rate makes it safe to disclose
- * those to a third party.
+ * `SSN` and `EIN` are not like that. They match a specific identifier, and in
+ * that same screen they hit 24 documents — one holding 260 distinct SSN-shaped
+ * values, which is a client roster rather than a placeholder. No corpus-level
+ * false-positive rate makes it safe to disclose those to a third party.
  *
- * `SSN-unformatted` is in this class rather than the contextual one for a
- * reason worth keeping: it was added to close a gap this very split opened.
- * The `SSN` regex matches formatted values only, and its narrowness was
- * justified by `taxpayer+amount` / `tax-form+amount` catching the unformatted
- * rest — which stopped being true the moment those became policy-tunable. A
- * contextual `SSN-unformatted` would reopen the same hole at the `warn`
- * default.
+ * `SSN-unformatted` is in this class for the same reason, but its evidence is
+ * weaker and that is worth stating plainly: it POST-DATES the 858-document
+ * screen above, so its real-world false-positive rate on this corpus is
+ * UNMEASURED. It was added to close a gap this very split opened — the `SSN`
+ * regex matches formatted values only, and its narrowness was justified by
+ * `taxpayer+amount` / `tax-form+amount` catching the unformatted rest, which
+ * stopped being true the moment those became policy-tunable. A contextual
+ * `SSN-unformatted` would reopen that hole at the `warn` default, so it belongs
+ * here; but membership means it hard-blocks regardless of policy, and a known
+ * collision is a 9-digit bank routing number sitting near the words "TIN" or
+ * "Social Security" (e.g. a vendor W-9 note). Re-run the corpus screen with
+ * this pattern before relying on its FP rate, and prefer narrowing the regex
+ * over relaxing the class if it proves noisy.
  *
  * So a single permissive policy must not cover both. Callers are expected to
  * treat an identifying match as a hard stop regardless of how lenient their
