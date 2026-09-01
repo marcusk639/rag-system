@@ -205,7 +205,8 @@ export const Config = z
          * The contextual patterns (`tax-form+amount`, `W2+amount`, …) match any
          * text naming an IRS form within ~50 characters of a dollar figure —
          * which is what a *procedure describing how to prepare that form* looks
-         * like. Measured by a full screen of the TWK corpus (858 documents,
+         * like. Measured by a full screen of a representative accounting-firm
+         * SOP corpus (858 documents,
          * 2026-08-01): **`tax-form+amount` matched 316 documents (36.8%) and the
          * inspected hits were SOPs.** Because one prompt bundles ~12 chunks, a
          * topically-clustered tax question reliably pulls in a tripping chunk,

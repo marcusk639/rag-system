@@ -131,7 +131,8 @@ export const TRI_PATTERN_LABELS: readonly string[] = TRI_PATTERNS.map(
  * The contextual patterns (`tax-form+amount`, `W2+amount`, `schedule+amount`,
  * `1099+amount`, `taxpayer+amount`) match any text naming an IRS form near a
  * dollar figure — which is what a *procedure explaining how to prepare that
- * form* looks like. A screen of the TWK corpus (858 documents) put
+ * form* looks like. A screen of a representative accounting-firm SOP corpus
+ * (858 documents) put
  * `tax-form+amount` on 316 of them, and the inspected hits were SOPs.
  * Treating those as a hard stop makes the assistant fail on exactly the
  * questions it exists to answer.

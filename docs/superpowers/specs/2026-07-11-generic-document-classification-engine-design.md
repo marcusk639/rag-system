@@ -13,7 +13,7 @@
 - `rag-system`'s own repository must contain zero product-specific classification rules, keyword lists, or business logic — only the generic interface, the rule-engine factory, and the generalized scanner. This is the reason this refactor exists; violating it defeats the purpose.
 - The existing `DocumentClass` A-D type and its current consumers are not replaced — the new `DocumentClassifier` interface sits alongside it and produces a compatible `class` value plus new `handlingRules`.
 - The ingestion gate (which tiers may proceed past `ClassBlockedError`) becomes a property of each rule set's declared handling rules, not a hardcoded "Phase 1 only allows A/B" check in the pipeline.
-- Any change to `packages/core`/`packages/ingestion` must keep every existing consumer's test suite green — this repo currently serves at least one production consumer (the CPA/TWK product via `apps/web`) whose classification behavior must not regress during this refactor.
+- Any change to `packages/core`/`packages/ingestion` must keep every existing consumer's test suite green — this repo currently serves at least one production consumer (the CPA/the firm product via `apps/web`) whose classification behavior must not regress during this refactor.
 
 ---
 
@@ -66,7 +66,7 @@ interface ClassificationRule {
 }
 
 interface ClassificationRuleSet {
-  productId: string; // e.g. "cpa-twk", "veteran-claims-app" — for audit/logging only, not branching logic
+  productId: string; // e.g. "cpa-kb", "veteran-claims-app" — for audit/logging only, not branching logic
   rules: ClassificationRule[];
   defaultTier: DocumentClass;
 }

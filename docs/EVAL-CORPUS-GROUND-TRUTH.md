@@ -104,7 +104,7 @@ question is the tedious half of gold-set authoring, and this derives it.
 
 ### 4. A third tier
 
-Add to `ScoringTier` in `twk-gold-set.ts`:
+Add to `ScoringTier` in `gold-set.ts`:
 
 ```ts
 /** Answer vs. what the corpus says. Automatable; does NOT establish correctness. */

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Nightly logical backup of the TWK KB database.
+# Nightly logical backup of the knowledge-base database.
 #
 # Runs as a Railway CRON SERVICE inside the private network — Postgres has no
 # public TCP domain, so this cannot run anywhere else. It must exit cleanly:
@@ -13,7 +13,8 @@
 # BACKUP_DEST selects where the artifact goes:
 #   sharepoint  the intended destination — firm-controlled, needs admin consent
 #   s3          S3-compatible (incl. Railway's own bucket) — STOPGAP ONLY, see below
-#   azure       Azure Blob via container SAS — blocked: TWK has no subscription
+#   azure       Azure Blob via container SAS — blocked where the operating
+#               tenant has no Azure subscription
 #
 # ⚠ s3-to-Railway is a deliberate stopgap, not a backup strategy. It lives with
 # the database it protects, so it does NOT survive project or account loss. It
@@ -25,7 +26,20 @@ set -euo pipefail
 : "${BACKUP_DEST:?BACKUP_DEST is required (sharepoint | s3 | azure)}"
 
 STAMP="$(date -u +%Y-%m-%dT%H%M%SZ)"
-NAME="twk-kb-${STAMP}.sql.gz"
+# Artifact FILENAME prefix. Parameterised rather than hard-coded because it is an
+# OPERATIONAL identifier, not a label: archives already written carry whatever
+# prefix produced them, and the restore procedure matches on it. A deployment
+# with existing backups should set BACKUP_NAME_PREFIX to the prefix those use,
+# or its restore glob stops matching the older half of the archive.
+#
+# Deliberately NOT called BACKUP_PREFIX: that name is already taken, further
+# down, for the upload FOLDER (`PREFIX="${BACKUP_PREFIX:-backups}"`). Assigning
+# BACKUP_PREFIX here would kill that default and silently relocate every upload
+# from `backups/` to the filename prefix — backups would keep succeeding, the
+# heartbeat would keep firing, and the runbook's own verification step would
+# keep listing the old folder full of healthy-looking historical files.
+BACKUP_NAME_PREFIX="${BACKUP_NAME_PREFIX:-kb}"
+NAME="${BACKUP_NAME_PREFIX}-${STAMP}.sql.gz"
 OUT="/tmp/${NAME}"
 
 log() { echo "[backup] $*"; }

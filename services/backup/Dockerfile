@@ -1,4 +1,4 @@
-# Nightly backup cron service for the TWK KB database.
+# Nightly backup cron service for the knowledge-base database.
 #
 # Base is postgres:16 to guarantee the pg_dump MAJOR version matches the server
 # (production is 16.14). A pg_dump older than the server refuses to run; a
