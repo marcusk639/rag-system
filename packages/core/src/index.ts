@@ -12,3 +12,4 @@ export * from "./auth-provider-factory.js";
 export * from "./egress-policy.js";
 export * from "./generation-credentials.js";
 export * from "./tri-scanner.js";
+export * from "./content-safety.js";

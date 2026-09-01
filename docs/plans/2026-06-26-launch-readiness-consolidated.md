@@ -1,9 +1,23 @@
 # Launch Readiness — Consolidated Plan (tenant #1, cloud-with-DPA)
 
-**Status:** Active. Single source of truth. Supersedes the conflicting framing of
-`docs/PLAN-LAUNCH-READINESS.md` (2026-06-14) and
-`docs/plans/2026-06-21-prelaunch-hardening-plan.md` (2026-06-21) — keep those for
-their detailed copy-patterns, but this file owns priority and sequencing.
+**Status:** Active **for priority and sequencing only** (scope narrowed 2026-08-03).
+Supersedes the conflicting framing of `docs/PLAN-LAUNCH-READINESS.md` (2026-06-14)
+and `docs/plans/2026-06-21-prelaunch-hardening-plan.md` (2026-06-21) — keep those
+for their detailed copy-patterns, but this file owns priority and sequencing.
+
+> ⚠ **This file is not the source of truth for current state**, despite the
+> earlier "Single source of truth" wording. For what is actually deployed, what
+> the open gates are, and what is known broken, read
+> [`../TWK-LAUNCH-STATUS.md`](../TWK-LAUNCH-STATUS.md).
+>
+> ⚠ **The §7216 reconciliation below rests on a falsified premise.** It concludes
+> the self-host build is off the critical path because _"Onvio — not SharePoint —
+> is the system of record for client engagement files."_ Onvio is not connected,
+> but the SharePoint KB was never checked until 2026-08-03, and the screen found
+> client billing files, engagement letters, and a 522-SSN roster inside it. The
+> residual control this section names — _"curate/spot-check out any stray client
+> examples"_ — was the right action and was never executed. See
+> [`../TWK-LAUNCH-STATUS.md`](../TWK-LAUNCH-STATUS.md).
 
 **Goal:** Take the RAG service from "feature-complete + partially hardened" to
 "safe to run with the firm's own SharePoint KB," launching on the **enterprise

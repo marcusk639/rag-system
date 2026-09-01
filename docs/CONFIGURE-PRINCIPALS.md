@@ -1,5 +1,7 @@
 # Configuring API Principals and Source Access
 
+**Status:** Current · **Updated:** 2026-08-03
+
 Step-by-step guide for setting up `API_PRINCIPALS` — the per-token source-ID
 access control that walls staff off from clients they don't work.
 

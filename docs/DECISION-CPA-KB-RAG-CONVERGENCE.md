@@ -93,5 +93,24 @@ May–September.
 - `cpa-knowledge-base` is marked deprecated (see its `README.md`); no further
   feature work there.
 - All chat-UI work happens in `rag-system/apps/web`.
-- New contributors should read this memo plus `PLAN-LAUNCH-READINESS.md` for the
-  current go-live checklist.
+- ~~New contributors should read this memo plus `PLAN-LAUNCH-READINESS.md` for the
+  current go-live checklist.~~ **Corrected 2026-08-03:** `PLAN-LAUNCH-READINESS.md`
+  is superseded. New contributors should read this memo plus
+  [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) (what is true now) and
+  [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md)
+  (priority and sequencing).
+
+> ### ⚠ One premise in §5 is falsified (marked 2026-08-03)
+>
+> Item 5 above reasons that _"real client data lives in Onvio, so **IRC §7216
+> self-hosted embeddings is NOT a launch gate** for tenant #1."_ Onvio is indeed
+> not connected — but the inference that the SharePoint KB is therefore free of
+> client data is wrong. A screen of all 858 indexed documents found client
+> billing files, engagement letters, and one spreadsheet holding 522 SSN-shaped
+> values. See [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) for the full
+> correction.
+>
+> The convergence decision itself is unaffected — it is about which codebase to
+> build on, not about corpus contents. What is affected is item 5's conclusion
+> that the proportionate action is merely "curating the few real client examples
+> out of scope": there are more than a few, and that curation was never done.

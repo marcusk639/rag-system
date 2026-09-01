@@ -6,6 +6,21 @@
 
 **How to use this:** Work items in the stated order within each priority tier — later items in P0 generally depend on earlier ones being at least started. Each item has a **Why**, an **Exact steps** section, a **Done when** checkpoint, and a **Depends on / blocks** line. Nothing here is legal advice; item 2 exists specifically because you need real legal advice, not this document's approximation of it.
 
+> ### ⚠ Completion status lives in `TWK-LAUNCH-STATUS.md`, not here (marked 2026-08-03)
+>
+> This file is the **procedure** source — what to do and how. It is not reliably
+> current about **what is already done**, because items get completed and recorded
+> in [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) without being marked here.
+> Known as of 2026-08-03:
+>
+> | Item                         | Written below as                                   | Actually                                                                                                                                                                                                                                                                                                                         |
+> | ---------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | **1. Audit what's indexed**  | Not started                                        | **In progress with a finding** — the deterministic screen has run over all 858 documents and found client-identifying material. The human review is what remains. See the correction in `TWK-LAUNCH-STATUS.md` and the plan in `superpowers/plans/2026-08-03-kb-content-boundary.md`                                             |
+> | **3. Verify backup/restore** | "you've personally watched a restore succeed once" | **Done 2026-07-31**, both legs, on real production data — [`BACKUP-RESTORE-DRILL.md`](./BACKUP-RESTORE-DRILL.md). Scheduled backups added 2026-08-01 — [`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md). Still open: an off-Railway destination (blocked on admin consent) and a restore _from a scheduled artifact_ |
+> | **4. Deploy `apps/web`**     | Pending, "confirm you personally can sign in"      | **Live since 2026-08-01**, auth-gated and verified. The Teams-bot half is blocked on an Azure subscription                                                                                                                                                                                                                       |
+>
+> Read the **Why** and **Exact steps** here; read status there.
+
 ---
 
 ## P0 — STOP: these are gates, not backlog
