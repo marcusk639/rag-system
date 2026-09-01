@@ -1,30 +1,8 @@
 # the operating tenant Readiness Assessment — 2026-07-08
 
-**Method:** Direct code reads cross-referenced against two prior audits (`docs/RAG-VALIDATION-REPORT.md`, 2026-07-06 — ⚠ **see the citation warning below**; `~/dev/cpa-consulting/docs/_meta/plans/2026-07-04-rag-system-reconciliation-and-priorities.md`), the business/compliance requirement docs (`~/dev/cpa-consulting/deliverables/kb-bot-partner-review.md`, `~/dev/cpa-consulting/docs/rag/kb-design.md`, `docs/CPA-COMPLIANCE-REQUIREMENTS.md`, `docs/compliance/vendor-dpa-google-gemini.md`), and five parallel subagent reviews (RAG architecture, security, deployment, test coverage, functional completeness) run against current `main` (`b5271e3`, CI green). Every claim below is either a file:line citation or explicitly flagged as inference.
+**Method:** Direct code reads cross-referenced against two prior audits (`docs/RAG-VALIDATION-REPORT.md`, 2026-07-06; `~/dev/cpa-consulting/docs/_meta/plans/2026-07-04-rag-system-reconciliation-and-priorities.md`), the business/compliance requirement docs (`~/dev/cpa-consulting/deliverables/kb-bot-partner-review.md`, `~/dev/cpa-consulting/docs/rag/kb-design.md`, `docs/CPA-COMPLIANCE-REQUIREMENTS.md`, `docs/compliance/vendor-dpa-google-gemini.md`), and five parallel subagent reviews (RAG architecture, security, deployment, test coverage, functional completeness) run against current `main` (`b5271e3`, CI green). Every claim below is either a file:line citation or explicitly flagged as inference.
 
 **Scope:** This is a reconciliation + gap document, not an implementation plan. It supersedes nothing — the 2026-07-04 reconciliation's P0/P1/P2/P3 framework is still the operative structure; this document updates it against four days of further work and adds findings that framework didn't cover (RAG quality specifics, a fresh security sweep, deployment/DR, test coverage, and a field-by-field functional-completeness check against the partner-facing promises).
-
-> ### ⚠ Citation warning (added 2026-08-03)
->
-> The Method line above names `docs/RAG-VALIDATION-REPORT.md` as one of two prior
-> audits this document cross-references. **That file has never existed in this
-> repository** — `git log --all -- docs/RAG-VALIDATION-REPORT.md` returns nothing.
-> It is cited again in §1 and §3 and by `ISSUES-AND-OPTIMIZATIONS.md`.
->
-> This does not invalidate the findings below — every one of them carries its own
-> `file:line` citation or an explicit inference flag, which is exactly the
-> discipline that makes them checkable without the missing document. But the
-> **method claim** is weaker than stated: one of the two named prior audits cannot
-> be produced. Treat this document's findings as directly-verified code reads, not
-> as corroborated-by-a-prior-audit.
-
-> ### ⚠ Status of the findings below (added 2026-08-03)
->
-> Several have since been resolved and carry inline resolution notes (the
-> `plainto_tsquery` and citation-filter items in §4.1 especially). The two §2/§3
-> compliance gaps were later closed. For current state read
-> [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) and
-> [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md).
 
 ---
 

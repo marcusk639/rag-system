@@ -1,9 +1,9 @@
-# KB Content Boundary — keeping the corpus to "how TWK does things"
+# KB Content Boundary — keeping the corpus to "how the firm does things"
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Make the indexed corpus contain **only firm-procedure content** — how to
-perform TWK tasks — and keep client-identifying material out of it, out of
+perform the firm tasks — and keep client-identifying material out of it, out of
 citations, and out of anything sent to a third-party model.
 
 > ## ⛔ Read this first: it is not hypothetical any more
@@ -31,7 +31,7 @@ citations, and out of anything sent to a third-party model.
 > `corpus-analysis/inventory.jsonl` when you need specific `externalId`s — do not
 > copy them here.
 >
-> **`docs/TWK-LAUNCH-STATUS.md` stated the opposite until 2026-08-03** — _"no
+> **`docs/PILOT-LAUNCH-STATUS.md` stated the opposite until 2026-08-03** — _"no
 > client files… §7216 attaches to taxpayer data; this corpus has none, which is
 > why a scoped pilot is defensible without counsel sign-off."_ ✅ **That file has
 > since been corrected** (see its "⛔ Read first" block and P0 gate #1); the quote
@@ -86,7 +86,7 @@ Python/FastAPI parser, vitest.
 
 - **Never hard-delete to implement exclusion.** `PLAN-CPA-COMPLIANCE.md:208-209`: _"Do not hard-delete anything (documents, sources, audit rows) to implement 'archive' — status-flip only."_ §7216 requires grant/È history be reconstructible; the same reasoning applies here.
 - **`content_type` is NOT a compliance control.** `schema.ts:60-64` and `PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md:200-202`: _"gating logic must never read one where it means the other."_ Use `data_class`/`DocumentClass` for sensitivity; `content_type` is a librarian taxonomy only.
-- **No product-specific rules in `rag-system`.** The classification-engine design (`specs/2026-07-11-generic-document-classification-engine-design.md:13`) is explicit: _"`rag-system`'s own repository must contain zero product-specific classification rules, keyword lists, or business logic… violating it defeats the purpose."_ TWK folder names and client names belong in injected config, never in a committed source file.
+- **No product-specific rules in `rag-system`.** The classification-engine design (`specs/2026-07-11-generic-document-classification-engine-design.md:13`) is explicit: _"`rag-system`'s own repository must contain zero product-specific classification rules, keyword lists, or business logic… violating it defeats the purpose."_ the firm folder names and client names belong in injected config, never in a committed source file.
 - All DB access via `@rag/db`; production walks use `createReadOnlyDb` + `assertReadOnly`.
 - Bound new client-supplied inputs with zod caps.
 - Commit format `<type>: <description>`. Pre-commit runs prettier + secret scan + 800-line cap — never `--no-verify`.
@@ -103,7 +103,7 @@ This is why a 522-SSN roster was indexed without anything objecting.
 | #   | Finding                                                                                                                                                                                    | Evidence                                                                                                                            |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | `docClass` is stamped from the **source**, not the document: `const docClass = deps.sourceDocClass ?? "A"`. Every document in a `general` source is Class A **regardless of its content**. | `packages/ingestion/src/pipeline.ts:148`; `classify-source.ts:24-42` (`general`→A).                                                 |
-| 2   | All 3 TWK sources are `data_class = general`. So all 858 documents are stamped Class A.                                                                                                    | `docs/TWK-LAUNCH-STATUS.md:142-143`.                                                                                                |
+| 2   | All 3 the firm sources are `data_class = general`. So all 858 documents are stamped Class A.                                                                                               | `docs/PILOT-LAUNCH-STATUS.md:142-143`.                                                                                              |
 | 3   | The ingest-time TRI scan **deliberately never blocks** — it logs `action:"tri-flagged"` and continues.                                                                                     | `pipeline.ts:306-323`: _"Ingestion is NOT blocked — these are client tax documents and storing them is the purpose of the system."_ |
 | 4   | So there is **no per-document sensitivity gate anywhere in ingest.** The only gate (`ClassBlockedError`) fires on a source-level declaration nobody set.                                   | `pipeline.ts:245`.                                                                                                                  |
 
@@ -147,7 +147,7 @@ already inside a structurally-excludable folder             258   (73%)
   → residual requiring genuine human review                  97
 ```
 
-Excludable folders, by document count: `TWK_KB_SANDBOX` **320**, `Draft Working
+Excludable folders, by document count: `the firm_KB_SANDBOX` **320**, `Draft Working
 Procedures` **226**, `Client Service Package Files` **189**, `**/Archive/` **51**.
 
 **This is the plan's central argument: an inclusion rule over folder structure
@@ -158,7 +158,7 @@ mis-classify a staff name as a client name.
 
 ## 0e. The inclusion criterion already exists, in the firm's own words
 
-You asked for a corpus containing "only data regarding how to perform TWK
+You asked for a corpus containing "only data regarding how to perform the firm
 tasks." **POL-01 §2 line 63 states that as a one-sentence test**, and it is a
 better criterion than anything an engineer would invent:
 
@@ -255,7 +255,7 @@ is being executed.
 
 - [ ] **Task 1.1 — Remove the roster from the index.** Identify `Client List & Priorities for Sending Out` by `externalId` from `corpus-analysis/inventory.jsonl`, then delete the document + its chunks via `deleteDocumentByExternalId` (`queries.ts:390`, FK-cascades to chunks). This is removal from an **index**, not destruction of a firm record — the file stays in SharePoint. Note it explicitly in the commit message so it is not mistaken for the banned "hard-delete as archive."
 - [ ] **Task 1.2 — Triage the other 16 identifying hits** from `corpus-analysis/`. `PERSONAL STATEMENT IN SUPPORT OF CLAIM` (×6 duplicates), `EIN Ltr`, `Pay.gov - Confirmation` read as client documents; `Auction Letter - Sample`, `Sponsor Letter - Sample`, `Sample SBA EIDL … - Redacted` read as templates and are probably fine. **Do not decide this alone — it is a firm judgment.** Produce the list; Chris or Doug rules.
-- [ ] **Task 1.3 — Correct `docs/TWK-LAUNCH-STATUS.md:142-147`.** Replace "this corpus has none" with what the screen actually found, and mark P0 gate #1 as **in progress with a finding**, not merely open. This project has a documented history of stale "resolved" claims creating false confidence; this is the highest-stakes instance of it.
+- [ ] **Task 1.3 — Correct `docs/PILOT-LAUNCH-STATUS.md:142-147`.** Replace "this corpus has none" with what the screen actually found, and mark P0 gate #1 as **in progress with a finding**, not merely open. This project has a documented history of stale "resolved" claims creating false confidence; this is the highest-stakes instance of it.
 - [ ] **Task 1.4 — Re-verify after removal.** Re-run `scripts/extract-corpus.ts` (screen only, no `--extract`) and confirm the identifying-pattern counts drop to the expected residual. The corpus fingerprint will change — that is correct, and it invalidates any sign-off, by design (`screen-gate.ts:23-28`).
 
 **Verify:** `ssn`/`ein`/`bank-account` document counts in the regenerated
@@ -279,7 +279,7 @@ expressible today.
 - [ ] **Task 2.1 — Failing tests first.** Extend `connectors/src/sharepoint/index.test.ts` (198 lines — read it for the `GraphReader` fake pattern). Assert: a `DriveItem` whose `parentReference.path` matches an exclude pattern is **not** returned by `list()`, and is not counted as a document; and that an excluded item still surfaces its **tombstone** if deleted (deletions are collected independently of the document budget at `sharepoint/index.ts:159-162` — don't break that).
 - [ ] **Task 2.2 — Add `excludePaths: string[]` to `SharePointConfigSchema`**, matched against the same `path` the connector already builds at `sharepoint/index.ts:315-321`. Use simple case-insensitive substring/prefix matching, **not** a regex from config — a regex in a JSONB config column is an injection and ReDoS surface for no benefit here.
 - [ ] **Task 2.3 — Apply the filter in `fetchPage`** alongside the existing folder/oversize skips (`index.ts:163-185`), and **count skips** the way `skippedOversize` already is, so exclusion is observable in the run summary rather than silent.
-- [ ] **Task 2.4 — Configure TWK's sources.** Exclude `Client Service Package Files`, `TWK_KB_SANDBOX`, `Draft Working Procedures`, `Archive`. **These strings go in the source's `config` JSONB — never in a committed `.ts` file** (Global Constraints; the classification design's zero-product-rules requirement).
+- [ ] **Task 2.4 — Configure the firm's sources.** Exclude `Client Service Package Files`, `the firm_KB_SANDBOX`, `Draft Working Procedures`, `Archive`. **These strings go in the source's `config` JSONB — never in a committed `.ts` file** (Global Constraints; the classification design's zero-product-rules requirement).
 - [ ] **Task 2.5 — Full resync** so exclusions take effect. Delta sync will not retroactively remove already-indexed documents; reconcile explicitly (Task 6.2).
 
 **Anti-pattern guards:** do not put client names in an exclude list — exclude
@@ -287,7 +287,7 @@ _containers_, not identities; the list must stay stable as clients change. Do no
 implement this as a post-retrieval filter — the point is that the bytes never
 enter the corpus, are never embedded, and never reach a third-party model.
 
-**Open question for Chris/Doug, not for engineering:** `TWK_KB_SANDBOX` (320) and
+**Open question for Chris/Doug, not for engineering:** `the firm_KB_SANDBOX` (320) and
 `Draft Working Procedures` (226) are 64% of the corpus. Excluding both is
 defensible for a "how do we do things" assistant — a draft in a staff member's
 folder is not firm procedure — but it is a **content decision with a large
@@ -302,7 +302,7 @@ Titles and paths reach every surface regardless of the prompt (§0b). Even a
 perfectly filtered corpus should not re-open this the first time a client-named
 file is added.
 
-- [ ] **Task 3.1 — Decide the `path` exposure.** `path` is on `EXPOSABLE_METADATA_FIELDS` for display/filtering, but the TWK corpus proves paths carry client identity. Options: drop `path` from the allowlist; or expose only the leading N segments. **Preferred: drop it.** Nothing in the web or Teams UI renders `path` today — grep before deciding, and if nothing consumes it, this costs nothing.
+- [ ] **Task 3.1 — Decide the `path` exposure.** `path` is on `EXPOSABLE_METADATA_FIELDS` for display/filtering, but the firm corpus proves paths carry client identity. Options: drop `path` from the allowlist; or expose only the leading N segments. **Preferred: drop it.** Nothing in the web or Teams UI renders `path` today — grep before deciding, and if nothing consumes it, this costs nothing.
 - [ ] **Task 3.2 — Failing test in `metadata-policy.test.ts`** (155 lines, existing allowlist tests) pinning the new shape.
 - [ ] **Task 3.3 — Title is harder and must not be silently mangled.** A citation with no title is useless. Do **not** regex-scrub names out of titles — `Terranova Williams Klein CPA's, LLC_Customer Phone List` shows the firm's own name matches any person-name pattern. The correct control is Phase 2 (the document should not be in the corpus) plus Phase 4 (it should not have been ingested). **Record this as a deliberate non-fix**, with the reasoning, so nobody "improves" it later with a name scrubber.
 
@@ -325,7 +325,7 @@ folder carrying the _wrong_ content.
 # Phase 5 — Human review of the residual, and the sign-off
 
 - [ ] **Task 5.1 — Generate a review packet** for the **97 flagged documents not covered by structural exclusion** (§0d). Group by pattern; put the 279 `tax-form-with-data`-only documents in a separate bulk-clear list with a one-line explanation of why they are expected false positives.
-- [ ] **Task 5.2 — Run the session with Chris/Doug**, using POL-01's own Class A test as the instrument (§0e): _"Would this be equally true if we had no clients at all?"_ plus the tie-breaker _"when you cannot tell, it is the higher class."_ This is P0 gate #1 and needs firm judgment, not an attorney (`TWK-LAUNCH-STATUS.md:146-147`). Two decisions belong to them, not to engineering: **(a)** whether to exclude `TWK_KB_SANDBOX` and `Draft Working Procedures` (64% of the corpus — Phase 2's open question); **(b)** whether the pilot indexes **Class A only**, which is the simplest resolution to the unbuilt Class B de-identification obligation (§0e).
+- [ ] **Task 5.2 — Run the session with Chris/Doug**, using POL-01's own Class A test as the instrument (§0e): _"Would this be equally true if we had no clients at all?"_ plus the tie-breaker _"when you cannot tell, it is the higher class."_ This is P0 gate #1 and needs firm judgment, not an attorney (`PILOT-LAUNCH-STATUS.md:146-147`). Two decisions belong to them, not to engineering: **(a)** whether to exclude `the firm_KB_SANDBOX` and `Draft Working Procedures` (64% of the corpus — Phase 2's open question); **(b)** whether the pilot indexes **Class A only**, which is the simplest resolution to the unbuilt Class B de-identification obligation (§0e).
 - [ ] **Task 5.3 — Record the sign-off** at `corpus-analysis/screen-signoff.json` in the exact shape `evaluateExtractionGate` requires (`screen-gate.ts:42-52`): `approvedBy`, `approvedOn`, `corpusFingerprint`, `clearedExternalIds`, `excludedExternalIds`. **Every flagged id must appear in one list or the other** — the gate rejects partial sign-off (`:134-146`), and _"silence is not a clearance."_
 - [ ] **Task 5.4** — Feed `excludedExternalIds` back into Phase 2's exclusion config and Phase 4's quarantine list.
 
@@ -351,5 +351,5 @@ this is dirty" into "we believe this is clean."
 - [ ] `node -e` over `inventory.jsonl`: no document **title** matches `/[A-Z][a-z]+,\s*[A-Z][a-z]+/` except known firm entities.
 - [ ] `corpus-analysis/screen-signoff.json` exists, and `evaluateExtractionGate(state, signoff)` returns `allowed: true` against the **current** fingerprint.
 - [ ] **Manual, and the real test:** ask the assistant a question that used to retrieve a client billing file (e.g. "what's our package pricing?") and confirm no client name appears in the answer **or in any citation title**.
-- [ ] `docs/TWK-LAUNCH-STATUS.md` no longer claims the corpus contains no client data, and P0 gate #1 reflects the finding and its resolution.
+- [ ] `docs/PILOT-LAUNCH-STATUS.md` no longer claims the corpus contains no client data, and P0 gate #1 reflects the finding and its resolution.
 - [ ] Update `docs/PROTOTYPE-READINESS-REVIEW-2026-08-01.md`'s closing "note on the corpus" — it flagged one client identifier in an SOP; the screen found substantially more.

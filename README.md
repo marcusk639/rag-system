@@ -74,6 +74,6 @@ See [`docs/`](./docs) for deeper topics:
 
 **Deployed and running a scoped pilot** (first deployment: an accounting firm's internal SharePoint knowledge base, ~858 documents). The API, MCP server, worker, and web chat UI run on Railway; the Teams bot is built and merged but not yet deployed.
 
-For what is actually true right now — deployed surfaces, open gates, and known defects — see [`docs/TWK-LAUNCH-STATUS.md`](./docs/TWK-LAUNCH-STATUS.md). Do not treat any `docs/PLAN-*.md` checkbox as a status signal; those are execution guides, not trackers.
+For what is actually true right now — deployed surfaces, open gates, and known defects — see [`docs/PILOT-LAUNCH-STATUS.md`](./docs/PILOT-LAUNCH-STATUS.md). Do not treat any `docs/PLAN-*.md` checkbox as a status signal; those are execution guides, not trackers.
 
 A full map of the documentation set is in [`docs/README.md`](./docs/README.md).

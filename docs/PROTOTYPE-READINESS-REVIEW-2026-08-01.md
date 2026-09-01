@@ -6,9 +6,9 @@ staff asking questions in MS Teams get substantive, accurate, properly cited
 answers about firm processes, SOPs, and general knowledge?_
 **Method:** Code read of the full path (SharePoint → parse → chunk → embed →
 hybrid retrieve → generate → surface), plus **measurement against the firm's real
-SOP corpus** (112 documents / 321 chunks extracted from `~/dev/cpa-consulting/docs/TWK SOPs`)
+SOP corpus** (112 documents / 321 chunks extracted from `~/dev/cpa-consulting/docs/the firm's SOPs`)
 and against the live evaluation harness.
-**Companion docs:** [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) (what is
+**Companion docs:** [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) (what is
 deployed), [`EVAL-BASELINE.md`](./EVAL-BASELINE.md) (retrieval numbers),
 [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md) (standing backlog).
 
@@ -66,7 +66,7 @@ unobtainable for a normal question a staff member would actually ask.
 | **M-7**  | 🟡       | `pnpm typecheck` is red on `main`; the launch doc claims the gate is green           | Documented         |
 | **M-8**  | 🟡       | Teams collapses every non-2xx into one undifferentiated message                      | Documented         |
 | **M-9**  | 🟡       | ~40 calculator spreadsheets chunk into meaningless rows                              | Documented         |
-| **M-10** | 🟡       | `pnpm eval:twk` documented but absent; `run-real-eval.ts` truncates the DB           | Documented         |
+| **M-10** | 🟡       | `pnpm eval:kb` documented but absent; `run-real-eval.ts` truncates the DB            | Documented         |
 | **L-1**  | 🟢       | Teams bot logs via `console.*`, against repo convention                              | Documented         |
 | **L-2**  | 🟢       | `WEB_AUTH_MODE=static-fallback` has no expiry or alert                               | Documented         |
 | **L-3**  | 🟢       | Teams bot is single-instance only (`MemoryStorage`)                                  | Documented         |
@@ -113,7 +113,7 @@ form**. It is what the firm's most valuable documents look like.
 ### Measurement against the firm's real corpus
 
 I extracted text from all 112 parseable documents under
-`~/dev/cpa-consulting/docs/TWK SOPs` and ran the actual scanner:
+`~/dev/cpa-consulting/docs/the firm's SOPs` and ran the actual scanner:
 
 | Metric                                         | Result              |
 | ---------------------------------------------- | ------------------- |
@@ -215,7 +215,7 @@ precisely what staff type.
 
 ### ⚠ The fix recorded in the docs would not have worked
 
-[`TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md:77`](./TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md)
+[`CPA-READINESS-ASSESSMENT-2026-07-08.md:77`](./CPA-READINESS-ASSESSMENT-2026-07-08.md)
 flags this at **LOW/MEDIUM** and prescribes `websearch_to_tsquery` as "the
 standard, low-effort fix." It is not a fix — `websearch_to_tsquery` also ANDs:
 
@@ -487,7 +487,7 @@ error, defeats that story silently — and it degrades exactly on the multi-sour
 synthesis answers the prompt works hardest to produce.
 
 **Credit where due:** this was correctly identified as MEDIUM in
-[`TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`](./TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md)
+[`CPA-READINESS-ASSESSMENT-2026-07-08.md`](./CPA-READINESS-ASSESSMENT-2026-07-08.md)
 on 2026-07-08 and sat open for three weeks. Confirming an old finding is still
 live is cheaper than finding it, and worth doing routinely.
 
@@ -559,7 +559,7 @@ Read the typed column instead, and assert it is present.
 **M-7 — `pnpm typecheck` is red on `main`.** Five errors in
 `tests/e2e/src/specs/eval-faithfulness.spec.ts` (missing `.js` extensions under
 `nodenext`, three implicit `any`). Verified pre-existing by stashing my changes.
-[`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) records the engineering go-live
+[`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) records the engineering go-live
 gate as **"Green — build + typecheck + lint + unit all pass on `main`."** That is
 now stale, in a document whose stated purpose is to be the one place that is not.
 
@@ -575,11 +575,11 @@ chunk into rows of formula output with no procedural content — retrievable noi
 that competes for context slots. A metadata-driven exclusion (or a folder-level
 source filter) is a cheap, large win for precision.
 
-**M-10 — Eval-harness hazards.** `pnpm eval:twk` is referenced by
-`twk-gold-set.ts` but defined in no `package.json`. More seriously,
+**M-10 — Eval-harness hazards.** `pnpm eval:kb` is referenced by
+`gold-set.ts` but defined in no `package.json`. More seriously,
 `run-real-eval.ts` calls `truncateAll` — `TRUNCATE TABLE chunks, documents,
 ingestion_jobs, sources RESTART IDENTITY CASCADE`. It is the natural file to copy
-when building a TWK gold-set runner, and pointing that copy at production would
+when building a gold-set runner, and pointing that copy at production would
 destroy the index. Both are already recorded as C3/C4 in
 [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md); repeated here
 because the gold-set work that would trigger it is the next thing scheduled.

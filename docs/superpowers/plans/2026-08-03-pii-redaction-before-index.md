@@ -1,6 +1,6 @@
 # PII redaction before chunking, indexing, or storage
 
-**Status:** design — not built. **Blocks:** re-ingestion of the TWK corpus.
+**Status:** design — not built. **Blocks:** re-ingestion of the firm corpus.
 **Context:** the index was purged 2026-08-03 after a screen found client
 identifiers in 355 of 858 documents. Nothing is re-ingested until this exists.
 

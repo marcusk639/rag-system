@@ -8,7 +8,7 @@ for their detailed copy-patterns, but this file owns priority and sequencing.
 > ⚠ **This file is not the source of truth for current state**, despite the
 > earlier "Single source of truth" wording. For what is actually deployed, what
 > the open gates are, and what is known broken, read
-> [`../TWK-LAUNCH-STATUS.md`](../TWK-LAUNCH-STATUS.md).
+> [`../PILOT-LAUNCH-STATUS.md`](../PILOT-LAUNCH-STATUS.md).
 >
 > ⚠ **The §7216 reconciliation below rests on a falsified premise.** It concludes
 > the self-host build is off the critical path because _"Onvio — not SharePoint —
@@ -17,7 +17,7 @@ for their detailed copy-patterns, but this file owns priority and sequencing.
 > client billing files, engagement letters, and a 522-SSN roster inside it. The
 > residual control this section names — _"curate/spot-check out any stray client
 > examples"_ — was the right action and was never executed. See
-> [`../TWK-LAUNCH-STATUS.md`](../TWK-LAUNCH-STATUS.md).
+> [`../PILOT-LAUNCH-STATUS.md`](../PILOT-LAUNCH-STATUS.md).
 
 **Goal:** Take the RAG service from "feature-complete + partially hardened" to
 "safe to run with the firm's own SharePoint KB," launching on the **enterprise

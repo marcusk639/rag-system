@@ -203,7 +203,7 @@ retention surface this system has deliberately never had.** `audit_log` stores
 only `questionHash` — _"SHA-256 of the question text (no raw PII stored here)"_
 (`schema.ts:363-364`) — and the docs-gap digest was built aggregate-only for the
 same reason. Whether to retain question text is **already an open, unowned
-decision** (TWK launch status P1 #5, _"a real privacy tradeoff; Marcus's call"_).
+decision** (the firm launch status P1 #5, _"a real privacy tradeoff; Marcus's call"_).
 Full transcripts are a strictly larger version of that same undecided question.
 Ephemeral history buys the usability win **without forcing it**, and preserves
 the deliberate `PLAN-CHAT-FRONTEND.md:10` ephemeral-sessions decision.

@@ -5,7 +5,7 @@
 > This document called itself _"the authoritative master plan."_ It was, on
 > 2026-06-08. It is not now, and three other documents have since made the same
 > claim over overlapping ground. **Current authority:**
-> [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) for what is true,
+> [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) for what is true,
 > [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md)
 > for priority and sequencing, and
 > [`superpowers/specs/2026-08-03-multi-vertical-rag-platform-design.md`](./superpowers/specs/2026-08-03-multi-vertical-rag-platform-design.md)
