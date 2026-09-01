@@ -29,13 +29,13 @@ collapses all of them onto one pack-declared set.
 
 ## 2. Decisions taken in brainstorming
 
-| #   | Decision                                                                                                                                                                                                                                                                                  |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Scope is **discovery + inventory**: a read-only pass producing evidence. No automated remediation.                                                                                                                                                                                        |
-| D2  | **Raw identifier values are never stored — including inside stored context.** Findings carry a locator and shape-preserving masks; context windows are themselves redacted before persistence. The true value is resolved on demand from the source under the reviewer's own permissions. |
-| D3  | Patterns are **pack data**, not code. The scanner engine is generic; TRI-ness lives in `packs/cpa/`.                                                                                                                                                                                      |
-| D4  | The registry and its API live in **`apps/api` with their own tables**; the scan runs as a job independent of ingestion. Designed for later extraction into a separate app.                                                                                                                |
-| D5  | Where PR #41 and the multi-vertical spec conflict, **the spec governs**: disposition is pack-declared with `exclude` as the default for `identifying`. PR #41 is the engine, not the policy.                                                                                              |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                       |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Scope is **discovery + inventory**: a read-only pass producing evidence. No automated remediation.                                                                                                                                                                                                                                             |
+| D2  | **Raw identifier values are never stored — including inside stored context.** Findings carry a locator and shape-preserving masks; context windows are themselves redacted before persistence. The true value is resolved on demand from the source under the reviewer's own permissions.                                                      |
+| D3  | Patterns are **pack data**, not code. The scanner engine is generic; TRI-ness lives in `packs/cpa/`.                                                                                                                                                                                                                                           |
+| D4  | The registry and its API live in **`apps/api` with their own tables**; the scan runs as a job independent of ingestion. Designed for later extraction into a separate app.                                                                                                                                                                     |
+| D5  | **Corrected 2026-09-01.** An earlier draft held that where PR #41 and this spec conflicted, the spec governed — on the mistaken reading that #41 redacted unconditionally. It does not: redaction is Layer 1 egress protection, and disposition is Layer 3 class escalation with quarantine. **#41's model governs**, and §4 is aligned to it. |
 
 ## 3. The pack scanner slice
 
@@ -131,57 +131,55 @@ YAML.
 
 ## 4. Disposition — protecting the corpus without hollowing it out
 
-Disposition is a function of **`(scanner kind, document class)`**, not scanner
-alone. A stray SSN in a genuine SOP and an SSN in a client roster are the same
-match and warrant opposite treatment.
+**This section was wrong in the first two drafts and is now aligned to the
+implementation in PR #41, which is stricter and better reasoned than what this spec
+originally proposed.** The earlier version had an identifying hit inside a
+Procedure/SOP resolving to "redact the span and index the document". That is not
+safe, for a reason the implementation states plainly:
 
-| Document class                                 | `identifying` hit                       | `contextual` hit        |
-| ---------------------------------------------- | --------------------------------------- | ----------------------- |
-| Client file (Layer 2 path, or Layer 3 class D) | **exclude**                             | exclude                 |
-| Procedure / SOP                                | **redact** the span, index the document | **flag**, index intact  |
-| Unclassified                                   | exclude                                 | flag — see caveat below |
+> Redaction is damage limitation, not absolution — a document that CONTAINED an
+> identifier is treated as client data even once masked, because masking cannot
+> prove every value was recognised.
 
-**On `Unclassified` + `contextual` → `flag`.** This row is _not_ fail-closed, and
-calling it so would be false. A known client file with a contextual-only hit is
-excluded; an unknown document with the identical signature is indexed. True
-fail-closed reasoning would match the worst class the document could plausibly be —
-the `exclude` sitting one row up.
+Masking also cannot mask a **name**. A client file whose SSN is masked is still a
+client file.
 
-It is `flag` on one empirical basis: in the single corpus ever screened, all 316
-contextual-only hits were inspected and every one was a legitimate SOP (platform spec
-§3.2). A 0-for-316 record on one historical corpus is not a property that generalises
-to a new source or a different firm. Treat it as a calibration to be **re-validated
-per corpus** on the first discovery run, not as a safety property. If a new corpus
-shows contextual-only hits landing on client files, this cell becomes `exclude`.
+### The rule
 
-### 4.0 ⚠ The class axis does not exist yet — read this before §4.1
+**An identifying match is dispositive.** It escalates the document's class to `D`
+and quarantines it — not indexed, regardless of what folder it sits in or what the
+source declared. Redaction still runs first, before the embedding call, because
+egress is a separate concern from indexing: the prompt must not carry the value even
+for a document that is about to be quarantined.
 
-The matrix above is the target state, not current behaviour, and the distinction is
-load-bearing enough to belong here rather than in §8.
+Classes are the existing `DocumentClass` enum (`packages/core/src/types.ts`):
 
-`PURGE-RECORD-2026-08-03.md` records that classification is currently **per-source
-and human-declared**: all three sources carry `data_class = general`, so _"every
-document is stamped Class A regardless of content."_ There is no per-document
-classifier running. Layer 2 (structural path exclusion) and Layer 3 (document
-classification) — the two things that would supply the `document class` axis — are
-on PR #41, not `main`.
+| Class | Meaning                       | Disposition    |
+| ----- | ----------------------------- | -------------- |
+| `A`   | Public / firm-general         | index          |
+| `B`   | Firm-internal, de-ID required | index          |
+| `C`   | Per-client business data      | **quarantine** |
+| `D`   | Client tax return data        | **quarantine** |
 
-Two consequences a reader of §4.1 alone would miss:
+And the classifier escalates only — the source's declared class is a **ceiling, not a
+verdict**:
 
-1. **The 2–3% figure is not yet earned by the matrix.** Until the class axis works,
-   the nuanced middle path rescues nothing; the outcome collapses to whatever the
-   single available class produces. The number describes where this design gets to,
-   not where it is.
-2. **This spec does not define how `data_class` values map onto the matrix's rows.**
-   `general` → is that `Procedure/SOP` or `Unclassified`? The two answers differ
-   sharply: a 522-SSN roster stamped Class A maps to `Procedure/SOP`, whose
-   identifying-hit disposition is **redact and index** — the roster would be indexed
-   with masked spans rather than excluded. That mapping must be defined explicitly,
-   and until it is, the matrix is not safe to enforce.
+| Signal                        | Effect                                          |
+| ----------------------------- | ----------------------------------------------- |
+| Source declares a class       | that class is the starting point                |
+| Source declares nothing       | `D` — fail-closed (previously defaulted to `A`) |
+| Any `identifying` match found | escalate to `D`                                 |
+| Client-context path (Layer 2) | escalate to `C`                                 |
+| `contextual` match only       | no escalation — advisory, recorded for review   |
 
-**Nothing is enforced from this matrix until Layer 2/3 land and the mapping is
-written down.** The discovery pass in §5 does not depend on any of it — it classifies
-nothing and indexes nothing — so it can be built and run in the meantime.
+That last row is where knowledge-base value is preserved: a procedure that merely
+names a tax form is not escalated, not masked, and not quarantined.
+
+Quarantine writes a durable `ingest_log` event with `action: "blocked"` and the
+escalation reasons. The implementation is explicit that this is not optional —
+_"Quarantining without a durable record would prevent the disclosure but destroy the
+evidence that the pipeline saw sensitive content, which is the half that matters
+under §7216 / Circular 230. A logger warning is not an audit trail."_
 
 ### 4.1 Why this preserves knowledge-base value
 
@@ -193,14 +191,23 @@ From the 2026-08-01 screen of 858 documents:
   These are `flag` → indexed intact, nothing masked, full value retained.
 - **17–24 carried SSN/EIN/bank-account hits** (counts differ between the purge
   record and §3.2 of the platform spec — different pattern sets and dates). One
-  held 522 SSN-shaped values: a client roster. These are `exclude` → roughly
-  **2–3% of the corpus**, and it is the portion that is not firm procedure.
+  held 522 SSN-shaped values: a client roster. These escalate to `D` and are
+  **quarantined** → roughly **2–3% of the corpus**, and it is the portion that is not
+  firm procedure.
 
-"Exclude by default" is safe _because_ it is scoped to `identifying`, which is
-rare. Redaction survives as the middle path: an SOP naming one real identifier
-stays indexed and readable with that span masked. The measured >25% comprehension
-cost of sanitization (Amazon Science, arXiv 2411.05978, cited in §3.7) applies only
-to spans actually masked — a small number of documents, not all 355.
+Quarantine is safe for the corpus _because_ it is scoped to `identifying` matches,
+which are rare. The 316 contextual-only documents — the ones the assistant exists to
+answer from — are not escalated at all: indexed intact, nothing masked, full value
+retained.
+
+**There is no "redact and index" middle path, and removing it is the correction.**
+An earlier draft kept one for an SOP naming a single real identifier. The
+implementation refuses that, and is right to: masking cannot prove every value was
+recognised, and it cannot mask a name. The measured >25% comprehension cost of
+sanitization (Amazon Science, arXiv 2411.05978, cited in platform spec §3.7) is
+therefore avoided differently than that draft assumed — not by masking sparingly,
+but by masking **only for egress** while the indexing decision is made on class.
+The KB cost is the same 2–3%; the mechanism is safer.
 
 ### 4.2 Why discovery is the prerequisite
 
@@ -403,13 +410,15 @@ RAG-internal coupling to unpick.
 
 ## 8. Consequences to accept
 
-- **PR #41 cannot merge as-is.** Its unconditional `redactOrThrow` is the `redact`
-  path applied globally; under D5 it becomes the engine behind pack-declared
-  disposition. The redaction code and its 25 tests are sound and are kept.
+- **PR #41 does not need reworking; this spec did.** An earlier draft asserted #41
+  could not merge because it "redacted unconditionally". That was a misreading:
+  redaction is Layer 1, protecting the embedding call, while disposition is Layer 3
+  class escalation with quarantine on `C`/`D`. #41's model is stricter than what
+  this spec first proposed and §4 now follows it. #41's only real blocker was two
+  documentation conflicts from the de-tenanting rename pass, since resolved.
+
 - **§4's matrix depends on PR #41 landing**, and on a `data_class` → matrix-row
-  mapping that does not exist yet. Stated in full at §4.0, where the claim it
-  qualifies actually lives — burying it here was itself a defect, since a reader who
-  stops at §4.1 comes away believing the middle path is already saving SOPs.
+  mapping that does not exist yet. Stated in §4, which now describes the classifier that supplies it.
 - **Requirement A depends on the pack slice**, which does not exist. That is the
   cost of not creating a fourth scanner.
 - The counts in §4.1 come from a screen run against a corpus that has since been
