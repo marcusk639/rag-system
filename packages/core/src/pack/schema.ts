@@ -31,12 +31,24 @@ const ScannerDecl = z
     disposition: s.disposition ?? DEFAULT_DISPOSITION[s.kind],
   }))
   .superRefine((s, ctx) => {
+    let compiled: RegExp | undefined;
     try {
-      new RegExp(s.pattern);
+      compiled = new RegExp(s.pattern);
     } catch (e) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `scanner "${s.id}": pattern is not a valid regex — ${(e as Error).message}`,
+      });
+      return;
+    }
+    // A pattern that can match the empty string (e.g. `\d*`) yields one match
+    // at every character index once the engine iterates with the `g` flag,
+    // and `applyRedaction` then inserts a mask token at every position —
+    // destroying the document rather than redacting an identifier in it.
+    if (compiled.test("")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `scanner "${s.id}": pattern can match the empty string, which would redact every position in the document — patterns must require at least one character`,
       });
     }
   });

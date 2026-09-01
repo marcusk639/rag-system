@@ -35,6 +35,12 @@ export interface LoadedPack {
  * than silently apply the wrong rule, a 0.x range is rejected outright — this
  * is unreachable while `PACK_CONTRACT_VERSION` stays >= 1.0.0, but guards the
  * day someone sets a 0.x contract version.
+ *
+ * @internal Exported only so the otherwise-unreachable 0.x-rejection branch
+ * can be unit-tested directly. Not part of `@rag/core`'s intended consumable
+ * API — `packages/core/src/index.ts` re-exports this module wholesale
+ * (`export * from "./pack/load.js"`), which makes it technically public, but
+ * that was not a deliberate decision to support external callers using it.
  */
 export function satisfiesCaret(range: string, version: string): boolean {
   const m = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range.trim());

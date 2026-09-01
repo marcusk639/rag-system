@@ -84,11 +84,12 @@ export interface PipelineDeps {
   /**
    * The loaded identifier-scanner pack `redactOrThrow` runs before anything
    * downstream (see 1b below). Optional ONLY because no production caller
-   * wires a real pack in yet — `packs/cpa/pack.yaml` doesn't exist until a
-   * later task, and this task's brief scopes it out of touching
-   * `apps/worker`. `ingestOne` fails CLOSED when this is missing: every
-   * document is quarantined rather than indexed unredacted. See the loud
-   * error thrown just above the `redactOrThrow` call below.
+   * wires a real pack in yet — `packs/cpa/pack.yaml` exists (load it via
+   * `@rag/core`'s `loadPack("packs/cpa")`), but this task's brief scopes
+   * wiring it into `apps/worker`'s `WorkerDeps` out of scope. `runIngestion`
+   * fails CLOSED, loudly, at the top of the run when this is missing (see the
+   * check at the start of `runIngestion` below); `ingestOne` also fails
+   * CLOSED per-document as defence-in-depth for direct callers.
    */
   pack?: LoadedPack;
 }
@@ -123,6 +124,25 @@ export async function runIngestion(
   opts: PipelineOptions,
   deps: PipelineDeps,
 ): Promise<PipelineRunResult> {
+  // A missing pack is a CONFIGURATION gap, not a property of any document —
+  // it must be detected once, here, at the top of the run, not per-document
+  // inside `ingestOne`. Checking it per-document meant a whole source
+  // (e.g. 858 documents) would each be individually quarantined and counted
+  // as `documentsProcessed++` with `chunksCreated: 0` — the job completed
+  // GREEN reporting `documentsFailed: 0` while indexing nothing, and wrote
+  // one misleading `ingest_log` "blocked" row per document, which a
+  // compliance query would misread as "the pipeline saw sensitive content in
+  // every one of these documents" rather than "nobody wired a pack in".
+  // Fail loudly, exactly once, with no per-document audit rows at all.
+  if (!deps.pack) {
+    throw new Error(
+      "PipelineDeps.pack is not configured — no identifier-scanner pack " +
+        "was wired into WorkerDeps, so redaction cannot run. Ingestion " +
+        "cannot proceed until a LoadedPack (see @rag/core loadPack) is " +
+        "supplied to PipelineDeps.pack.",
+    );
+  }
+
   const log = deps.logger.child({ sourceId, connector: connector.kind });
   const maxPages = opts.maxPagesPerRun ?? Number.POSITIVE_INFINITY;
   log.info({ startCursor, maxPages }, "starting ingestion run");
@@ -249,8 +269,16 @@ export async function runIngestion(
   };
 }
 
-/** Process a single source document: parse, chunk, embed, store. */
-async function ingestOne(
+/**
+ * Process a single source document: parse, chunk, embed, store.
+ *
+ * @internal Exported so its missing-pack defence-in-depth guard (see the
+ * `!deps.pack` check below) stays directly unit-testable and reachable even
+ * though `runIngestion` now checks for a missing pack once at the top of the
+ * run. Not part of `@rag/ingestion`'s intended public API — callers should go
+ * through `runIngestion`.
+ */
+export async function ingestOne(
   sourceId: string,
   source: SourceDocument,
   deps: PipelineDeps,

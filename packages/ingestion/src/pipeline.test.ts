@@ -9,14 +9,15 @@ import type {
 } from "@rag/core";
 import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
-import { runIngestion, type PipelineDeps } from "./pipeline.js";
+import { runIngestion, ingestOne, type PipelineDeps } from "./pipeline.js";
 
 /**
- * `packs/cpa/pack.yaml` doesn't exist yet (a later task authors it), so this
- * suite builds the equivalent pack in memory — same shape as the scanners
- * `redactText` used to hardcode. Only `ssn`/`ein` are needed: the "BLOCKS a
- * document containing an SSN" test below depends on this pack actually
- * finding the identifier, exactly as the pre-migration hardcoded patterns did.
+ * `packs/cpa/pack.yaml` exists (Task 6 authored it), but this suite builds
+ * the equivalent pack in memory rather than loading it — same shape as the
+ * scanners `redactText` used to hardcode. Only `ssn`/`ein` are needed: the
+ * "BLOCKS a document containing an SSN" test below depends on this pack
+ * actually finding the identifier, exactly as the pre-migration hardcoded
+ * patterns did.
  */
 const TEST_PACK: LoadedPack = {
   id: "test",
@@ -674,19 +675,59 @@ describe("TRI compliance scanning at ingest", () => {
   });
 });
 
-describe("PipelineDeps.pack — fails closed when unconfigured", () => {
-  it("quarantines the document AND writes a durable ingest_log audit row when no pack is wired", async () => {
-    // `pack` is optional on PipelineDeps only because no production caller
-    // (apps/worker) wires a real one in yet. Until it does, ingestOne must
-    // refuse to index ANY document rather than skip redaction — this pins
-    // that fail-closed behaviour (Ruling R7). The audit write is Ruling R8:
-    // quarantining without a durable record destroys the compliance evidence
-    // that the pipeline saw (or, here, COULD NOT check) sensitive content.
+describe("runIngestion — fails closed at ENTRY when unconfigured", () => {
+  // `pack` is optional on PipelineDeps only because no production caller
+  // (apps/worker) wires a real one in yet. A missing pack is a CONFIGURATION
+  // gap, not a property of any one document, so `runIngestion` must detect
+  // it ONCE, up front, and reject the whole run loudly — never silently
+  // quarantine every document one-by-one as if each had its own problem.
+  // Concretely: quarantining per-document meant an 858-document source
+  // completed GREEN as `{documentsProcessed: 858, documentsFailed: 0,
+  // chunksCreated: 0}` while writing 858 misleading "blocked" ingest_log
+  // rows — exactly the shape a compliance query would misread as "the
+  // pipeline saw sensitive content in 858 documents" rather than "nobody
+  // wired a pack in".
+  it("REJECTS when no pack is supplied, before touching the connector or the db", async () => {
     const deps = { ...makeDeps(), pack: undefined };
     const { connector } = makeConnector([
       { documents: ["doc-1"], nextCursor: null, done: true },
     ]);
-    const result = await runIngestion("src-id", connector, null, OPTS, deps);
+
+    await expect(
+      runIngestion("src-id", connector, null, OPTS, deps),
+    ).rejects.toThrow(/PipelineDeps\.pack is not configured/);
+
+    // No per-document work happened at all: the check runs before the
+    // connector is ever asked to list a page.
+    expect(connector.list).not.toHaveBeenCalled();
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+    expect(replaceChunksMock).not.toHaveBeenCalled();
+    // No ingest_log row of ANY kind — not even "blocked" — because a
+    // configuration gap is not evidence about any document.
+    expect(logIngestEventMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ingestOne — missing-pack guard as defence-in-depth", () => {
+  // `runIngestion` now catches a missing pack once at the top of the run
+  // (see the describe block above), but `ingestOne` keeps its own guard so
+  // it still fails CLOSED — quarantine, not raw index — if it is ever
+  // invoked directly rather than through `runIngestion`. This test calls
+  // `ingestOne` directly (exported for exactly this reason) to keep that
+  // backstop covered now that `runIngestion` no longer reaches it via a
+  // whole-run missing-pack path.
+  it("quarantines the document AND writes a durable ingest_log audit row when called directly with no pack", async () => {
+    const deps = { ...makeDeps(), pack: undefined };
+    const source = {
+      externalId: "doc-1",
+      title: "doc-1",
+      modifiedAt: new Date().toISOString(),
+      mimeType: "text/plain",
+      content: Buffer.from("content-doc-1"),
+      metadata: {},
+    };
+
+    const result = await ingestOne("src-id", source, deps, "A");
 
     // Nothing was indexed: no chunks, no upsert.
     expect(result.chunksCreated).toBe(0);

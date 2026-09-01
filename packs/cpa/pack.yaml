@@ -1,7 +1,23 @@
 # Pattern definitions for the CPA vertical. This file is DATA — the scan engine
-# in @rag/core knows nothing about tax. Adding a pattern here does not require a
-# code change; adding a new `validator` or `context` name does (see
-# packages/core/src/pack/registry.ts).
+# in @rag/core knows nothing about tax.
+#
+# ⚠ Adding a new `validator` or `context` name requires a code change (see
+# packages/core/src/pack/registry.ts) — that part IS safe to assume.
+#
+# But adding a new scanner `id` here is NOT code-change-free, despite the scan
+# engine itself being generic: TWO other places hardcode the specific scanner
+# ids emitted by this pack, outside the engine and outside this file:
+#   - packages/core/src/content-safety.ts — the `kindFor` function maps a
+#     scanner id onto its legacy `RedactionKind` for the audit-findings mask
+#     table.
+#   - packages/ingestion/src/classify-document.ts — `CLASS_D_IDENTIFIERS`
+#     decides which scanner ids escalate a document to Class D.
+# If you add e.g. `- id: passport, kind: identifying, ...` and do NOT update
+# both of those, the new pattern is silently masked in the redacted text, but
+# `findings` stays empty, `totalRedacted` stays 0, no `ingest.redacted` log
+# line is emitted, and `classifyDocument` never escalates the document — it
+# is indexed as Class A with zero audit evidence that anything was redacted.
+# This is a tracked type-safety gap, not yet closed at the type level.
 pack:
   id: cpa
   version: 1.0.0

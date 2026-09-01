@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   redactText,
   redactOrThrow,
@@ -7,59 +9,27 @@ import {
   ContentSafetyError,
   DEFAULT_EXCLUDED_PATH_FRAGMENTS,
 } from "./content-safety.js";
-import type { LoadedPack } from "./pack/load.js";
 import type { ScanMatch } from "./pack/scan.js";
-import { resolveValidator, resolveContext } from "./pack/registry.js";
+import { loadPack } from "./pack/load.js";
 
 /**
- * `packs/cpa/pack.yaml` doesn't exist yet (Task 6 authors it), so these tests
- * — the pre-existing SPECIFICATION for redactText's behaviour — build the
- * equivalent pack in memory. Same four scanners, same validators/context as
- * the original hardcoded PATTERNS this file used to exercise directly, now
- * resolved through the real compiled-in registry (Task 2) so Ruling R3's
- * luhn `digits.length > 0` guard is live here too.
+ * `packs/cpa/pack.yaml` exists (Task 6 authored it) and is the real shipped
+ * artifact, so these tests — the pre-existing SPECIFICATION for redactText's
+ * behaviour — load it directly rather than building an equivalent pack by
+ * hand in TypeScript. Loading the real pack means a regression in
+ * `pack.yaml` itself (e.g. an SSN pattern losing its `\b` anchors) fails
+ * these tests, instead of silently passing against a fixture that has
+ * drifted from the artifact actually shipped. Same four scanners, same
+ * validators/context as the original hardcoded PATTERNS this file used to
+ * exercise directly, resolved through the real compiled-in registry
+ * (Task 2) so Ruling R3's luhn `digits.length > 0` guard is live here too.
+ *
+ * `content-safety.test.ts` sits in `packages/core/src/`, one level shallower
+ * than `pack/cpa-pack.test.ts`, so this needs one fewer `../` than that
+ * file's `../../../../packs/cpa`.
  */
-const TEST_PACK: LoadedPack = {
-  id: "test",
-  version: "1.0.0",
-  scanners: [
-    // 123-45-6789 — delimiter-anchored, so a form number cannot match.
-    {
-      id: "ssn",
-      kind: "identifying",
-      disposition: "exclude",
-      re: /\b\d{3}-\d{2}-\d{4}\b/g,
-      contextWindow: 60,
-    },
-    // 12-3456789
-    {
-      id: "ein",
-      kind: "identifying",
-      disposition: "exclude",
-      re: /\b\d{2}-\d{7}\b/g,
-      contextWindow: 60,
-    },
-    // 9-digit runs only when the ABA checksum passes AND routing vocabulary is near.
-    {
-      id: "routing",
-      kind: "identifying",
-      disposition: "exclude",
-      re: /\b\d{9}\b/g,
-      validate: resolveValidator("aba"),
-      context: resolveContext("account-vocab"),
-      contextWindow: 60,
-    },
-    // 13–19 digits, Luhn-valid, optionally space/dash grouped.
-    {
-      id: "card",
-      kind: "identifying",
-      disposition: "exclude",
-      re: /\b(?:\d[ -]?){12,18}\d\b/g,
-      validate: resolveValidator("luhn"),
-      contextWindow: 60,
-    },
-  ],
-};
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEST_PACK = loadPack(join(__dirname, "../../../packs/cpa"));
 
 describe("redactText — catches structured identifiers", () => {
   it("redacts a delimiter-formatted SSN", () => {

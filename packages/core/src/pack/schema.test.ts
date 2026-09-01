@@ -59,4 +59,13 @@ describe("PackFile", () => {
       }),
     ).toThrow(/regex/i);
   });
+
+  it("rejects a pattern that can match the empty string", () => {
+    expect(() =>
+      PackFile.parse({
+        ...minimal,
+        scanners: [{ id: "a", kind: "identifying", pattern: "\\d*" }],
+      }),
+    ).toThrow(/empty string/i);
+  });
 });
