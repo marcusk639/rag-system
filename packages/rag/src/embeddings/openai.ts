@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
 import { EgressPolicy, EmbeddingError, egressSafeFetch } from "@rag/core";
 import { retryOnRateLimit } from "./retry.js";
+import { createThrottle } from "./throttle.js";
 
 /**
  * OpenAI embedding provider. Use when you want maximum quality and don't
@@ -30,6 +31,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI;
   private readonly maxRetries: number;
   private readonly _egressPolicy: EgressPolicy;
+  private readonly _throttle: <T>(fn: () => Promise<T>) => Promise<T>;
 
   constructor(opts: {
     apiKey: string;
@@ -37,6 +39,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     dimensions?: number;
     maxRetries?: number;
     egressPolicy?: EgressPolicy;
+    /** Pace embedding requests to at most N per minute. 0/undefined = unpaced. */
+    requestsPerMinute?: number;
   }) {
     if (!opts.apiKey) throw new EmbeddingError("OpenAI API key is required");
     this.client = new OpenAI({
@@ -54,6 +58,11 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.dimensions = opts.dimensions ?? 1536;
     this.maxRetries = opts.maxRetries ?? 5;
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
+    this._throttle = createThrottle({
+      ...(opts.requestsPerMinute !== undefined
+        ? { requestsPerMinute: opts.requestsPerMinute }
+        : {}),
+    });
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -70,15 +79,17 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       const batchSize = 2048; // OpenAI limit
       for (let i = 0; i < texts.length; i += batchSize) {
         const slice = texts.slice(i, i + batchSize);
-        const resp = await retryOnRateLimit(
-          () =>
-            this.client.embeddings.create({
-              model: this.model,
-              input: slice,
-              dimensions: this.dimensions,
-              encoding_format: "float",
-            }),
-          { maxRetries: this.maxRetries },
+        const resp = await this._throttle(() =>
+          retryOnRateLimit(
+            () =>
+              this.client.embeddings.create({
+                model: this.model,
+                input: slice,
+                dimensions: this.dimensions,
+                encoding_format: "float",
+              }),
+            { maxRetries: this.maxRetries },
+          ),
         );
         for (const item of resp.data) {
           results.push({

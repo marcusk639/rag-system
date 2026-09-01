@@ -351,3 +351,20 @@ describe("loadConfig — generation TRI policy default", () => {
     expect(cfg.generation?.triPolicy).toBe("off");
   });
 });
+
+describe("loadConfig — embedding request pacing", () => {
+  // Pacing is opt-in: a deployment that was not hitting a rate limit must see
+  // no behaviour change from this field existing.
+  it("defaults to 0 (unpaced)", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.embedding.requestsPerMinute).toBe(0);
+  });
+
+  it("reads EMBEDDING_REQUESTS_PER_MINUTE", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_REQUESTS_PER_MINUTE: "60",
+    });
+    expect(cfg.embedding.requestsPerMinute).toBe(60);
+  });
+});

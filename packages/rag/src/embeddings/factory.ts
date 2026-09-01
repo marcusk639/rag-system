@@ -41,6 +41,7 @@ export function createEmbeddingProvider(
         model: cfg.model,
         dimensions: cfg.dimensions,
         maxRetries: cfg.maxRetries,
+        requestsPerMinute: cfg.requestsPerMinute,
         egressPolicy: opts?.egressPolicy,
       });
     case "openai":
@@ -53,6 +54,7 @@ export function createEmbeddingProvider(
         model: cfg.model,
         dimensions: cfg.dimensions,
         maxRetries: cfg.maxRetries,
+        requestsPerMinute: cfg.requestsPerMinute,
         egressPolicy: opts?.egressPolicy,
       });
     case "local":
