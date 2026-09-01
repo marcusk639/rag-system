@@ -48,6 +48,14 @@ USER node
 ENV NODE_ENV=production
 
 # Worker polls pg-boss; no HTTP listener.
-# preDeployCommand on Railway runs `pnpm --filter @rag/db migrate` before this
-# service starts — worker is the designated migration owner (see DEPLOYMENT.md).
+# preDeployCommand on Railway runs `node node_modules/@rag/db/dist/migrate.js`
+# before this service starts — worker is the designated migration owner (see
+# DEPLOYMENT.md).
+#
+# NOT `pnpm --filter @rag/db migrate`: this runtime stage is plain node:22-slim
+# and has no pnpm, and `pnpm deploy --prod` prunes the tsx that the `migrate`
+# script shells out to. That command could never have worked against this
+# image — it went unnoticed for ~7 weeks because every deploy in between was a
+# `railway redeploy`, which re-runs the previously built image rather than
+# building the current commit.
 CMD ["node", "dist/main.js"]

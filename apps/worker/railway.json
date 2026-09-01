@@ -5,7 +5,7 @@
     "dockerfilePath": "apps/worker/Dockerfile"
   },
   "deploy": {
-    "preDeployCommand": "pnpm --filter @rag/db migrate",
+    "preDeployCommand": "node node_modules/@rag/db/dist/migrate.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
