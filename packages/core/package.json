@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "jose": "^6.2.3",
+    "yaml": "^2.9.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
