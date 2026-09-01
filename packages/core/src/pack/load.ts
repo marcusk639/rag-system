@@ -86,8 +86,9 @@ export function loadPack(dir: string): LoadedPack {
       id: s.id,
       kind: s.kind,
       disposition: s.disposition,
-      // `g` is required — the engine iterates all matches.
-      re: new RegExp(s.pattern, "g"),
+      // `g` is required — the engine iterates all matches. `i` is opt-in per
+      // scanner (label-gated patterns need it; digit patterns do not).
+      re: new RegExp(s.pattern, s.ignoreCase ? "gi" : "g"),
       validate: s.validator ? resolveValidator(s.validator) : undefined,
       context: s.context ? resolveContext(s.context) : undefined,
       contextWindow: s.contextWindow,

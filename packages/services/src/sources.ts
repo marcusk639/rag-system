@@ -130,6 +130,39 @@ export async function purgeSource(
   deps: ServiceDeps,
   sourceId: string,
 ): Promise<void> {
-  const deleted = await purgeSourceQuery(deps.db, sourceId);
+  const { deleted, storageKeys } = await purgeSourceQuery(deps.db, sourceId);
   if (!deleted) throw new NotFoundError(`Source ${sourceId} not found`);
+
+  // The Postgres cascade is committed at this point. The originals live in the
+  // object store and are NOT reached by it, so without this they outlive the
+  // source that owned them — which is how a §7216 purge left the corpus it was
+  // performed over sitting in a third-party bucket.
+  if (!deps.objectStore || storageKeys.length === 0) return;
+
+  let failed = 0;
+  for (const key of storageKeys) {
+    try {
+      await deps.objectStore.delete(key);
+    } catch (err) {
+      failed += 1;
+      // Deliberately not rethrown. The rows are already gone, so failing here
+      // would return an error for a purge that largely succeeded and invite a
+      // retry against a source that no longer exists. The orphan is recorded
+      // instead, with the key, so it can be swept up.
+      deps.logger?.error(
+        { err, sourceId, storageKey: key, marker: "purge.object_orphaned" },
+        "source purged but its stored original could not be deleted; the " +
+          "object is now orphaned in the bucket",
+      );
+    }
+  }
+
+  deps.logger?.info(
+    {
+      sourceId,
+      objectsDeleted: storageKeys.length - failed,
+      objectsOrphaned: failed,
+    },
+    "purged source originals from object storage",
+  );
 }

@@ -12,7 +12,7 @@
 > migrations via its `preDeployCommand` and is the single migration owner;
 > `rag-api`, `rag-mcp`, and `rag-web` are deployed Railway services. See
 > [`DEPLOYMENT.md` § Migrations on deploy (Railway)](./DEPLOYMENT.md#migrations-on-deploy-railway),
-> [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md), and
+> [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md), and
 > [`superpowers/specs/2026-07-17-platform-tenancy-and-plugin-boundary.md`](./superpowers/specs/2026-07-17-platform-tenancy-and-plugin-boundary.md) §2.5.
 >
 > **What is still valid below:** `docker/compose.prod.yml` remains a working

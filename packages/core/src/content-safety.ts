@@ -13,6 +13,14 @@
  *
  * Everything here is deterministic and offline. A redactor that needed a network
  * call would itself become an egress path.
+ *
+ * ── Where the rules live ───────────────────────────────────────────────────
+ *
+ * The per-match identifier rules are NOT in this file. They are declared as
+ * data in a vertical's pack (`packs/<vertical>/pack.yaml`) and executed by
+ * `scanText`; this module turns those matches into masked text and auditable
+ * counts. The one exception is the tabular density sweep below, which is a
+ * whole-document property the pack contract cannot yet express.
  */
 
 import { scanText, type ScanMatch } from "./pack/scan.js";
@@ -106,12 +114,58 @@ export function applyRedaction(
   return parts.join("");
 }
 
-/** Maps a pack scanner id onto the legacy RedactionKind for the mask table. */
+/**
+ * Maps a pack scanner id onto the RedactionKind used for the mask token and
+ * the finding counts.
+ *
+ * The segment before the first `-` is the kind, so a pack can declare several
+ * scanners for one identifier — `ssn` (delimited) and `ssn-unformatted`
+ * (label-gated bare digits) both count as `ssn` and both mask as
+ * `[REDACTED-SSN]`. Pack ids must be unique, so variants of one identifier
+ * need distinct ids; without this they would each report as their own kind and
+ * fragment the audit counts.
+ *
+ * An unrecognised id is not an error — `redactText` falls back to a generic
+ * `[REDACTED-<ID>]` token, so a pack can declare a scanner this list has never
+ * heard of and still get it redacted.
+ */
 function kindFor(scannerId: string): RedactionKind | undefined {
+  const base = scannerId.split("-")[0];
   return (["ssn", "ein", "routing", "card", "account"] as const).find(
-    (k) => k === scannerId,
+    (k) => k === base,
   );
 }
+
+/**
+ * Identifier vocabulary anywhere in the document. Deliberately narrower than
+ * the pack's `account-vocab` context: this gates a whole-document sweep, so it
+ * must not fire on ordinary banking prose.
+ */
+const IDENTIFIER_VOCAB =
+  /\b(ssn|ssns|social\s+security|tin|itin|taxpayer\s+id)\b/i;
+
+/**
+ * Minimum bare 9-digit runs before the tabular sweep fires.
+ *
+ * The corpus screen's worst document held 522 SSN-shaped values in a
+ * spreadsheet. Parsed to markdown a row reads `| Smith, John | 123456789 |
+ * 45,200 |` — the "SSN" header sits rows away, so no adjacent-label rule can
+ * reach it, and the ABA gate does not fire on a non-routing number. It was
+ * caught by nothing.
+ *
+ * DENSITY separates a roster from a procedure: a roster carries a column of
+ * them, an SOP carries none or one incidental reference number. Requiring
+ * repetition AND vocabulary targets the roster shape without redacting the
+ * documents the assistant exists to answer from. Three is low enough to catch a
+ * short roster, high enough that a lone reference number is safe.
+ *
+ * This sweep stays in code rather than moving into the pack with the other
+ * rules: it is a property of the WHOLE DOCUMENT (how many candidates appear,
+ * and whether vocabulary occurs anywhere in it), and a pack scanner is a
+ * per-match regex with a bounded context window. Expressing it as pack data
+ * needs a document-scoped scanner kind the contract does not have yet.
+ */
+const COLUMN_DENSITY_THRESHOLD = 3;
 
 /**
  * Redact structured identifiers from parsed document text, using every scanner
@@ -123,7 +177,8 @@ function kindFor(scannerId: string): RedactionKind | undefined {
  */
 export function redactText(input: string, pack: LoadedPack): RedactionResult {
   const matches = scanText(input, pack);
-  const text = applyRedaction(input, matches, (m) => {
+  // `let` — the tabular sweep below rewrites this after the pack's scanners run.
+  let text = applyRedaction(input, matches, (m) => {
     const k = kindFor(m.scannerId);
     return k ? MASK[k] : `[REDACTED-${m.scannerId.toUpperCase()}]`;
   });
@@ -134,6 +189,23 @@ export function redactText(input: string, pack: LoadedPack): RedactionResult {
     const k = kindFor(m.scannerId);
     if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
   }
+
+  // Tabular sweep. A roster's SSN column has its header rows away, so no
+  // adjacent-label rule reaches it. Gated on vocabulary AND repetition so a
+  // procedure document with one incidental reference number is untouched.
+  // Density is measured against the ORIGINAL input: the label-gated pattern
+  // above may already have masked the first value in the column, and counting
+  // the survivors would drop a genuine roster below the threshold.
+  if (IDENTIFIER_VOCAB.test(input)) {
+    const bare = input.match(/\b\d{9}\b/g) ?? [];
+    if (bare.length >= COLUMN_DENSITY_THRESHOLD) {
+      text = text.replace(/\b\d{9}\b/g, () => {
+        counts.set("ssn", (counts.get("ssn") ?? 0) + 1);
+        return MASK.ssn;
+      });
+    }
+  }
+
   const findings = [...counts.entries()].map(([kind, count]) => ({
     kind,
     count,

@@ -69,7 +69,7 @@ describe("PackFile", () => {
     ).toThrow(/empty string/i);
   });
 
-  it("rejects a pattern starting with a lookahead, even though it fails .test('')", () => {
+  it("rejects a pattern that is ONLY a lookahead, even though it fails .test('')", () => {
     // `(?=\d)` returns false for `.test("")` (there's no digit to look ahead
     // to in an empty string), so the empty-string guard above does not catch
     // it — this is exactly the context-dependent zero-width gap `scanText`'s
@@ -82,7 +82,7 @@ describe("PackFile", () => {
     ).toThrow(/zero-width/i);
   });
 
-  it("rejects a pattern starting with a negative lookahead", () => {
+  it("rejects a pattern that is ONLY a negative lookahead", () => {
     expect(() =>
       PackFile.parse({
         ...minimal,
@@ -91,11 +91,61 @@ describe("PackFile", () => {
     ).toThrow(/zero-width/i);
   });
 
-  it("rejects a pattern starting with a lookbehind", () => {
+  it("rejects a pattern that is ONLY a lookbehind", () => {
     expect(() =>
       PackFile.parse({
         ...minimal,
         scanners: [{ id: "a", kind: "identifying", pattern: "(?<=x)" }],
+      }),
+    ).toThrow(/zero-width/i);
+  });
+
+  it("ACCEPTS a lookbehind that gates a pattern which does consume characters", () => {
+    // The regression this guards: the check used to test only the PREFIX, so
+    // any pattern beginning `(?<` was rejected as zero-width. That is the
+    // exact shape a label-gated identifier rule needs — assert the label,
+    // consume only the digits — and it is what `ssn-unformatted` in
+    // packs/cpa/pack.yaml uses. Rejecting it meant the rule could not be
+    // expressed as pack data at all.
+    expect(() =>
+      PackFile.parse({
+        ...minimal,
+        scanners: [
+          {
+            id: "a",
+            kind: "identifying",
+            pattern: "(?<=SSN[\\s:]{0,4})\\b\\d{9}\\b",
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("still rejects a lookaround that closes at the very end with nothing after it", () => {
+    // A nested group inside the lookaround must not be mistaken for the
+    // lookaround closing early.
+    expect(() =>
+      PackFile.parse({
+        ...minimal,
+        scanners: [
+          { id: "a", kind: "identifying", pattern: "(?=(?:ab|cd)\\d)" },
+        ],
+      }),
+    ).toThrow(/zero-width/i);
+  });
+
+  it("does not mistake an escaped or class-bracketed paren for the lookaround's close", () => {
+    // `\)` and `[)]` both contain a `)` that must NOT close the group.
+    expect(() =>
+      PackFile.parse({
+        ...minimal,
+        scanners: [{ id: "a", kind: "identifying", pattern: "(?<=\\()\\d{4}" }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      PackFile.parse({
+        ...minimal,
+        scanners: [{ id: "b", kind: "identifying", pattern: "(?=[)])" }],
       }),
     ).toThrow(/zero-width/i);
   });

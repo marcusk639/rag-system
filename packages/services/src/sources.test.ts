@@ -138,15 +138,15 @@ describe("triggerSync", () => {
 });
 
 describe("purgeSource", () => {
-  it("resolves when the db query returns true (source existed)", async () => {
-    purgeSourceQuery.mockResolvedValue(true);
+  it("resolves when the db query reports the source existed", async () => {
+    purgeSourceQuery.mockResolvedValue({ deleted: true, storageKeys: [] });
 
     await expect(purgeSource(deps, "src-1")).resolves.toBeUndefined();
     expect(purgeSourceQuery).toHaveBeenCalledWith(deps.db, "src-1");
   });
 
-  it("throws NotFoundError when the db query returns false (source not found)", async () => {
-    purgeSourceQuery.mockResolvedValue(false);
+  it("throws NotFoundError when the db query reports no such source", async () => {
+    purgeSourceQuery.mockResolvedValue({ deleted: false, storageKeys: [] });
 
     await expect(purgeSource(deps, "src-missing")).rejects.toThrow(
       /not found/i,
@@ -200,5 +200,69 @@ describe("listPublicSources", () => {
       expect.any(Array),
     );
     expect(result).toEqual([{ id: "src-a" }]);
+  });
+});
+
+describe("purgeSource — object-store cleanup", () => {
+  // Deleting a source cascaded in Postgres only. The original bytes in the
+  // object store were never touched, so every deleted source left its files
+  // behind — 1,747 orphaned objects (~499 MB) accumulated in production this
+  // way, including the pre-purge corpus a §7216 purge was performed over. The
+  // DB rows went; the documents themselves stayed in a third-party bucket.
+  //
+  // The keys come back from the DB layer because only it knows which documents
+  // existed before the cascade removed them. @rag/db stays free of any
+  // object-store dependency.
+
+  it("deletes the stored originals for every purged document", async () => {
+    purgeSourceQuery.mockResolvedValue({
+      deleted: true,
+      storageKeys: ["sources/src-1/aaa", "sources/src-1/bbb"],
+    });
+    const objectStore = { delete: vi.fn().mockResolvedValue(undefined) };
+    const d = { ...deps, objectStore } as unknown as ServiceDeps;
+
+    await purgeSource(d, "src-1");
+
+    expect(objectStore.delete).toHaveBeenCalledTimes(2);
+    expect(objectStore.delete).toHaveBeenCalledWith("sources/src-1/aaa");
+    expect(objectStore.delete).toHaveBeenCalledWith("sources/src-1/bbb");
+  });
+
+  it("still purges when no object store is configured", async () => {
+    purgeSourceQuery.mockResolvedValue({
+      deleted: true,
+      storageKeys: ["sources/src-1/aaa"],
+    });
+    const d = { ...deps, objectStore: null } as unknown as ServiceDeps;
+
+    await expect(purgeSource(d, "src-1")).resolves.toBeUndefined();
+  });
+
+  it("does NOT fail the purge when an object delete fails", async () => {
+    // The DB rows are already gone by this point — the cascade is committed.
+    // Throwing here would surface a 500 for a purge that mostly succeeded and
+    // invite a retry against a source that no longer exists. The orphan is
+    // logged instead, so it can be swept up.
+    purgeSourceQuery.mockResolvedValue({
+      deleted: true,
+      storageKeys: ["sources/src-1/aaa"],
+    });
+    const objectStore = {
+      delete: vi.fn().mockRejectedValue(new Error("bucket unreachable")),
+    };
+    const d = { ...deps, objectStore } as unknown as ServiceDeps;
+
+    await expect(purgeSource(d, "src-1")).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it("throws NotFound when the source does not exist, and touches no objects", async () => {
+    purgeSourceQuery.mockResolvedValue({ deleted: false, storageKeys: [] });
+    const objectStore = { delete: vi.fn() };
+    const d = { ...deps, objectStore } as unknown as ServiceDeps;
+
+    await expect(purgeSource(d, "nope")).rejects.toThrow(/not found/i);
+    expect(objectStore.delete).not.toHaveBeenCalled();
   });
 });

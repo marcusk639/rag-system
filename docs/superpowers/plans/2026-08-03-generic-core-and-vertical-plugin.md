@@ -32,7 +32,7 @@
 
 **Goal:** Make `rag-system` a generic RAG platform that external projects consume
 and extend — starting with the ability to supply a different system prompt and
-configure retrieval/generation per deployment — with the TWK knowledge base
+configure retrieval/generation per deployment — with the firm knowledge base
 becoming a consumer rather than something baked into core.
 
 **This implements an existing design.**
@@ -49,18 +49,18 @@ anticipate.
 1. `apps/web` **stays generic in `rag-system`, branded per tenant** (spec §2.3, `APP_NAME`). It is not moving to a consumer repo.
 2. **`@rag/*` packages may be published publicly** — but publishing is **not a prerequisite** (see decision 4). Phase 2 is deferred, not blocking.
 3. **Core is not opinionated about any domain. Domain belongs to the consumer.**
-4. **Do not split the repo to get the boundary.** The CPA plugin starts as a **workspace package in `rag-system`, built to be extractable**. TWK's _deployment_ — prompt file, tenant env, folder exclusions, staff roster — lives in a consumer repo (`twk-kb` or `cpa-consulting`).
+4. **Do not split the repo to get the boundary.** The CPA plugin starts as a **workspace package in `rag-system`, built to be extractable**. the firm's _deployment_ — prompt file, tenant env, folder exclusions, staff roster — lives in a consumer repo (`kb-kb` or `cpa-consulting`).
 
 > ### Decision 4 needs one distinction to be coherent
 >
-> "Keep it as a workspace package" and "it lives in `cpa-consulting` or `twk-kb`"
+> "Keep it as a workspace package" and "it lives in `cpa-consulting` or `kb-kb`"
 > are describing **two different artifacts**, and conflating them is how this goes
 > wrong:
 >
-> | Artifact                               | What it is                                                                                                                           | Where it lives         | Why                                                                                                                                                         |
-> | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-> | **`packages/plugin-cpa/`**             | CPA _code_ — classifier, prompt text, optional generator wrapper                                                                     | `rag-system` workspace | Needs to compile against `@rag/core`. Publishing purely to satisfy a repo boundary buys nothing at this team size.                                          |
-> | **`twk-kb/`** (or in `cpa-consulting`) | TWK _deployment_ — `SYSTEM_PROMPT_PATH` target, tenant env, SharePoint folder exclusions, staff roster, the content-boundary runbook | Consumer repo          | Firm data and firm config. Already required to stay out of core by the content-boundary plan. Mostly **not code**, so it needs no package mechanism at all. |
+> | Artifact                              | What it is                                                                                                                                | Where it lives         | Why                                                                                                                                                         |
+> | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | **`packages/plugin-cpa/`**            | CPA _code_ — classifier, prompt text, optional generator wrapper                                                                          | `rag-system` workspace | Needs to compile against `@rag/core`. Publishing purely to satisfy a repo boundary buys nothing at this team size.                                          |
+> | **`kb-kb/`** (or in `cpa-consulting`) | the firm _deployment_ — `SYSTEM_PROMPT_PATH` target, tenant env, SharePoint folder exclusions, staff roster, the content-boundary runbook | Consumer repo          | Firm data and firm config. Already required to stay out of core by the content-boundary plan. Mostly **not code**, so it needs no package mechanism at all. |
 >
 > **Say the quiet part:** under decision 4 the `rag-system` _repo_ still contains
 > CPA code, even though `@rag/core` does not. That is a real cost and it is worth
@@ -129,8 +129,8 @@ rewrite opportunistically, never as a task.
 
 ## 0b. `apps/web` is already generic — it just isn't configurable
 
-Good news for the decision above: `grep -rniE "twk|terranova"` over `apps/web/src`
-returns **nothing**. There is no TWK branding to remove. But `APP_NAME` is
+Good news for the decision above: `grep -rniE "kb|terranova"` over `apps/web/src`
+returns **nothing**. There is no the firm branding to remove. But `APP_NAME` is
 referenced **nowhere**, and the product name is hardcoded twice:
 
 - `apps/web/src/app/layout.tsx:8` — `title: "RAG Knowledge Hub"`
@@ -225,11 +225,11 @@ half is independently reviewable.
 - [ ] **Task 1.2 — Add `systemPrompt?: string` to `GeneratorOptions`**, alongside `triPolicy`/`onTriDetected`. Replace the four consumption sites (`:330, :352, :398, :420`) with `this.opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT`. Export `DEFAULT_SYSTEM_PROMPT`.
 - [ ] **Task 1.3 — Write the domain-neutral default** from the §1a split. **⚠ Carry the header comment across** (`generator.ts:19-38`): it documents three load-bearing properties — near-verbatim steps, partial-answer-beats-refusal, conflicts-surfaced-never-resolved — each with the failure it prevents. Those properties are all in the neutral half, so they stay; a consumer replacing the prompt needs to know they exist.
 - [ ] **Task 1.4 — Wire `SYSTEM_PROMPT_PATH`** through `loadConfig` → `buildCoreDeps` → `createGenerator`. Read at startup; **fail loud** if set-but-unreadable. A silently-defaulting prompt is the worst outcome — the deployment looks configured and isn't.
-- [ ] **Task 1.5 — ⚠ Ship TWK's prompt in the same change.** This is a **behavior change for the running pilot**: once the default is neutral, TWK gets a materially different assistant unless `SYSTEM_PROMPT_PATH` is set at the same deploy. Put the current CPA text in a file the TWK deployment points at, and verify with one real question before/after that the answer is unchanged. Do not land Task 1.3 and Task 1.5 in separate deploys.
+- [ ] **Task 1.5 — ⚠ Ship the firm's prompt in the same change.** This is a **behavior change for the running pilot**: once the default is neutral, the firm gets a materially different assistant unless `SYSTEM_PROMPT_PATH` is set at the same deploy. Put the current CPA text in a file the firm deployment points at, and verify with one real question before/after that the answer is unchanged. Do not land Task 1.3 and Task 1.5 in separate deploys.
 - [ ] **Task 1.6 — Document in `env.example`** beside `GENERATION_*`: the default is domain-neutral, and a domain deployment is expected to supply its own.
 
 **Verify:** `pnpm --filter @rag/rag test` green; the no-CPA-vocabulary assertion
-passes; TWK's configured prompt produces a byte-identical request to today's.
+passes; the firm's configured prompt produces a byte-identical request to today's.
 
 **Anti-pattern guards:** do not put prompt text in an env var — a 60-line prompt
 belongs in a reviewable file. Do not delete the default — an unconfigured
@@ -300,18 +300,18 @@ extracting it later is a `git mv` plus a `package.json` dependency swap.
 
 - [ ] **Task 4.1 — Create `packages/plugin-cpa/`.** Depends on `@rag/core` (and `@rag/rag` for base classes) via `workspace:*` — **and nothing else from this repo**. Contents: the CPA prompt file that Phase 1 moved out of core, and the `DocumentClassifier` the spec calls _"the primary CPA seam."_ Add it to `pnpm-workspace.yaml`.
 - [ ] **Task 4.2 — Register through the Phase 3 registry**, not by editing a core factory. If registering the plugin requires touching a `switch` in core, Phase 3 is incomplete — go back.
-- [ ] **Task 4.3 — Keep firm data out of the plugin too.** The plugin holds _domain_ logic (what a CPA SOP looks like); TWK folder exclusions, the staff roster, and POL-01 class rules are _firm_ data and belong in the deployment repo. The distinction is "would another CPA firm reuse this?" — same test the content-boundary plan applies.
+- [ ] **Task 4.3 — Keep firm data out of the plugin too.** The plugin holds _domain_ logic (what a CPA SOP looks like); the firm folder exclusions, the staff roster, and POL-01 class rules are _firm_ data and belong in the deployment repo. The distinction is "would another CPA firm reuse this?" — same test the content-boundary plan applies.
 - [ ] **Task 4.4 — ⛔ Enforce the extraction boundary mechanically.** This is the task that makes decision 4 honest rather than aspirational. Add a check (an eslint `no-restricted-imports` rule, a `depcruise` config, or a test that walks the import graph) asserting `packages/plugin-cpa/**` imports **only** from `@rag/core` and `@rag/rag` public entry points — never `@rag/db`, `@rag/runtime`, `@rag/services`, `@rag/ingestion`, `@rag/connectors`, and never a relative path escaping the package root. Wire it into `pnpm lint` so CI enforces it. **Without this, "extractable later" stops being true within a few commits and nobody notices until extraction day.**
 - [ ] **Task 4.5 — Write the extraction procedure down** in the plugin's README, in five lines: `git mv` to the new repo, swap `workspace:*` → a published version, run Phase 2, done. A boundary you can't describe the crossing of isn't one.
 - [ ] **Task 4.6 — Move `examples/cpa-kb-demo`** (CPA synthetic docs: `1040-intake-checklist.md`, `boi-filing-sop.md`, `k1-treatment-reference.md`, `karbon-template-catalog.md`) into the plugin or the deployment repo, or replace it with a domain-neutral example. Low priority — demo data, not behavior.
 
-## Phase 4b — The TWK deployment repo (`twk-kb` or in `cpa-consulting`)
+## Phase 4b — The deployment repo (`kb-kb` or in `cpa-consulting`)
 
 Separate artifact, mostly **not code** — so the choice between a new repo and a
 folder in `cpa-consulting` is low-stakes and reversible. Pick either.
 
-- [ ] **Task 4b.1** — Holds: the TWK `SYSTEM_PROMPT_PATH` file, tenant env (`tenants/twk.env` per spec §2.3), SharePoint folder exclusions, staff roster, and the content-boundary runbook.
-- [ ] **Task 4b.2 — Move [`2026-08-03-kb-content-boundary.md`](./2026-08-03-kb-content-boundary.md) here.** It is entirely TWK-specific and currently sits in `rag-system/docs/`, which is exactly the coupling this plan exists to remove. Its _code_ tasks stay in `rag-system`; the firm-specific runbook goes with the deployment.
+- [ ] **Task 4b.1** — Holds: the firm `SYSTEM_PROMPT_PATH` file, tenant env (`tenants/kb.env` per spec §2.3), SharePoint folder exclusions, staff roster, and the content-boundary runbook.
+- [ ] **Task 4b.2 — Move [`2026-08-03-kb-content-boundary.md`](./2026-08-03-kb-content-boundary.md) here.** It is entirely the firm-specific and currently sits in `rag-system/docs/`, which is exactly the coupling this plan exists to remove. Its _code_ tasks stay in `rag-system`; the firm-specific runbook goes with the deployment.
 - [ ] **Task 4b.3 — ⚠ If it lands in `cpa-consulting`, respect that repo's rules.** Its `CLAUDE.md` binds `docs/issue-synthesis/` as _"maintained in place, never regenerated"_ — do not let a deployment folder disturb it.
 
 ---
@@ -321,7 +321,7 @@ folder in `cpa-consulting` is low-stakes and reversible. Pick either.
 Tier 1's remaining items — the TRI scanner, the Circular 230 disclaimer, Class
 A/B/C/D — are the hardest and **must come last**.
 
-**Why last, explicitly:** these are the machinery the TWK pilot's regulatory
+**Why last, explicitly:** these are the machinery the firm pilot's regulatory
 posture rests on, and the corpus currently has confirmed Class D data in it.
 Relocating §7216 controls while that is true, on a system in front of real staff,
 trades a real compliance property for an architectural one. Do it when the
@@ -344,7 +344,7 @@ corpus is clean and the pilot is stable.
 
 - [ ] `pnpm -r build` · `pnpm lint` 0 errors · full unit suite green.
 - [ ] `pnpm typecheck` shows **only** the 5 pre-existing `eval-faithfulness.spec.ts` errors.
-- [ ] **The behavior-unchanged proof — note the one deliberate exception.** With no `PLUGINS` and no `APP_NAME`, everything is byte-identical to today. **The prompt is not**: Phase 1 intentionally makes the unconfigured default domain-neutral, so an un-configured deployment now answers generically. That is the point of decision 3, not a regression. **The proof that matters instead:** the TWK deployment, with its `SYSTEM_PROMPT_PATH` set, produces a byte-identical request to today's. Verify that before deploying Phase 1 (Task 1.5).
+- [ ] **The behavior-unchanged proof — note the one deliberate exception.** With no `PLUGINS` and no `APP_NAME`, everything is byte-identical to today. **The prompt is not**: Phase 1 intentionally makes the unconfigured default domain-neutral, so an un-configured deployment now answers generically. That is the point of decision 3, not a regression. **The proof that matters instead:** the firm deployment, with its `SYSTEM_PROMPT_PATH` set, produces a byte-identical request to today's. Verify that before deploying Phase 1 (Task 1.5).
 - [ ] `grep -rniE "CPA|§7216|Karbon|BK-CATCHUP|tax advisor" packages/core/src packages/rag/src packages/services/src` → **zero** after Phase 1 and Phase 5. Tier-3 comment hits (`access-control.ts:5`, `metadata-policy.ts:6`) are acceptable until Phase 5; nothing behavioral is.
 - [ ] Registry has no extension point touching scope/audit/`dataClass` enforcement (Phase 3 test).
 - [ ] **The extraction-boundary check is wired into `pnpm lint` and fails on a deliberate violation** — add `import { createDb } from "@rag/db"` to the plugin, confirm lint goes red, revert. An unverified boundary check is worse than none: it grants false confidence at exactly the moment it matters.

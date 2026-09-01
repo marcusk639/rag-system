@@ -9,7 +9,9 @@
 # ids emitted by this pack, outside the engine and outside this file:
 #   - packages/core/src/content-safety.ts — the `kindFor` function maps a
 #     scanner id onto its legacy `RedactionKind` for the audit-findings mask
-#     table.
+#     table. It keys off the segment BEFORE the first `-`, so `ssn-unformatted`
+#     resolves to `ssn` for free; a genuinely new identifier still needs the
+#     list there extended.
 #   - packages/ingestion/src/classify-document.ts — `CLASS_D_IDENTIFIERS`
 #     decides which scanner ids escalate a document to Class D.
 # If you add e.g. `- id: passport, kind: identifying, ...` and do NOT update
@@ -24,18 +26,42 @@ pack:
   requiresCore: "^1.0.0"
 
 scanners:
-  # 123-45-6789 — delimiter-anchored, so a form number cannot match, and a bare
-  # 9-digit run is deliberately NOT an SSN.
+  # 123-45-6789 and 123 45 6789 — delimiter-anchored, so a form number cannot
+  # match. Space is accepted because tri-scanner.ts accepts it: when this rule
+  # was dash-only the redactor was strictly WEAKER than the scanner in the same
+  # package, so a spaced identifier passed redaction, got embedded and sent to
+  # the hosted model, and was only then blocked at generation — disclosed and
+  # unanswerable at once. The two must agree.
   - id: ssn
     kind: identifying
     disposition: exclude
-    pattern: '\b\d{3}-\d{2}-\d{4}\b'
+    pattern: '\b\d{3}[-\s]\d{2}[-\s]\d{4}\b'
 
-  # 12-3456789
+  # A bare 9-digit run that an adjacent SSN/TIN/ITIN label identifies — the OCR
+  # shape, where the separators are lost but the field label survives. Mirrors
+  # `SSN-unformatted` in tri-scanner.ts.
+  #
+  # The lookbehind is what makes this safe to mask: only the DIGITS are
+  # consumed, so "Client SSN on file: 123456789" keeps its label and prose and
+  # loses only the number. Matching the whole span would collapse all of it
+  # into one token.
+  #
+  # A bare 9-digit run with NO nearby label is deliberately not matched here —
+  # in this corpus those are far more often amounts or IDs, and blanket
+  # over-redaction would destroy the SOPs the assistant exists to answer from.
+  # The roster shape (a whole column of them) is caught instead by the
+  # density-gated tabular sweep in content-safety.ts.
+  - id: ssn-unformatted
+    kind: identifying
+    disposition: exclude
+    ignoreCase: true
+    pattern: '(?<=\b(?:SSN|SSNs|social\s+security(?:\s+(?:number|no\.?|#))?|TIN|ITIN)\b[\s\S]{0,40}?)\b\d{9}\b'
+
+  # 12-3456789 and 12 3456789 — same parity requirement as `ssn` above.
   - id: ein
     kind: identifying
     disposition: exclude
-    pattern: '\b\d{2}-\d{7}\b'
+    pattern: '\b\d{2}[-\s]\d{7}\b'
 
   # 9-digit runs only when the ABA checksum passes AND routing vocabulary is near.
   - id: routing

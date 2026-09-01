@@ -68,12 +68,46 @@ export async function listSources(db: Db) {
  * Returns `true` when a row was found and deleted, `false` when no source with
  * that id exists — the caller decides whether that warrants an error.
  */
-export async function purgeSource(db: Db, id: string): Promise<boolean> {
+export interface PurgeSourceResult {
+  /** False when no source with that id existed. */
+  deleted: boolean;
+  /**
+   * Logical object-store keys of the documents this purge removed, for the
+   * caller to delete from the bucket.
+   *
+   * Returned rather than deleted here because @rag/db must not depend on
+   * ObjectStore, and because only this function can see the rows: the cascade
+   * removes them, so the keys are unrecoverable a moment later. That is exactly
+   * how 1,747 objects (~499 MB) were orphaned in production — the DB rows went
+   * and nothing remembered which files had belonged to them.
+   */
+  storageKeys: string[];
+}
+
+export async function purgeSource(
+  db: Db,
+  id: string,
+): Promise<PurgeSourceResult> {
+  // Read the keys BEFORE the delete: `documents` has ON DELETE CASCADE to
+  // `sources`, so after the delete there is nothing left to ask.
+  const rows = await db
+    .select({ storageKey: documents.storageKey })
+    .from(documents)
+    .where(eq(documents.sourceId, id));
+
   const deleted = await db
     .delete(sources)
     .where(eq(sources.id, id))
     .returning({ id: sources.id });
-  return deleted.length > 0;
+
+  return {
+    deleted: deleted.length > 0,
+    // Null for documents ingested before storage was enabled, or whose upload
+    // failed — those have nothing to clean up.
+    storageKeys: rows
+      .map((r) => r.storageKey)
+      .filter((k): k is string => k !== null),
+  };
 }
 
 /**

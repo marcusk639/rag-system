@@ -3,7 +3,7 @@
 **Status:** Design — 2026-08-31. Approved in brainstorming.
 **Builds on:** [`2026-08-03-multi-vertical-rag-platform-design.md`](./2026-08-03-multi-vertical-rag-platform-design.md) — implements the `scanners:` slice of its pack format (§3.2, §3.4, §3.6, §3.7).
 **Supersedes in practice:** the ad-hoc screen in `scripts/extract-corpus.ts`, which reads the index rather than the source and cannot run at all now that the corpus is purged.
-**Blocks:** re-ingestion of the TWK corpus — and is the input that lets re-ingestion be precise rather than destructive.
+**Blocks:** re-ingestion of the firm corpus — and is the input that lets re-ingestion be precise rather than destructive.
 
 ---
 

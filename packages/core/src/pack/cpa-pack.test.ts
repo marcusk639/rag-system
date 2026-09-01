@@ -9,13 +9,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pack = loadPack(join(__dirname, "../../../../packs/cpa"));
 
 describe("cpa pack", () => {
-  it("declares the four identifier scanners the redactor relied on", () => {
+  it("declares the identifier scanners the redactor relied on", () => {
     expect(pack.scanners.map((s) => s.id).sort()).toEqual([
       "card",
       "ein",
       "routing",
       "ssn",
+      "ssn-unformatted",
     ]);
+  });
+
+  it("compiles ssn-unformatted case-insensitively so a lowercase label still gates", () => {
+    const s = pack.scanners.find((x) => x.id === "ssn-unformatted");
+    expect(s!.re.flags).toContain("i");
+  });
+
+  it("matches a label-gated bare SSN as high, masking only the digits", () => {
+    const text = "Client ssn on file: 123456789 — see the folder.";
+    const [m] = scanText(text, pack).filter(
+      (x) => x.scannerId === "ssn-unformatted",
+    );
+    expect(m!.confidence).toBe("high");
+    // The lookbehind must leave the label and the prose between it and the
+    // number outside the match — otherwise redaction swallows the sentence.
+    expect(text.slice(m!.start, m!.end)).toBe("123456789");
+  });
+
+  it("leaves an unlabelled bare 9-digit run to the density sweep, not this scanner", () => {
+    const hits = scanText("Reference document 100200300 in the folder.", pack);
+    expect(hits.filter((x) => x.scannerId === "ssn-unformatted")).toEqual([]);
   });
 
   it("matches a formatted SSN as high", () => {

@@ -96,7 +96,7 @@ May–September.
 - ~~New contributors should read this memo plus `PLAN-LAUNCH-READINESS.md` for the
   current go-live checklist.~~ **Corrected 2026-08-03:** `PLAN-LAUNCH-READINESS.md`
   is superseded. New contributors should read this memo plus
-  [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) (what is true now) and
+  [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) (what is true now) and
   [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md)
   (priority and sequencing).
 
@@ -107,7 +107,7 @@ May–September.
 > not connected — but the inference that the SharePoint KB is therefore free of
 > client data is wrong. A screen of all 858 indexed documents found client
 > billing files, engagement letters, and one spreadsheet holding 522 SSN-shaped
-> values. See [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) for the full
+> values. See [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) for the full
 > correction.
 >
 > The convergence decision itself is unaffected — it is about which codebase to

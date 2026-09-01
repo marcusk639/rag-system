@@ -74,12 +74,12 @@ a pilot is defensible without counsel sign-off.
 | `superpowers/plans/2026-08-03-kb-content-boundary.md`                | Plan/spec           | **8/10** | Correctly identifies F-1; its own remediation task names only 1 of 3 affected docs            |
 | `EVAL-GOLD-SET-GUIDE.md`                                             | Guide               | **8/10** | Clear, well-sequenced, honest about why a CPA is required                                     |
 | `ISSUES-AND-OPTIMIZATIONS.md`                                        | Knowledge/reference | **7/10** | Rich and well-maintained, but cites a document that never existed (F-6)                       |
-| `TWK-MANUAL-RUNBOOK.md`                                              | Plan/SOP            | **6/10** | Designated the remaining-work source, but ≥2 items completed elsewhere still shown open       |
+| `PILOT-MANUAL-RUNBOOK.md`                                            | Plan/SOP            | **6/10** | Designated the remaining-work source, but ≥2 items completed elsewhere still shown open       |
 | `ARCHITECTURE.md`                                                    | Knowledge/reference | **6/10** | Connector list and reranker status both wrong vs. code; undefined `CR-*` refs                 |
 | `CLAUDE.md`                                                          | Knowledge/reference | **5/10** | States four apps (there are five); retired embedding model; unrelated model-tier policy       |
-| `TWK-LAUNCH-STATUS.md`                                               | Knowledge/reference | **5/10** | Self-declared source of truth carrying the corpus claim (F-1) and a stale backup status       |
+| `PILOT-LAUNCH-STATUS.md`                                             | Knowledge/reference | **5/10** | Self-declared source of truth carrying the corpus claim (F-1) and a stale backup status       |
 | `README.md`                                                          | Guide/onboarding    | **4/10** | "Greenfield scaffold"; retired model; 4 of 6 connectors; per-package READMEs that don't exist |
-| `TWK-STAFF-BOT-ONE-PAGER.md`                                         | Guide               | **3/10** | Staff-facing, undated, repeats F-1, and documents a bot that cannot be used (F-2)             |
+| `STAFF-BOT-ONE-PAGER.md`                                             | Guide               | **3/10** | Staff-facing, undated, repeats F-1, and documents a bot that cannot be used (F-2)             |
 | `DEPLOYMENT-TARGET.md`                                               | Proposal/analysis   | **2/10** | Known stale since at least 2026-07-31; still carries no marker and is still linked to (F-3)   |
 | `dev-prompts.md/system-reviewer-aug-1.md`                            | —                   | **1/10** | Not documentation: a raw prompt paste in a directory misleadingly named `*.md`                |
 
@@ -91,21 +91,21 @@ a pilot is defensible without counsel sign-off.
 
 **1. Accuracy / currency — three documents assert the indexed corpus contains no client files; the project's own screen falsified it.**
 
-- `TWK-LAUNCH-STATUS.md:142-147` — _"**Verified 2026-08-01:** all 3 indexed sources are SharePoint, `data_class = general` … **no client files, no Onvio, no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none, which is why a scoped pilot is defensible without counsel sign-off."_
+- `PILOT-LAUNCH-STATUS.md:142-147` — _"**Verified 2026-08-01:** all 3 indexed sources are SharePoint, `data_class = general` … **no client files, no Onvio, no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none, which is why a scoped pilot is defensible without counsel sign-off."_
 - `PROTOTYPE-DELIVERY-OPTIONS.md:27-29` — _"There are no client files, no Onvio content, and no QuickBooks data."_
-- `TWK-STAFF-BOT-ONE-PAGER.md:28` — _"It does **not** have your client files, Onvio data, or anything outside the KB."_
+- `STAFF-BOT-ONE-PAGER.md:28` — _"It does **not** have your client files, Onvio data, or anything outside the KB."_
 
 `corpus-analysis/client-identifier-screen.md` screened the same 858-document corpus: **355 of 858 documents carry a pattern hit**, including engagement letters, per-client billing and production analyses under a dozen client-named folders, client fee/scope deliverables, and one spreadsheet with **522 SSN-shaped and 518 EIN-shaped values**. A second SharePoint drive contributes veteran-disability claim documents with SSN hits — content not represented in the three-source table at all.
 
 All three documents hedged correctly on the _mechanism_ (`data_class = general` is the ingestion default, not a verified judgment). They nonetheless stated the _conclusion_ in bold as verified, and built the compliance argument on it.
 
-**Fix:** Correct all three. `superpowers/plans/2026-08-03-kb-content-boundary.md` Task 1.3 already specifies this — but names only `TWK-LAUNCH-STATUS.md`. Add the other two, and prioritize the staff one-pager: it is the only one already distributed to people who will act on it.
+**Fix:** Correct all three. `superpowers/plans/2026-08-03-kb-content-boundary.md` Task 1.3 already specifies this — but names only `PILOT-LAUNCH-STATUS.md`. Add the other two, and prioritize the staff one-pager: it is the only one already distributed to people who will act on it.
 
 ---
 
 **2. Accuracy — the staff-facing one-pager documents a Teams bot that cannot currently be used.**
 
-`TWK-STAFF-BOT-ONE-PAGER.md:9-21` instructs staff to _"search for **TWK KB** in the chat/search bar"_ and to `@mention` it in channels. `TWK-LAUNCH-STATUS.md:163-172` records that the Teams bot is blocked: _"the Teams bot needs an Azure subscription the firm does not have … `az` returns `No subscriptions found`."_ `PROTOTYPE-DELIVERY-OPTIONS.md` Option 3 confirms it, and the shipped surface is the **web app** at a Railway URL — which the one-pager never mentions.
+`STAFF-BOT-ONE-PAGER.md:9-21` instructs staff to _"search for **the knowledge base** in the chat/search bar"_ and to `@mention` it in channels. `PILOT-LAUNCH-STATUS.md:163-172` records that the Teams bot is blocked: _"the Teams bot needs an Azure subscription the firm does not have … `az` returns `No subscriptions found`."_ `PROTOTYPE-DELIVERY-OPTIONS.md` Option 3 confirms it, and the shipped surface is the **web app** at a Railway URL — which the one-pager never mentions.
 
 A staff member following this document finds nothing and concludes the tool is broken. The document also carries no date, no status, and no pilot-scope note (contrast every other current doc).
 
@@ -117,9 +117,9 @@ A staff member following this document finds nothing and concludes the tool is b
 
 It states _"## Chosen target: single VM + docker-compose"_ (D1, 2026-06-14) with no supersession banner. Two other documents already record it as wrong:
 
-- `TWK-LAUNCH-STATUS.md:204` — _"`docs/DEPLOYMENT-TARGET.md` is stale … the system actually runs on **Railway**."_
+- `PILOT-LAUNCH-STATUS.md:204` — _"`docs/DEPLOYMENT-TARGET.md` is stale … the system actually runs on **Railway**."_
 - `superpowers/specs/2026-07-17-platform-tenancy-and-plugin-boundary.md:77` — same correction.
-- `PLAN-TWK-READINESS-AUTOMATABLE.md` even contains an unchecked task to reconcile it.
+- `PLAN-PILOT-READINESS-AUTOMATABLE.md` even contains an unchecked task to reconcile it.
 
 Meanwhile `DEPLOYMENT.md:44` still routes readers _into_ it: _"See `docs/DEPLOYMENT-TARGET.md` for the deployment-target rationale (D1) and provisioning steps."_ A reader arriving via that link gets no warning.
 
@@ -163,7 +163,7 @@ Verified against the tree:
 
 `docs/RAG-VALIDATION-REPORT.md` is cited by three documents, including as a _method_ input:
 
-- `TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md:3` — _"**Method:** … cross-referenced against two prior audits (`docs/RAG-VALIDATION-REPORT.md`, 2026-07-06 …)"_
+- `CPA-READINESS-ASSESSMENT-2026-07-08.md:3` — _"**Method:** … cross-referenced against two prior audits (`docs/RAG-VALIDATION-REPORT.md`, 2026-07-06 …)"_
 - `ISSUES-AND-OPTIMIZATIONS.md:318` — _"See `docs/RAG-VALIDATION-REPORT.md` (2026-07-06) for the verification pass that caught the drift."_
 
 `git log --all -- docs/RAG-VALIDATION-REPORT.md` returns **nothing** — it was never committed. Same for `docs/CPA-CONSULTING-PLAN-REVIEW.md`.
@@ -210,27 +210,27 @@ The system is deployed on Railway, auth-gated, serving a pilot, with 858 documen
 
 This is the repository's front door, and it is the single most misleading document in the corpus.
 
-**Fix:** Replace with the current state and a link to `TWK-LAUNCH-STATUS.md` (once F-1 is corrected).
+**Fix:** Replace with the current state and a link to `PILOT-LAUNCH-STATUS.md` (once F-1 is corrected).
 
 ---
 
 ### MEDIUM
 
-**9. Currency — `TWK-MANUAL-RUNBOOK.md`, designated the authoritative remaining-work source, shows completed items as open.** `TWK-LAUNCH-STATUS.md:58` says _"Tracked in detail in `docs/TWK-MANUAL-RUNBOOK.md`"_ and `:205` calls it _"the remaining-work source."_ But its item 3 (backup/restore) still reads _"Done when: you've personally watched a restore succeed once"_ — completed 2026-07-31 per `BACKUP-RESTORE-DRILL.md`; and item 4 (deploy `apps/web`) is framed as pending — live since 2026-08-01. **Fix:** reconcile, or demote it to background and name a single work source.
+**9. Currency — `PILOT-MANUAL-RUNBOOK.md`, designated the authoritative remaining-work source, shows completed items as open.** `PILOT-LAUNCH-STATUS.md:58` says _"Tracked in detail in `docs/PILOT-MANUAL-RUNBOOK.md`"_ and `:205` calls it _"the remaining-work source."_ But its item 3 (backup/restore) still reads _"Done when: you've personally watched a restore succeed once"_ — completed 2026-07-31 per `BACKUP-RESTORE-DRILL.md`; and item 4 (deploy `apps/web`) is framed as pending — live since 2026-08-01. **Fix:** reconcile, or demote it to background and name a single work source.
 
-**10. Currency — the reverse direction of the same problem: `TWK-LAUNCH-STATUS.md` is stale against `BACKUP-SCHEDULE-RUNBOOK.md`.** The runbook (2026-08-01) declares _"Stopgap LIVE since 2026-08-01 — nightly backups are running"_ and _"Closes: the open half of P0 gate #3."_ `TWK-LAUNCH-STATUS.md` P0 #3 still reads _"A restore is proven; a backup schedule is not"_ and lists enabling volume backups as _"do this now, it is checkboxes"_ — already done. **Fix:** update P0 #3.
+**10. Currency — the reverse direction of the same problem: `PILOT-LAUNCH-STATUS.md` is stale against `BACKUP-SCHEDULE-RUNBOOK.md`.** The runbook (2026-08-01) declares _"Stopgap LIVE since 2026-08-01 — nightly backups are running"_ and _"Closes: the open half of P0 gate #3."_ `PILOT-LAUNCH-STATUS.md` P0 #3 still reads _"A restore is proven; a backup schedule is not"_ and lists enabling volume backups as _"do this now, it is checkboxes"_ — already done. **Fix:** update P0 #3.
 
-**11. Precedence — four documents claim authority over the same ground, none referencing the others' claims.** `plans/2026-06-26-launch-readiness-consolidated.md` (_"Active. Single source of truth"_); `TWK-LAUNCH-STATUS.md` (_"current source of truth"_); `CPA-KB-IMPLEMENTATION-SPEC.md` (_"The authoritative master plan"_); and `PLAN-LAUNCH-READINESS.md`, which `DECISION-CPA-KB-RAG-CONVERGENCE.md:97` still tells new contributors to read — while the consolidated plan says it supersedes it. `PLAN-LAUNCH-READINESS.md` itself carries only _"Status: Draft — created 2026-06-14."_ **Fix:** one authority statement per scope, and put the superseded marker in the superseded file.
+**11. Precedence — four documents claim authority over the same ground, none referencing the others' claims.** `plans/2026-06-26-launch-readiness-consolidated.md` (_"Active. Single source of truth"_); `PILOT-LAUNCH-STATUS.md` (_"current source of truth"_); `CPA-KB-IMPLEMENTATION-SPEC.md` (_"The authoritative master plan"_); and `PLAN-LAUNCH-READINESS.md`, which `DECISION-CPA-KB-RAG-CONVERGENCE.md:97` still tells new contributors to read — while the consolidated plan says it supersedes it. `PLAN-LAUNCH-READINESS.md` itself carries only _"Status: Draft — created 2026-06-14."_ **Fix:** one authority statement per scope, and put the superseded marker in the superseded file.
 
 **12. Redundancy — `ARCHITECTURE.md` (18 KB) and `RAG-ARCHITECTURE-GUIDE.md` (32 KB) are two architecture documents that never reference each other.** Both open with a mental model, a pipeline diagram, and a package-layout table. They have already drifted (connector lists differ in framing; the guide carries the retired embedding model). **Fix:** merge, or state explicitly which is canonical and make the other link to it.
 
-**13. Metadata — 40 of 81 documents carry no status, date, or owner line.** Including `ARCHITECTURE.md`, `API.md`, `MCP.md`, `CONNECTORS.md`, `DEPLOYMENT.md`, `RAG-ARCHITECTURE-GUIDE.md`, `TWK-MANUAL-RUNBOOK.md`, `TWK-STAFF-BOT-ONE-PAGER.md`, and every `superpowers/plans/*` file. In a corpus whose central problem is knowing what is current, an undated document cannot be triaged. **Fix:** a one-line front-matter convention (`**Status:** … **Updated:** …`) applied to reference docs and plans first.
+**13. Metadata — 40 of 81 documents carry no status, date, or owner line.** Including `ARCHITECTURE.md`, `API.md`, `MCP.md`, `CONNECTORS.md`, `DEPLOYMENT.md`, `RAG-ARCHITECTURE-GUIDE.md`, `PILOT-MANUAL-RUNBOOK.md`, `STAFF-BOT-ONE-PAGER.md`, and every `superpowers/plans/*` file. In a corpus whose central problem is knowing what is current, an undated document cannot be triaged. **Fix:** a one-line front-matter convention (`**Status:** … **Updated:** …`) applied to reference docs and plans first.
 
 **14. Currency — `PLAN-LAUNCH-READINESS.md` and `DECISION-CPA-KB-RAG-CONVERGENCE.md` carry the F-1 premise as a live rationale.** `PLAN-LAUNCH-READINESS.md:11-12` — _"Real client data lives in **Onvio**, not the KB … §7216 is **not a launch gate** for tenant #1."_ `DECISION-CPA-KB-RAG-CONVERGENCE.md:77-82` — the same. Neither is corrected by F-1's fix list. **Fix:** include them in the F-1 sweep, or mark both superseded.
 
 **15. Topic focus — `CLAUDE.md` carries a general-purpose model-tier policy unrelated to this repo.** Lines 118-155 describe an 80/15/5 routing rule naming _"Firebase function scaffolding"_ and _"Content calendar generation, email drafts"_ — neither exists here. It dilutes an otherwise excellent orientation document. **Fix:** move to user-level config; keep only the RAG-specific calibration below it.
 
-**16. Discoverability — no entry point or index for 81 documents.** `README.md:50-56` lists five docs and stops. There is no map distinguishing current reference from historical plan, and the naming carries no signal — `PLAN-*` covers both complete and never-started work, and the two most current status documents (`TWK-LAUNCH-STATUS.md`, `PROTOTYPE-READINESS-REVIEW-2026-08-01.md`) sort into unrelated parts of an alphabetical listing. **Fix:** a `docs/README.md` index with a Current / Historical split.
+**16. Discoverability — no entry point or index for 81 documents.** `README.md:50-56` lists five docs and stops. There is no map distinguishing current reference from historical plan, and the naming carries no signal — `PLAN-*` covers both complete and never-started work, and the two most current status documents (`PILOT-LAUNCH-STATUS.md`, `PROTOTYPE-READINESS-REVIEW-2026-08-01.md`) sort into unrelated parts of an alphabetical listing. **Fix:** a `docs/README.md` index with a Current / Historical split.
 
 ### LOW
 
@@ -251,7 +251,7 @@ This is the repository's front door, and it is the single most misleading docume
 - **The structural failure, stated once:** corrections are written into the _discovering_ document and never propagated to the _asserting_ one. Confirmed independently six times — F-1 (corpus claim), F-3 (`DEPLOYMENT-TARGET`), F-9 and F-10 (runbook and launch status, in opposite directions), F-11 (four authority claims), F-14. Every individual document is honest; the corpus is not, because honesty was recorded in the wrong place. **This is the finding to fix as a process, not one document at a time.**
 - **Contradictions:** F-1 (three docs vs. the corpus screen) · F-4 (two live 2026-08-03 architectures) · F-5 (four docs vs. code on connectors/apps/reranker) · F-7 (three docs vs. `ARCHITECTURE.md` and code) · F-9/F-10 (mutually stale pair).
 - **Redundancy / SSOT:** F-12 (two architecture docs) · the connector list is restated in four places with no canonical home · the eval story is spread across `EVAL-BASELINE`, `EVAL-AND-FEEDBACK`, `EVAL-GOLD-SET-GUIDE`, and `EVAL-CORPUS-GROUND-TRUTH` — these are well cross-linked and are a _good_ example of the opposite pattern.
-- **Missing cross-references:** `DEPLOYMENT.md` → the Railway reality (it links only to the stale target doc) · `ARCHITECTURE.md` → `CPA-COMPLIANCE-REQUIREMENTS.md` for `CR-*` · `README.md` → `TWK-LAUNCH-STATUS.md` for actual state · the plugin plan ↔ the packs spec.
+- **Missing cross-references:** `DEPLOYMENT.md` → the Railway reality (it links only to the stale target doc) · `ARCHITECTURE.md` → `CPA-COMPLIANCE-REQUIREMENTS.md` for `CR-*` · `README.md` → `PILOT-LAUNCH-STATUS.md` for actual state · the plugin plan ↔ the packs spec.
 - **Coverage gaps:** no `docs/README.md` index (F-16) · no per-package READMEs despite `README.md:73` promising them · five documents the packs spec §9 declares as deliverables are unwritten (`PACK-AUTHORING`, `DEPLOYING`, `UPGRADING`, `SETTINGS`, `LOCAL-GENERATION`) — expected, listed here so they are not mistaken for the broken references in F-6.
 - **Citation ambiguity (distinct from F-6):** references such as `docs/rag/kb-design.md` and `docs/issue-synthesis/policies/…` resolve in **`cpa-consulting`**, not here. They exist and are correct, but read as local paths. Prefix them `cpa-consulting/` — most already are; the inconsistent ones are the hazard.
 - **Naming consistency:** `PLAN-*` marks both completed and never-started work · `docs/plans/` and `docs/superpowers/plans/` are two plan directories with no stated distinction · date-in-filename is used in `docs/plans/` and `superpowers/` but not at top level.
@@ -261,9 +261,9 @@ This is the repository's front door, and it is the single most misleading docume
 These need a human decision; they are not findings to fix.
 
 1. **Does the packs spec fully supersede the plugin plan, or do parts survive?** The plan's Phase 0 discovery (packages are unpublishable as-is; `cpa-consulting` is not a code repo) is real and is not duplicated in the spec. Answer decides whether F-4 is a supersede or a merge.
-2. **Is `TWK-STAFF-BOT-ONE-PAGER.md` already distributed?** If staff have it, F-1 and F-2 are a correction to send, not just an edit to make.
+2. **Is `STAFF-BOT-ONE-PAGER.md` already distributed?** If staff have it, F-1 and F-2 are a correction to send, not just an edit to make.
 3. ~~**Do `RAG-VALIDATION-REPORT.md` and `CPA_Firm_Operations_Consultant_Briefing.md` exist outside this repo?**~~ **ANSWERED 2026-08-03.** The briefing exists in `cpa-consulting` and its premise checks out. `RAG-VALIDATION-REPORT.md` and `CPA-CONSULTING-PLAN-REVIEW.md` are not present anywhere under `~/dev` — the documents resting on _those two_ still need their claims re-grounded (F-6).
-4. **Should TWK-specific docs stay in `rag-system/docs/`?** The plugin plan's Task 4b.2 proposes moving the content-boundary plan out; ~10 `TWK-*`/`CPA-*` documents raise the same question, and it interacts with the genericisation work.
+4. **Should the firm-specific docs stay in `rag-system/docs/`?** The plugin plan's Task 4b.2 proposes moving the content-boundary plan out; ~10 `the firm-*`/`CPA-*` documents raise the same question, and it interacts with the genericisation work.
 5. **Is `docs/plans/` vs `docs/superpowers/plans/` a meaningful split?** If not, merging removes a standing source of confusion.
 
 ## Recommended Action Plan

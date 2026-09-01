@@ -359,3 +359,88 @@ describe("applyRedaction", () => {
     expect(result).toBe(Array(N).fill("[X]").join("|"));
   });
 });
+
+describe("parity with the generation-time TRI scanner", () => {
+  // The two detectors in this package must not disagree about what counts as an
+  // identifier. When the redactor was strictly weaker, the chain was: no
+  // redaction -> not quarantined -> embedded and sent to the hosted model (the
+  // §7216 disclosure) -> an audit event written documenting it -> generation
+  // then refuses to answer from that document forever. Disclosed AND
+  // unanswerable — the worst of both outcomes.
+  //
+  // These cases are exactly the ones verified to reach the embedding API.
+
+  it.each([
+    ["space-separated SSN", "Client SSN: 123 45 6789"],
+    ["space-separated EIN", "Employer EIN 12 3456789"],
+  ])(
+    "redacts %s, matching the scanner's dash-or-space rule",
+    (_label, text) => {
+      const { findings } = redactText(text, TEST_PACK);
+      expect(findings.length).toBeGreaterThan(0);
+    },
+  );
+
+  it.each([
+    ["labelled bare SSN", "SSN 123456789"],
+    ["labelled bare ITIN", "ITIN 912781234"],
+    ["TIN with colon", "TIN: 123456789"],
+    ["cross-line OCR label", "Social Security Number\n123456789"],
+  ])("redacts %s, matching SSN-unformatted", (_label, text) => {
+    const { findings } = redactText(text, TEST_PACK);
+    expect(findings.length).toBeGreaterThan(0);
+  });
+
+  it("still redacts the canonical dash forms (regression guard)", () => {
+    expect(redactText("SSN 123-45-6789", TEST_PACK).findings.length).toBe(1);
+    expect(redactText("EIN 12-3456789", TEST_PACK).findings.length).toBe(1);
+  });
+});
+
+describe("tabular identifier columns", () => {
+  // The corpus screen's worst document held 522 SSN-shaped values in a
+  // spreadsheet. Parsed to markdown a row looks like
+  //   | Smith, John | 123456789 | 45,200 |
+  // with the "SSN" header rows away, so an adjacent-label rule cannot see it
+  // and the ABA/routing gate does not fire. It was caught by nothing.
+  //
+  // The signal that separates a roster from an SOP is DENSITY: a roster has
+  // many bare 9-digit runs, a procedure document has none or one incidental
+  // form number. Gating on vocabulary AND repetition targets the roster shape
+  // without redacting the SOPs the assistant exists to answer from.
+
+  const roster = [
+    "| Client | SSN | YTD |",
+    "| --- | --- | --- |",
+    "| Smith, John | 123456789 | 45,200 |",
+    "| Doe, Jane | 987654321 | 51,000 |",
+    "| Roe, Sam | 456789123 | 38,750 |",
+  ].join("\n");
+
+  it("redacts a column of bare 9-digit identifiers", () => {
+    const { totalRedacted, text } = redactText(roster, TEST_PACK);
+    // `findings` is one entry PER KIND, so assert the occurrence count.
+    expect(totalRedacted).toBeGreaterThanOrEqual(3);
+    expect(text).not.toContain("123456789");
+    expect(text).not.toContain("987654321");
+  });
+
+  it("leaves an ordinary SOP alone when it has one incidental 9-digit number", () => {
+    // The false positive that matters: over-redaction turns a procedure into
+    // unusable prose, which is the failure that looks like success.
+    const sop =
+      "Review the prior-year return before filing. Reference document " +
+      "100200300 in the engagement folder. Confirm the client signed Form 8879.";
+    expect(redactText(sop, TEST_PACK).findings.length).toBe(0);
+  });
+
+  it("does not fire on repeated 9-digit runs with no identifier vocabulary", () => {
+    const invoices = [
+      "| Invoice | Ref | Total |",
+      "| A | 100200300 | 10 |",
+      "| B | 100200301 | 20 |",
+      "| C | 100200302 | 30 |",
+    ].join("\n");
+    expect(redactText(invoices, TEST_PACK).findings.length).toBe(0);
+  });
+});

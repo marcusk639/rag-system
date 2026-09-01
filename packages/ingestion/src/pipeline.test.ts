@@ -676,8 +676,9 @@ describe("TRI compliance scanning at ingest", () => {
 });
 
 describe("runIngestion — fails closed at ENTRY when unconfigured", () => {
-  // `pack` is optional on PipelineDeps only because no production caller
-  // (apps/worker) wires a real one in yet. A missing pack is a CONFIGURATION
+  // `pack` is typed optional on PipelineDeps so its omission fails at runtime
+  // rather than compile time — which is what protects JS callers and the
+  // `as any` deps objects tests build. A missing pack is a CONFIGURATION
   // gap, not a property of any one document, so `runIngestion` must detect
   // it ONCE, up front, and reject the whole run loudly — never silently
   // quarantine every document one-by-one as if each had its own problem.

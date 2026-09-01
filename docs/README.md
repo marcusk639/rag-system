@@ -15,7 +15,7 @@ This page exists so you can tell which is which.
 
 | If you want to know…                            | Read                                                                                     |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| What is deployed, what is broken, what is gated | [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md)                                         |
+| What is deployed, what is broken, what is gated | [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md)                                     |
 | How the system works                            | [`ARCHITECTURE.md`](./ARCHITECTURE.md) — canonical                                       |
 | How to change the code without breaking it      | [`RAG-ARCHITECTURE-GUIDE.md`](./RAG-ARCHITECTURE-GUIDE.md) — engineering companion       |
 | What the known defects are, ranked              | [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) |
@@ -24,7 +24,7 @@ This page exists so you can tell which is which.
 
 ⚠ **Never read a `PLAN-*.md` checkbox as a status signal.** Those files are
 execution guides, not trackers; several are ~1% checked with the work long since
-complete. Status lives in `TWK-LAUNCH-STATUS.md`.
+complete. Status lives in `PILOT-LAUNCH-STATUS.md`.
 
 ---
 
@@ -47,15 +47,15 @@ Describes how the system works today. Should be correct; correct it if not.
 
 | Document                                                                                                   | Covers                                                                                                           |
 | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md)                                                           | **The status source.** Deployed surfaces, P0/P1/P2 gates                                                         |
-| [`TWK-MANUAL-RUNBOOK.md`](./TWK-MANUAL-RUNBOOK.md)                                                         | Procedure for the human/legal/infra items. Not a status source                                                   |
+| [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md)                                                       | **The status source.** Deployed surfaces, P0/P1/P2 gates                                                         |
+| [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md)                                                     | Procedure for the human/legal/infra items. Not a status source                                                   |
 | [`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md)                                               | Backup layers and what each does and does not cover                                                              |
 | [`BACKUP-RESTORE-DRILL.md`](./BACKUP-RESTORE-DRILL.md)                                                     | The proven restore procedure, incl. applying a migration by hand                                                 |
-| [`TWK-AZURE-DEPLOY-RUNBOOK.md`](./TWK-AZURE-DEPLOY-RUNBOOK.md)                                             | Entra + Azure Bot setup for web and Teams                                                                        |
+| [`AZURE-DEPLOY-RUNBOOK.md`](./AZURE-DEPLOY-RUNBOOK.md)                                                     | Entra + Azure Bot setup for web and Teams                                                                        |
 | [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md) | **Active** — priority and sequencing only. Its §7216 reconciliation rests on a falsified premise; see its banner |
 | [`DECISION-CPA-KB-RAG-CONVERGENCE.md`](./DECISION-CPA-KB-RAG-CONVERGENCE.md)                               | Live decision memo (build on `rag-system`). One falsified premise in §5, flagged in place                        |
 | [`PROTOTYPE-DELIVERY-OPTIONS.md`](./PROTOTYPE-DELIVERY-OPTIONS.md)                                         | Ranked delivery surfaces. Carries a corrected compliance premise                                                 |
-| [`TWK-STAFF-BOT-ONE-PAGER.md`](./TWK-STAFF-BOT-ONE-PAGER.md)                                               | ⛔ **Not for distribution** — describes an undeployed surface                                                    |
+| [`STAFF-BOT-ONE-PAGER.md`](./STAFF-BOT-ONE-PAGER.md)                                                       | ⛔ **Not for distribution** — describes an undeployed surface                                                    |
 | [`compliance/`](./compliance/)                                                                             | DPA artifacts. The Gemini DPA is **PROVISIONAL, not counsel-confirmed**                                          |
 
 ## Current — evaluation
@@ -71,14 +71,14 @@ A well-cross-linked set; read in this order.
 
 ## Current — reviews and analysis
 
-| Document                                                                                     | Covers                                                            |
-| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md)     | End-to-end defect review, severity-scored. Several fixed          |
-| [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md)                               | Standing backlog with resolution history                          |
-| [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md)                 | This corpus, reviewed                                             |
-| [`QUEUE-ARCHITECTURE-REVIEW.md`](./QUEUE-ARCHITECTURE-REVIEW.md)                             | Advisory: keep pg-boss. Still valid                               |
-| [`HOOK-INJECTION-FINDINGS.md`](./HOOK-INJECTION-FINDINGS.md)                                 | Tooling security investigation, self-corrected                    |
-| [`TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`](./TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md) | Broad gap audit. Many items since resolved; cites one missing doc |
+| Document                                                                                 | Covers                                                            |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) | End-to-end defect review, severity-scored. Several fixed          |
+| [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md)                           | Standing backlog with resolution history                          |
+| [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md)             | This corpus, reviewed                                             |
+| [`QUEUE-ARCHITECTURE-REVIEW.md`](./QUEUE-ARCHITECTURE-REVIEW.md)                         | Advisory: keep pg-boss. Still valid                               |
+| [`HOOK-INJECTION-FINDINGS.md`](./HOOK-INJECTION-FINDINGS.md)                             | Tooling security investigation, self-corrected                    |
+| [`CPA-READINESS-ASSESSMENT-2026-07-08.md`](./CPA-READINESS-ASSESSMENT-2026-07-08.md)     | Broad gap audit. Many items since resolved; cites one missing doc |
 
 ## Active design and plans (2026-08)
 
@@ -101,7 +101,7 @@ Kept for their reasoning, their copy-this-pattern references, and the record.
 
 - **Superseded planning:** [`PLAN-LAUNCH-READINESS.md`](./PLAN-LAUNCH-READINESS.md) ⛔ · [`CPA-KB-IMPLEMENTATION-SPEC.md`](./CPA-KB-IMPLEMENTATION-SPEC.md) ⛔ · [`DEPLOYMENT-TARGET.md`](./DEPLOYMENT-TARGET.md) ⛔ · [`CPA-KB-ADOPTION-PLAN.md`](./CPA-KB-ADOPTION-PLAN.md) · [`app-comparison-2026-06-21.md`](./app-comparison-2026-06-21.md)
 - **Completed execution plans:** `PLAN-KB-SYNC.md` · `PLAN-POST-MERGE-FOLLOWUPS.md` · `PLAN-HOOK-INJECTION-REMEDIATION.md` · `PLAN-FIVE-SYSTEMS.md` (+ `-RESUME`) · `plans/2026-06-26-phase-a-7216-architecture.md` · `plans/2026-06-23-test-fixtures-package.md`
-- **Partially executed / stale checkboxes:** `PLAN-TWK-READINESS-AUTOMATABLE.md` (17 tasks — recorded complete in `TWK-LAUNCH-STATUS.md`, boxes unchecked here) · `PLAN-SHAREPOINT-READINESS.md` · `PLAN-SHAREPOINT-GOLIVE.md` · `PLAN-PER-PAGE-REENQUEUE.md` · `PLAN-CPA-COMPLIANCE.md` · `PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md` (its premise **is** verified — the source briefing lives in `cpa-consulting`; one secondary source is missing) · `PLAN-CHAT-FRONTEND.md` · `PLAN-LIVE-DEPLOY-AND-CHAT-UI.md` · `HARDEN-SEARCH-INDEX-GUARDS.md` · `plans/2026-06-21-prelaunch-hardening-plan.md` · `plans/2026-06-22-phase-g3-retrieval-quality.md`
+- **Partially executed / stale checkboxes:** `PLAN-PILOT-READINESS-AUTOMATABLE.md` (17 tasks — recorded complete in `PILOT-LAUNCH-STATUS.md`, boxes unchecked here) · `PLAN-SHAREPOINT-READINESS.md` · `PLAN-SHAREPOINT-GOLIVE.md` · `PLAN-PER-PAGE-REENQUEUE.md` · `PLAN-CPA-COMPLIANCE.md` · `PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md` (its premise **is** verified — the source briefing lives in `cpa-consulting`; one secondary source is missing) · `PLAN-CHAT-FRONTEND.md` · `PLAN-LIVE-DEPLOY-AND-CHAT-UI.md` · `HARDEN-SEARCH-INDEX-GUARDS.md` · `plans/2026-06-21-prelaunch-hardening-plan.md` · `plans/2026-06-22-phase-g3-retrieval-quality.md`
 - **Runbooks for one-time events:** `PHASE-2-RAILWAY-RUNBOOK.md` · `PHASE-3-SHAREPOINT-RUNBOOK.md` · `PHASE-3-FIRST-SYNC-RESUME.md`
 - **Research and spikes:** `AUTH-AND-SESSIONS-RESEARCH.md` · `ECFR-CONNECTOR-SPIKE.md` · `SESSION-2026-05-26.md` (greenfield checkpoint; its "read this first" advice is long obsolete)
 - **Earlier superpowers plans/specs:** `superpowers/plans/2026-07-{06,15,16}-*` · `superpowers/specs/2026-07-{06,16}-*`
@@ -113,7 +113,7 @@ Kept for their reasoning, their copy-this-pattern references, and the record.
 
 Tracked in [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md); listed here so they are not rediscovered.
 
-- **Cited but not found anywhere:** `RAG-VALIDATION-REPORT.md`, `CPA-CONSULTING-PLAN-REVIEW.md`, `EVAL-ANSWER-BASELINE.md`, `PLAN-P0-GATES-EXECUTION.md`, `compliance/BREACH-IR-RUNBOOK.md`, `compliance/VENDOR-REGISTER.md`. **Only the first two carry a warning in their citing documents so far** — `ISSUES-AND-OPTIMIZATIONS.md`, `TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`, and `PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md`. The rest are still cited without one, in `superpowers/plans/2026-07-16-e2e-autopilot-and-feedback.md` and `PLAN-CPA-COMPLIANCE.md`.
+- **Cited but not found anywhere:** `RAG-VALIDATION-REPORT.md`, `CPA-CONSULTING-PLAN-REVIEW.md`, `EVAL-ANSWER-BASELINE.md`, `PLAN-P0-GATES-EXECUTION.md`, `compliance/BREACH-IR-RUNBOOK.md`, `compliance/VENDOR-REGISTER.md`. **Only the first two carry a warning in their citing documents so far** — `ISSUES-AND-OPTIMIZATIONS.md`, `CPA-READINESS-ASSESSMENT-2026-07-08.md`, and `PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md`. The rest are still cited without one, in `superpowers/plans/2026-07-16-e2e-autopilot-and-feedback.md` and `PLAN-CPA-COMPLIANCE.md`.
 - **Cited as local but actually cross-repo:** `CPA_Firm_Operations_Consultant_Briefing.md` **does exist**, at `cpa-consulting/docs/marcus-onboarding/`. It was briefly and wrongly listed here as missing. Same shape as the `docs/rag/…` citations below — check `~/dev/cpa-consulting` before concluding a document is gone.
 - **Planned but unwritten** (deliverables of the packs spec §9): `PACK-AUTHORING.md`, `DEPLOYING.md`, `UPGRADING.md`, `SETTINGS.md`, `LOCAL-GENERATION.md`.
 - **Cross-repo citations:** paths like `docs/rag/kb-design.md` and `docs/issue-synthesis/policies/…` resolve in **`cpa-consulting`**, not here. Prefix them `cpa-consulting/`.

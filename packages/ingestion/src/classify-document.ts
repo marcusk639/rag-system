@@ -7,7 +7,7 @@ import type { RedactionFinding } from "@rag/core";
  * ── The hole this closes ───────────────────────────────────────────────────
  *
  * Classification was **source-level only**: one `sources.data_class` value
- * decided the class of every document beneath it. The TWK knowledge base was
+ * decided the class of every document beneath it. The knowledge base was
  * declared `general` → Class A, so all 858 documents were treated as public
  * regardless of what they actually contained. That is how a spreadsheet with
  * 522 Social-Security-shaped values reached a third-party embedding API.

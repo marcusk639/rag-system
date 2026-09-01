@@ -321,6 +321,19 @@ export async function ingestOne(
   //    a document that is never parsed cannot be chunked, embedded, or stored.
   //    The 2026-08-03 screen's strongest signal was LOCATION, not content —
   //    per-client billing files sat under client-named folders.
+  //    Layer 2 reads `metadata.path`, which ONLY the SharePoint connector
+  //    populates today. On every other connector the check evaluates undefined
+  //    and returns not-excluded — a result indistinguishable in the logs from a
+  //    document that was genuinely checked and cleared. A guard that cannot run
+  //    has to say so, or its silence reads as protection it never provided.
+  if (source.metadata?.path === undefined) {
+    log.warn(
+      { marker: "ingest.path_unavailable", connectorKind: source.mimeType },
+      "structural exclusion (Layer 2) could not evaluate: this connector " +
+        "supplies no metadata.path, so location-based client-content " +
+        "filtering is NOT in effect for this document",
+    );
+  }
   const exclusion = isExcludedPath(source.metadata?.path);
   if (exclusion.excluded) {
     log.warn(

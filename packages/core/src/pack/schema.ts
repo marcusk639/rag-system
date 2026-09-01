@@ -12,6 +12,49 @@ const DEFAULT_DISPOSITION: Record<ScannerKind, Disposition> = {
   contextual: "flag",
 };
 
+/**
+ * True when the pattern is nothing BUT a leading lookaround — `(?=…)`,
+ * `(?!…)`, `(?<=…)`, `(?<!…)` — with nothing after it to consume a character.
+ *
+ * The distinction matters: `(?<=SSN:\s*)\d{9}` also STARTS with a lookaround
+ * but goes on to consume nine digits, and is exactly the shape a label-gated
+ * identifier rule needs (mask the number, not the label). An earlier version
+ * of this check tested only the prefix and rejected that pattern as
+ * zero-width, which it is not.
+ *
+ * Walks the leading group to its matching `)`, tracking escapes and character
+ * classes so a `)` inside `\)` or `[)]` does not close it early. Zero-width is
+ * only claimed when that `)` is the pattern's last character.
+ */
+function isEntirelyLookaround(pattern: string): boolean {
+  if (!/^\(\?(?:[=!]|<[=!])/.test(pattern)) return false;
+  let depth = 0;
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "\\") {
+      i++; // skip the escaped character
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") inClass = false;
+      continue;
+    }
+    if (c === "[") {
+      inClass = true;
+    } else if (c === "(") {
+      depth++;
+    } else if (c === ")") {
+      depth--;
+      // The leading lookaround just closed. Zero-width only if nothing follows.
+      if (depth === 0) return i === pattern.length - 1;
+    }
+  }
+  // Unbalanced — `new RegExp` above already rejected it, so this is unreachable
+  // in practice. Do not claim zero-width on a pattern we could not parse.
+  return false;
+}
+
 const ScannerDecl = z
   .object({
     id: z.string().min(1),
@@ -19,6 +62,13 @@ const ScannerDecl = z
     disposition: Disposition.optional(),
     /** JS regex source. Compiled at load; `g` is added by the engine. */
     pattern: z.string().min(1),
+    /**
+     * Compile the pattern case-insensitively (`i`). Needed by patterns gated
+     * on a written label — "SSN", "ssn" and "Social Security" are the same
+     * field. Off by default: digit patterns gain nothing from it, and `i`
+     * widens what a character class matches.
+     */
+    ignoreCase: z.boolean().default(false),
     /** Registered name of a compiled-in validator, e.g. "luhn". */
     validator: z.string().min(1).optional(),
     /** Registered name of a compiled-in context matcher, e.g. "account-vocab". */
@@ -77,10 +127,10 @@ const ScannerDecl = z
     // pattern). `scanText`'s runtime throw on any zero-length match is the
     // real backstop; this just catches the obvious cases before a pack ever
     // ships.
-    if (/^\(\?[=<!]/.test(s.pattern) || s.pattern === "\\b") {
+    if (isEntirelyLookaround(s.pattern) || s.pattern === "\\b") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `scanner "${s.id}": pattern is structurally zero-width (starts with a lookaround, or is exactly "\\b") — it can never consume a character, so it will match zero-width at every position where its assertion holds, destroying the document when redacted`,
+        message: `scanner "${s.id}": pattern is structurally zero-width (it is nothing but a lookaround, or is exactly "\\b") — it can never consume a character, so it will match zero-width at every position where its assertion holds, destroying the document when redacted`,
       });
     }
   });
