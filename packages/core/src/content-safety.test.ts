@@ -266,4 +266,66 @@ describe("applyRedaction", () => {
     ];
     expect(applyRedaction(text, matches, () => "[X]")).toBe(text);
   });
+
+  it("merges two overlapping high matches into one masked span with no text loss (Ruling R9)", () => {
+    // Confirmed defect before R9: replacing right-to-left WITHOUT merging
+    // silently dropped the second match's mask token AND the trailing text
+    // after it ("01[a]" instead of "01[a]01") because the earlier match's
+    // stale `end` offset landed past the end of the already-shortened string.
+    const text = "0123456789012345678901"; // 22 chars, indices 0..21
+    const matches: ScanMatch[] = [
+      {
+        scannerId: "a",
+        kind: "identifying",
+        disposition: "exclude",
+        confidence: "high",
+        start: 2,
+        end: 13,
+        maskedSample: "x",
+      },
+      {
+        scannerId: "b",
+        kind: "identifying",
+        disposition: "exclude",
+        confidence: "high",
+        start: 8,
+        end: 20,
+        maskedSample: "x",
+      },
+    ];
+    // One merged span [2, 20), masked once with the EARLIEST (outermost,
+    // smallest-start) contributing match's token — "a", not "b" — and the
+    // untouched text on both sides ("01" ... "01") fully preserved.
+    expect(applyRedaction(text, matches, (m) => `[${m.scannerId}]`)).toBe(
+      "01[a]01",
+    );
+  });
+
+  it("does NOT merge adjacent-but-not-overlapping matches (does not over-reach)", () => {
+    const text = "abcdefghij";
+    const matches: ScanMatch[] = [
+      {
+        scannerId: "m1",
+        kind: "identifying",
+        disposition: "exclude",
+        confidence: "high",
+        start: 2,
+        end: 5,
+        maskedSample: "x",
+      },
+      {
+        scannerId: "m2",
+        kind: "identifying",
+        disposition: "exclude",
+        confidence: "high",
+        start: 5,
+        end: 8,
+        maskedSample: "x",
+      },
+    ];
+    // Two separate mask tokens, not one merged span covering [2, 8).
+    expect(applyRedaction(text, matches, (m) => `[${m.scannerId}]`)).toBe(
+      "ab[m1][m2]ij",
+    );
+  });
 });

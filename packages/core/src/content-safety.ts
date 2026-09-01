@@ -49,6 +49,19 @@ const MASK: Record<RedactionKind, string> = {
  * Right-to-left matters: replacing left-to-right shifts every later offset by the
  * difference between the match length and the mask length, silently corrupting
  * subsequent replacements in a dense document.
+ *
+ * Ruling R9: overlapping `high` ranges are merged into a single masked span BEFORE
+ * replacement, rather than replaced independently. Two overlapping replacements
+ * applied right-to-left corrupt the text: the second (leftmost-start) match's
+ * `end` offset was computed against the ORIGINAL text and goes stale the instant
+ * the first (rightmost-start) replacement changes the string's length — the
+ * observed failure mode was silent, with a mask token AND trailing document text
+ * both disappearing. Merging the union and masking it once with a single token
+ * cannot do that: every byte of every overlapping match's span is covered by
+ * exactly one replacement, so no fragment of a redacted value can survive.
+ * Merely ADJACENT matches (one's `end` equals the next's `start`) are NOT
+ * merged — they don't corrupt each other under right-to-left replacement, and
+ * merging them would mask text no scanner actually matched.
  */
 export function applyRedaction(
   text: string,
@@ -57,10 +70,28 @@ export function applyRedaction(
 ): string {
   const high = matches
     .filter((m) => m.confidence === "high")
-    .sort((a, b) => b.start - a.start);
+    .sort((a, b) => a.start - b.start);
+
+  // Coalesce overlapping matches into spans. Each span's `token` is the FIRST
+  // (earliest-starting, i.e. outermost) match that opened it — never
+  // reassigned as later overlapping matches extend the span — per R9's
+  // instruction to mask with the earliest contributing scanner's token.
+  const spans: { start: number; end: number; token: ScanMatch }[] = [];
+  for (const m of high) {
+    const open = spans[spans.length - 1];
+    if (open && m.start < open.end) {
+      open.end = Math.max(open.end, m.end);
+    } else {
+      spans.push({ start: m.start, end: m.end, token: m });
+    }
+  }
+
   let out = text;
-  for (const m of high)
-    out = out.slice(0, m.start) + mask(m) + out.slice(m.end);
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const span = spans[i];
+    if (!span) continue;
+    out = out.slice(0, span.start) + mask(span.token) + out.slice(span.end);
+  }
   return out;
 }
 

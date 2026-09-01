@@ -675,11 +675,13 @@ describe("TRI compliance scanning at ingest", () => {
 });
 
 describe("PipelineDeps.pack — fails closed when unconfigured", () => {
-  it("quarantines the document rather than indexing it unredacted when no pack is wired", async () => {
+  it("quarantines the document AND writes a durable ingest_log audit row when no pack is wired", async () => {
     // `pack` is optional on PipelineDeps only because no production caller
     // (apps/worker) wires a real one in yet. Until it does, ingestOne must
     // refuse to index ANY document rather than skip redaction — this pins
-    // that fail-closed behaviour (Ruling R7).
+    // that fail-closed behaviour (Ruling R7). The audit write is Ruling R8:
+    // quarantining without a durable record destroys the compliance evidence
+    // that the pipeline saw (or, here, COULD NOT check) sensitive content.
     const deps = { ...makeDeps(), pack: undefined };
     const { connector } = makeConnector([
       { documents: ["doc-1"], nextCursor: null, done: true },
@@ -693,6 +695,48 @@ describe("PipelineDeps.pack — fails closed when unconfigured", () => {
     expect(logIngestEventMock).not.toHaveBeenCalledWith(
       deps.db,
       expect.objectContaining({ action: "ingested" }),
+    );
+    // The durable audit row, naming the missing-pack cause specifically.
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: null,
+        externalId: "doc-1",
+        action: "blocked",
+        rejectionReason: expect.stringContaining("no identifier-scanner pack"),
+      }),
+    );
+  });
+
+  it("distinguishes a genuine redaction failure from a missing pack in the audit row", async () => {
+    // Same catch block, different cause: a reader of ingest_log must be able
+    // to tell "no pack was configured" (a config gap) apart from "redaction
+    // threw on this document" (something about this document's content).
+    const deps = makeDeps();
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
+      title: "broken",
+      markdown: null as unknown as string,
+      tables: [],
+      metadata: {},
+    });
+    const { connector } = makeConnector([
+      { documents: ["doc-1"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src-id", connector, null, OPTS, deps);
+
+    expect(result.chunksCreated).toBe(0);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src-id",
+        docId: null,
+        action: "blocked",
+        rejectionReason: expect.stringContaining(
+          "redaction threw while processing this document",
+        ),
+      }),
     );
   });
 });

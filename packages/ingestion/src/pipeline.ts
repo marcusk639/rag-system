@@ -329,7 +329,32 @@ async function ingestOne(
       { err, marker: "ingest.redaction_failed" },
       "redaction failed; quarantining document rather than indexing it",
     );
-    if (err instanceof ContentSafetyError) return { chunksCreated: 0 };
+    if (err instanceof ContentSafetyError) {
+      // ⚠ The audit event is not optional here either (Ruling R8) — same
+      // standard as the Layer 3 quarantine below: "Quarantining without a
+      // durable record would prevent the disclosure but destroy the evidence
+      // that the pipeline saw sensitive content... A logger warning is not
+      // an audit trail." Two distinct causes reach this branch — a missing
+      // pack (a config gap, nothing about THIS document) and a genuine
+      // redactOrThrow failure (something about this document's content) — so
+      // the reason string names which one, rather than reusing one generic
+      // phrase for both.
+      const rejectionReason = deps.pack
+        ? `redaction threw while processing this document: ${
+            err.cause instanceof Error ? err.cause.message : err.message
+          }`
+        : "no identifier-scanner pack was configured on PipelineDeps.pack; " +
+          "redaction cannot run until one is wired in";
+      await logIngestEvent(deps.db, {
+        sourceId,
+        docId: null,
+        externalId: source.externalId,
+        docClass,
+        action: "blocked",
+        rejectionReason,
+      });
+      return { chunksCreated: 0 };
+    }
     throw err;
   }
   if (redacted.totalRedacted > 0) {
