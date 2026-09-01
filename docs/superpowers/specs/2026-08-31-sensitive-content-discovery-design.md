@@ -81,8 +81,22 @@ The alternative — two pattern sets, or one set with two profiles — makes
 "the audit never misses what the redactor catches" a convention someone must
 maintain. Instead, a single pass emits **every** match with a confidence:
 
-- satisfies its `validator` and `context` gate → `high`
-- fails **only** the context gate → `low`
+- satisfies **every** gate it declares (`validator` and `context`) → `high`
+- fails **any** gate it declares → `low`
+
+**The rule is total, and that is the point.** An earlier draft defined `low` as
+"fails only the context gate", which left a match that fails its `validator`
+belonging to neither bucket — the `card` scanner declares `validator: luhn` and no
+`context` at all, so a Luhn-failing candidate fitted no defined case and a literal
+implementation would have dropped it from **both** consumers. That is worse than the
+three-disagreeing-scanners problem this design exists to remove, because a single
+pass can drop a match with no second implementation left to catch it. A digit lost to
+OCR is enough to trigger it on a real card number.
+
+So: **no match is ever discarded.** Every match a pattern produces is emitted as
+`high` or `low`. Gates decide the label, never whether the finding exists. A fixture
+asserts this directly — a deliberately Luhn-invalid card-shaped string must appear in
+discovery output as `low`, not be absent.
 
 Consumers differ solely in what they act on:
 
@@ -91,9 +105,18 @@ Consumers differ solely in what they act on:
 | Ingest (redact / exclude) | `high` only — preserves the precision `content-safety.ts` was built for |
 | Discovery (audit)         | everything, including `low`, surfaced for triage                        |
 
-The superset property becomes structural rather than conventional, and is
-assertable in one test. The recall-versus-precision conflict dissolves: nothing is
-dropped, it is ranked.
+The superset property becomes structural rather than conventional, and is assertable
+in one test.
+
+**Scope it honestly:** this is a guarantee about a single scan's output, not an
+operational one about the system over time. Discovery is a point-in-time pass (§7
+puts scheduled re-scanning out of scope) while ingest-time redaction runs
+continuously on live syncs. A document added or edited after the last scan can be
+redacted at ingest before the audit has ever seen it. "The audit never misses what
+the redactor catches" holds within a run; across time it holds only as far as the
+last run's `finished_at`. The recall-versus-precision conflict is not eliminated — it is relocated into a
+single testable boundary, where the `context` gate is drawn, instead of living in
+two pattern sets that drift apart. Nothing is dropped; it is ranked.
 
 Concretely — in an SOP, `123456789` with no account vocabulary nearby is `low`.
 The redactor ignores it (no over-redaction); the audit lists it (no silent miss).
@@ -116,7 +139,49 @@ match and warrant opposite treatment.
 | ---------------------------------------------- | --------------------------------------- | ---------------------- |
 | Client file (Layer 2 path, or Layer 3 class D) | **exclude**                             | exclude                |
 | Procedure / SOP                                | **redact** the span, index the document | **flag**, index intact |
-| Unclassified                                   | exclude (fail-closed)                   | flag                   |
+| Unclassified                                   | exclude                                 | flag — see caveat below |
+
+**On `Unclassified` + `contextual` → `flag`.** This row is *not* fail-closed, and
+calling it so would be false. A known client file with a contextual-only hit is
+excluded; an unknown document with the identical signature is indexed. True
+fail-closed reasoning would match the worst class the document could plausibly be —
+the `exclude` sitting one row up.
+
+It is `flag` on one empirical basis: in the single corpus ever screened, all 316
+contextual-only hits were inspected and every one was a legitimate SOP (platform spec
+§3.2). A 0-for-316 record on one historical corpus is not a property that generalises
+to a new source or a different firm. Treat it as a calibration to be **re-validated
+per corpus** on the first discovery run, not as a safety property. If a new corpus
+shows contextual-only hits landing on client files, this cell becomes `exclude`.
+
+### 4.0 ⚠ The class axis does not exist yet — read this before §4.1
+
+The matrix above is the target state, not current behaviour, and the distinction is
+load-bearing enough to belong here rather than in §8.
+
+`PURGE-RECORD-2026-08-03.md` records that classification is currently **per-source
+and human-declared**: all three sources carry `data_class = general`, so *"every
+document is stamped Class A regardless of content."* There is no per-document
+classifier running. Layer 2 (structural path exclusion) and Layer 3 (document
+classification) — the two things that would supply the `document class` axis — are
+on PR #41, not `main`.
+
+Two consequences a reader of §4.1 alone would miss:
+
+1. **The 2–3% figure is not yet earned by the matrix.** Until the class axis works,
+   the nuanced middle path rescues nothing; the outcome collapses to whatever the
+   single available class produces. The number describes where this design gets to,
+   not where it is.
+2. **This spec does not define how `data_class` values map onto the matrix's rows.**
+   `general` → is that `Procedure/SOP` or `Unclassified`? The two answers differ
+   sharply: a 522-SSN roster stamped Class A maps to `Procedure/SOP`, whose
+   identifying-hit disposition is **redact and index** — the roster would be indexed
+   with masked spans rather than excluded. That mapping must be defined explicitly,
+   and until it is, the matrix is not safe to enforce.
+
+**Nothing is enforced from this matrix until Layer 2/3 land and the mapping is
+written down.** The discovery pass in §5 does not depend on any of it — it classifies
+nothing and indexes nothing — so it can be built and run in the meantime.
 
 ### 4.1 Why this preserves knowledge-base value
 
@@ -194,8 +259,17 @@ a curated extract of exactly the material the purge removed.
 
 Both context columns are therefore passed through the same redactor before they are
 persisted: `masked_context_before` and `masked_context_after` are stored already
-masked, never raw. This costs nothing — the engine is already in the call path — and
-it keeps a finding locatable without carrying the values.
+masked, never raw. Closing the leak costs nothing — the engine is already in the call
+path.
+
+**But it does cost locatability, and precisely where locating matters most.** In that
+same roster, the text around any one match is *other identifiers*; masked, it becomes
+a run of near-identical tokens (`1XX-XX-XXX9`, `1XX-XX-XXX8`, …) that cannot
+distinguish row 47 from row 200. The context leg of the locator is close to useless
+for dense-identifier documents, which is the highest-risk class. For those,
+`locator_hint` and `parsed_offset` carry the whole job — which is why the gaps in
+`locator_hint` below are not cosmetic. Masking is still correct: an unusable locator
+is recoverable, a leaked roster is not.
 
 #### Why `parsed_offset` alone cannot be the locator
 
@@ -206,9 +280,19 @@ back to a page or cell, and the parser does not supply one — `ParsedDocument` 
 
 The locator is therefore three fields working together:
 
-- `locator_hint` — the parser's `sheetName` for tabular sources, otherwise the
-  nearest preceding markdown heading. Structural, human-usable, and derivable from
-  what the parser already returns.
+- `locator_hint` — resolved by an explicit fallback chain, because none of its parts
+  is total: the parser's `ParsedTable.sheetName` where the match maps to a table and
+  that field is non-null (it is nullable, and `sheetType` includes `narrative`,
+  `financial_model` and `freeform`, so tables are not Excel-only); else the nearest
+  preceding markdown heading; else the document title; else `null`. A scanned `.pdf`
+  through the fallback parse route can carry no headings at all, and a match can
+  precede the first heading — `null` must be a legal value, not an accident.
+
+  **Unresolved and must be settled before implementation:** `parsed_offset` indexes
+  the flat `markdown` string, while tables arrive in a separate `tables[]` field.
+  Nothing in the parser contract maps an offset back to the table it came from. That
+  plumbing has to be designed, and it matters most in exactly the dense-identifier
+  document where the sheet name is the only useful hint.
 - `masked_context_*` — enough surrounding prose to find the spot by eye or by search,
   with any identifiers inside it masked.
 - `parsed_offset` — exact, but only meaningful against the parsed text whose hash is
@@ -288,7 +372,7 @@ RAG-internal coupling to unpick.
   synthetic documents with known plants, asserting exact counts by `kind` and
   `confidence`. Fixtures are synthetic — no real identifiers enter the repo.
 - **The superset property**: no `high` finding exists that discovery would not
-  report. One test, derived structurally from §3.1.
+  report. One test, derived structurally from §3.1 of this spec.
 - **The honesty property**: a parse failure produces a `scan_document` row with
   `scan_status='failed'`, not a missing row.
 - **Value-freeness**: no raw match text reaches any `scan_finding` column or any log
@@ -321,11 +405,10 @@ RAG-internal coupling to unpick.
 - **PR #41 cannot merge as-is.** Its unconditional `redactOrThrow` is the `redact`
   path applied globally; under D5 it becomes the engine behind pack-declared
   disposition. The redaction code and its 25 tests are sound and are kept.
-- **§4's matrix depends on PR #41 landing.** Layer 2 (structural path exclusion)
-  and Layer 3 (document classification) are what supply the `document class` axis;
-  neither is on `main`. Discovery itself does not depend on them — it classifies
-  nothing and indexes nothing — so the two can be built in parallel, but the
-  disposition matrix cannot be enforced until #41 merges in its reworked form.
+- **§4's matrix depends on PR #41 landing**, and on a `data_class` → matrix-row
+  mapping that does not exist yet. Stated in full at §4.0, where the claim it
+  qualifies actually lives — burying it here was itself a defect, since a reader who
+  stops at §4.1 comes away believing the middle path is already saving SOPs.
 - **Requirement A depends on the pack slice**, which does not exist. That is the
   cost of not creating a fourth scanner.
 - The counts in §4.1 come from a screen run against a corpus that has since been
