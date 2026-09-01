@@ -368,3 +368,24 @@ describe("loadConfig — embedding request pacing", () => {
     expect(cfg.embedding.requestsPerMinute).toBe(60);
   });
 });
+
+describe("loadConfig — WORKER_SCANNER_PACK_DIR", () => {
+  it("defaults to packs/cpa so a deployment that sets nothing still redacts", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.worker.scannerPackDir).toBe("packs/cpa");
+  });
+
+  it("honours an override, so another vertical's pack can be swapped in", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      WORKER_SCANNER_PACK_DIR: "packs/legal",
+    });
+    expect(cfg.worker.scannerPackDir).toBe("packs/legal");
+  });
+
+  it("rejects an empty pack dir rather than silently resolving to cwd", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, WORKER_SCANNER_PACK_DIR: "" }),
+    ).toThrow();
+  });
+});

@@ -1,4 +1,11 @@
-import type { AuditLogSink, Config, Connector, ObjectStore } from "@rag/core";
+import {
+  loadPack,
+  type AuditLogSink,
+  type Config,
+  type Connector,
+  type LoadedPack,
+  type ObjectStore,
+} from "@rag/core";
 import {
   claimPendingUploads,
   getPendingUploadByExternalId,
@@ -45,6 +52,12 @@ export interface WorkerDeps {
   /** Off-host sink for `audit_log` rows; null when shipping is disabled. */
   auditLogSink: AuditLogSink | null;
   /**
+   * Compiled identifier scanners the ingestion pipeline redacts against.
+   * Non-nullable on purpose: the pipeline refuses to ingest without one, so a
+   * missing pack must stop the worker at startup rather than fail every job.
+   */
+  pack: LoadedPack;
+  /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
    * bound to specific credentials/folders).
@@ -66,6 +79,11 @@ export async function buildDeps(
   // only resources (parser, chunker, connector factory) are layered on below.
   const { db, embedder, queue, objectStore, auditLogSink, close } =
     await buildCoreDeps(config, logger);
+
+  // Fail fast: `loadPack` throws on a missing, malformed, or
+  // version-incompatible pack. Better to refuse to start than to boot a worker
+  // whose every ingestion job dies at the redaction gate.
+  const pack = loadPack(config.worker.scannerPackDir);
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -138,6 +156,7 @@ export async function buildDeps(
     queue,
     objectStore,
     auditLogSink,
+    pack,
     makeConnector,
     close,
   };

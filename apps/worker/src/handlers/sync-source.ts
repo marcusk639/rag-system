@@ -48,6 +48,7 @@ export async function handleSyncSource(
     queue,
     makeConnector,
     config,
+    pack,
   } = deps;
   const { sourceId, ingestionId, mode } = job.data;
   const continuation = job.data.continuation ?? false;
@@ -126,6 +127,9 @@ export async function handleSyncSource(
         // to Class A regardless of `sources.data_class` — see
         // packages/ingestion/src/classify-source.ts.
         sourceDocClass: mapDataClassToDocumentClass(source.dataClass),
+        // Layer 1 (egress): identifier scanners the pipeline redacts against
+        // before anything is embedded. Loaded once at worker startup.
+        pack,
       },
     );
 

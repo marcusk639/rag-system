@@ -83,13 +83,16 @@ export interface PipelineDeps {
   objectStore?: ObjectStore | null;
   /**
    * The loaded identifier-scanner pack `redactOrThrow` runs before anything
-   * downstream (see 1b below). Optional ONLY because no production caller
-   * wires a real pack in yet — `packs/cpa/pack.yaml` exists (load it via
-   * `@rag/core`'s `loadPack("packs/cpa")`), but this task's brief scopes
-   * wiring it into `apps/worker`'s `WorkerDeps` out of scope. `runIngestion`
-   * fails CLOSED, loudly, at the top of the run when this is missing (see the
-   * check at the start of `runIngestion` below); `ingestOne` also fails
-   * CLOSED per-document as defence-in-depth for direct callers.
+   * downstream (see 1b below). Every caller supplies one: the worker loads it
+   * at startup from `config.worker.scannerPackDir` (default `packs/cpa`) and
+   * hands it down through `WorkerDeps.pack`.
+   *
+   * Still typed optional so the omission is a *runtime* failure rather than a
+   * compile-time one — the guards below are what protect JavaScript callers
+   * and the `as any` deps objects tests build, neither of which the type
+   * checker sees. `runIngestion` fails CLOSED, loudly, at the top of the run
+   * when this is missing; `ingestOne` also fails CLOSED per-document as
+   * defence-in-depth for direct callers.
    */
   pack?: LoadedPack;
 }

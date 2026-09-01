@@ -32,7 +32,7 @@ import pino from "pino";
 import { CompositeChunker, HttpParserClient, Retriever } from "@rag/rag";
 import { runIngestion } from "@rag/ingestion";
 import { createDb, createSource } from "@rag/db";
-import { ADMIN_SCOPE } from "@rag/core";
+import { ADMIN_SCOPE, loadPack } from "@rag/core";
 import type {
   Connector,
   ConnectorListOptions,
@@ -44,6 +44,9 @@ import type {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = join(__dirname, "..", "docs");
+// Ingestion refuses to run without a scanner pack — the demo uses the same
+// `packs/cpa` rules production does, so what it indexes is redacted the same way.
+const SCANNER_PACK_DIR = join(__dirname, "..", "..", "..", "packs", "cpa");
 const DATABASE_URL =
   process.env.DATABASE_URL ?? "postgres://rag:rag@localhost:5432/rag";
 const PARSER_URL = process.env.PARSER_URL ?? "http://localhost:8000";
@@ -230,7 +233,14 @@ async function main(): Promise<void> {
       connector,
       null,
       { concurrency: 2, pageSize: 50 },
-      { db, parser, chunker, embedder, logger },
+      {
+        db,
+        parser,
+        chunker,
+        embedder,
+        logger,
+        pack: loadPack(SCANNER_PACK_DIR),
+      },
     );
     log("ingest", `  documents: ${result.documentsProcessed} ingested`);
     log("ingest", `  chunks:    ${result.chunksCreated} created`);

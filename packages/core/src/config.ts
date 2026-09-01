@@ -136,6 +136,16 @@ export const Config = z
     worker: z.object({
       concurrency: z.number().int().positive().default(4),
       pollIntervalMs: z.number().int().positive().default(2_000),
+      /**
+       * Directory holding the vertical's `pack.yaml` — the identifier
+       * scanners the ingestion pipeline redacts against. Resolved relative to
+       * `cwd`, matching how `docs/compliance` is located; the worker image
+       * copies `packs/` alongside its code so the default works unchanged in
+       * a container. Ingestion refuses to run without a loadable pack, so a
+       * wrong path here fails the worker at startup rather than silently
+       * indexing unredacted identifiers.
+       */
+      scannerPackDir: z.string().min(1).default("packs/cpa"),
     }),
 
     retrieval: z.object({
@@ -652,6 +662,7 @@ export function loadConfig(
     worker: {
       concurrency: Number(env.WORKER_CONCURRENCY ?? 4),
       pollIntervalMs: Number(env.WORKER_POLL_INTERVAL_MS ?? 2000),
+      scannerPackDir: env.WORKER_SCANNER_PACK_DIR ?? "packs/cpa",
     },
     retrieval: {
       chunkSize: effectiveChunkSize,

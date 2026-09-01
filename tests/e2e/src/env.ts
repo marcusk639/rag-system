@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Config } from "@rag/core";
 
 /**
@@ -7,6 +9,24 @@ import type { Config } from "@rag/core";
  * locally running `pnpm docker:up` stack with no extra env wiring. CI can
  * override via DATABASE_URL / PARSER_URL.
  */
+/**
+ * Repo root, resolved from this file rather than `cwd`: the suite runs from
+ * `tests/e2e`, so the cwd-relative paths production uses (`packs/cpa`,
+ * `docs/compliance`) do not resolve here.
+ */
+export const REPO_ROOT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
+
+/**
+ * The scanner pack the harness ingests against — the real `packs/cpa`, not a
+ * stub, so e2e exercises the redaction rules that actually ship.
+ */
+export const TEST_SCANNER_PACK_DIR = join(REPO_ROOT, "packs", "cpa");
+
 export const TEST_API_TOKEN = "e2e-test-token";
 
 /**
@@ -80,7 +100,11 @@ export function makeTestConfig(): Config {
       provider: "composite",
       internalScopeSecrets: [TEST_INTERNAL_SCOPE_SECRET],
     },
-    worker: { concurrency: 1, pollIntervalMs: 2_000 },
+    worker: {
+      concurrency: 1,
+      pollIntervalMs: 2_000,
+      scannerPackDir: TEST_SCANNER_PACK_DIR,
+    },
     retrieval: {
       chunkSize: 800,
       chunkOverlap: 120,

@@ -5,8 +5,9 @@ import { CompositeChunker, HttpParserClient } from "@rag/rag";
 import { createIngestionJob, type Db } from "@rag/db";
 import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
 import { handleSyncSource } from "@rag/worker";
+import { loadPack } from "@rag/core";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
-import { env } from "../env.js";
+import { env, TEST_SCANNER_PACK_DIR } from "../env.js";
 
 /**
  * End-to-end classification gate: when a source's real `data_class` column is
@@ -80,6 +81,9 @@ describe("E2E: data-class ingestion gate (Phase 3 compliance)", () => {
       objectStore: null,
       makeConnector: () => connector,
       close: async () => undefined,
+      // The real pack too — the pipeline refuses to ingest without one, and
+      // this spec's whole point is that nothing about the path is faked.
+      pack: loadPack(TEST_SCANNER_PACK_DIR),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 

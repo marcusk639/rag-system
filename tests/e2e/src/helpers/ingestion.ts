@@ -1,10 +1,23 @@
 import pino from "pino";
 import { CompositeChunker, HttpParserClient } from "@rag/rag";
 import { runIngestion, type PipelineRunResult } from "@rag/ingestion";
-import type { Connector, EmbeddingProvider } from "@rag/core";
+import {
+  loadPack,
+  type Connector,
+  type EmbeddingProvider,
+  type LoadedPack,
+} from "@rag/core";
 import type { Db } from "@rag/db";
-import { env } from "../env.js";
+import { env, TEST_SCANNER_PACK_DIR } from "../env.js";
 import { FakeEmbedder } from "@rag/test-fixtures";
+
+/**
+ * The pipeline refuses to run without a scanner pack, so e2e wires the real
+ * one rather than a stub: these specs are the only place the whole ingestion
+ * path runs end-to-end, and a stub pack would exercise a redaction layer that
+ * ships to nobody. Loaded once — `loadPack` reads and compiles from disk.
+ */
+const CPA_PACK: LoadedPack = loadPack(TEST_SCANNER_PACK_DIR);
 
 /**
  * Drive the ingestion pipeline synchronously, bypassing pg-boss. The worker
@@ -29,6 +42,11 @@ export async function runOneIngestion(
      * vectors from two different embedding spaces).
      */
     embedder?: EmbeddingProvider;
+    /**
+     * Defaults to the `packs/cpa` scanner pack. Override to exercise a
+     * different scanner set; the pipeline rejects a missing or empty pack.
+     */
+    pack?: LoadedPack;
   },
 ): Promise<PipelineRunResult> {
   const logger = pino({ level: "silent" });
@@ -61,6 +79,7 @@ export async function runOneIngestion(
       // content, so declare Class A explicitly rather than relying on a
       // permissive default — the implicit default is what this layer removed.
       sourceDocClass: "A",
+      pack: overrides?.pack ?? CPA_PACK,
     },
   );
 }

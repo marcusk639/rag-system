@@ -17,6 +17,7 @@ COPY apps ./apps
 COPY tests ./tests
 COPY examples ./examples
 COPY docs/compliance ./docs/compliance
+COPY packs ./packs
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile all workspace packages (tsconfig per package)
@@ -38,6 +39,10 @@ COPY --from=pruner --chown=node:node /deploy .
 # docs/compliance/vendor-dpa-*.md relative to cwd at runtime — pnpm deploy's
 # pruned output doesn't include it, so copy it separately from installer.
 COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compliance
+# WORKER_SCANNER_PACK_DIR (default packs/cpa) is likewise resolved relative to
+# cwd at startup, and buildDeps refuses to boot without a loadable pack. Same
+# reason as above: pnpm deploy prunes non-package files.
+COPY --from=installer --chown=node:node /workspace/packs ./packs
 
 USER node
 ENV NODE_ENV=production
