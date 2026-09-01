@@ -218,7 +218,7 @@ describe("redactOrThrow — fails closed", () => {
 });
 
 describe("applyRedaction", () => {
-  it("replaces right-to-left so earlier offsets stay valid", () => {
+  it("replaces every span without disturbing surrounding text", () => {
     const text = "a 111-11-1111 b 222-22-2222 c";
     const matches: ScanMatch[] = [
       {
