@@ -1,7 +1,7 @@
 import type { Generator, Retriever } from "@rag/rag";
 import type { Db } from "@rag/db";
 import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
-import { type Config } from "@rag/core";
+import { type Config, type ObjectStore } from "@rag/core";
 import type { Logger } from "pino";
 
 /**
@@ -23,12 +23,28 @@ export interface Deps {
   embedder: Embedder;
   queue: Queue;
   generator: Generator | null;
+  /**
+   * Threaded through purely so `purge_source` can delete a purged source's
+   * originals. Without it the Postgres cascade runs and the objects survive —
+   * the orphaning bug, reachable via this surface even after the API was fixed.
+   */
+  objectStore: ObjectStore | null;
   close: () => Promise<void>;
   logger: Logger;
 }
 
 export async function buildDeps(config: Config, logger: Logger): Promise<Deps> {
-  const { db, embedder, retriever, queue, generator, close } =
+  const { db, embedder, retriever, queue, generator, objectStore, close } =
     await buildCoreDeps(config, logger);
-  return { config, db, embedder, retriever, queue, generator, close, logger };
+  return {
+    config,
+    db,
+    embedder,
+    retriever,
+    queue,
+    generator,
+    objectStore,
+    close,
+    logger,
+  };
 }
