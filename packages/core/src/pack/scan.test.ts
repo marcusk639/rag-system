@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { scanText, maskValue } from "./scan.js";
+import { resolveValidator } from "./registry.js";
 import type { LoadedPack } from "./load.js";
 
 const pack: LoadedPack = {
@@ -22,6 +23,19 @@ const pack: LoadedPack = {
       context: /\b(routing|account)\b/i,
       contextWindow: 60,
     },
+    // The actual incident shape (task-4 fix round 1, finding 3): a validator with
+    // NO context gate. This is the exact configuration where an earlier draft's
+    // "low = fails only the context gate" definition left a validator failure
+    // belonging to no bucket and silently dropped it — a Luhn-failing card number
+    // (one digit lost to OCR) hit this hole in production.
+    {
+      id: "card",
+      kind: "identifying",
+      disposition: "exclude",
+      re: /\b\d{16}\b/g,
+      validate: resolveValidator("luhn"),
+      contextWindow: 60,
+    },
   ],
 };
 
@@ -38,8 +52,17 @@ describe("scanText", () => {
     const text = "111-11-1111 222-22-2222 333-33-3333";
     const ms = scanText(text, pack);
     expect(ms).toHaveLength(3);
-    for (const m of ms)
-      expect(text.slice(m.start, m.end)).toMatch(/^\d{3}-\d{2}-\d{4}$/);
+    // Exact expected values, not a shape pattern (task-4 fix round 1, finding 4):
+    // asserting each slice merely MATCHES /^\d{3}-\d{2}-\d{4}$/ would still pass if
+    // the engine returned the same match three times over (e.g. start 0,0,0), since
+    // every candidate slice happens to fit that pattern here. Asserting the exact,
+    // distinct list is the only check that discriminates real per-match offsets
+    // from a degenerate engine that repeats one match.
+    expect(ms.map((m) => text.slice(m.start, m.end))).toEqual([
+      "111-11-1111",
+      "222-22-2222",
+      "333-33-3333",
+    ]);
   });
 
   it("demotes to low when the context gate fails, and does NOT drop it", () => {
@@ -72,6 +95,45 @@ describe("scanText", () => {
     for (const m of scanText(text, pack)) {
       expect(m.maskedSample).not.toContain("123-45-6789");
     }
+  });
+
+  it("demotes to low when the validator fails and there is NO context gate (the card/luhn shape), and does NOT drop it", () => {
+    // task-4 fix round 1, finding 3: neither fixture above exercises "validator,
+    // no context" — the exact shape of the original incident. A card number one
+    // digit off from a valid Luhn checksum (as if OCR dropped a digit) must still
+    // appear, labeled low, never absent.
+    const ms = scanText("card 4111111111111112 on file", pack).filter(
+      (x) => x.scannerId === "card",
+    );
+    expect(ms).toHaveLength(1);
+    expect(ms[0]!.confidence).toBe("low");
+  });
+
+  it("still finds a match when a hand-constructed scanner regex carries the sticky (y) flag", () => {
+    // task-4 fix round 1, finding 2: CompiledScanner is exported and hand-
+    // constructible (as this very fixture proves), so a `y`-flagged scanner regex
+    // is reachable even though loadPack always compiles with plain "g". Preserving
+    // the author's flags via passthrough (`flags.includes("g") ? flags : flags +
+    // "g"`) previously produced "yg", which anchors every match attempt at
+    // lastIndex and returns nothing for a document that visibly contains the
+    // identifier — a silent total-drop path.
+    const stickyPack: LoadedPack = {
+      id: "test",
+      version: "1.0.0",
+      scanners: [
+        {
+          id: "sticky-ssn",
+          kind: "identifying",
+          disposition: "exclude",
+          re: /\d{3}-\d{2}-\d{4}/y,
+          contextWindow: 60,
+        },
+      ],
+    };
+    const text = "prefix 123-45-6789 suffix";
+    const ms = scanText(text, stickyPack);
+    expect(ms).toHaveLength(1);
+    expect(text.slice(ms[0]!.start, ms[0]!.end)).toBe("123-45-6789");
   });
 });
 

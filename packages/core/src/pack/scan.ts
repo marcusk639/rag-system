@@ -37,10 +37,13 @@ export function scanText(text: string, pack: LoadedPack): ScanMatch[] {
   const out: ScanMatch[] = [];
 
   for (const s of pack.scanners) {
-    const re = new RegExp(
-      s.re.source,
-      s.re.flags.includes("g") ? s.re.flags : s.re.flags + "g",
-    );
+    // Fixed flag set, not passthrough: keep the author's semantic flags (i/m/s/u/v)
+    // but never inherit `y` — sticky anchors every match attempt at `lastIndex`, so
+    // a sticky scanner regex combined with `g` (`"yg"`) would return NOTHING for a
+    // document that visibly contains the identifier. `g` is always added so the
+    // engine controls iteration itself.
+    const flags = s.re.flags.replace(/[gy]/g, "") + "g";
+    const re = new RegExp(s.re.source, flags);
     for (const m of text.matchAll(re)) {
       const value = m[0];
       const start = m.index;

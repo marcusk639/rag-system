@@ -54,11 +54,32 @@ export function resolveValidator(name: string): (m: string) => boolean {
   return fn;
 }
 
+/**
+ * Context regexes are shared, module-level singletons handed to every scanner in
+ * every pack that references them (unlike scan patterns, which the engine rebuilds
+ * per scanner). `RegExp.prototype.test` advances `lastIndex` on a `g`- or
+ * `y`-flagged regex, so a stateful context would leak match position across
+ * unrelated scanners and calls — silent, non-deterministic, order-dependent
+ * demotions. Reject those flags here so a bad context can never reach the engine;
+ * exported so the invariant is unit-testable without needing a bad entry in
+ * `CONTEXTS`.
+ */
+export function assertStatelessContextRegex(re: RegExp, label: string): void {
+  if (re.flags.includes("g") || re.flags.includes("y")) {
+    throw new Error(
+      `${label} must not use the "g" or "y" flag — context regexes are shared ` +
+        `singletons and .test() is called on them repeatedly; a stateful flag ` +
+        `would leak lastIndex between unrelated scanners`,
+    );
+  }
+}
+
 export function resolveContext(name: string): RegExp {
   const re = CONTEXTS[name];
   if (!re)
     throw new Error(
       `unknown context "${name}" — packs may only reference compiled-in names`,
     );
+  assertStatelessContextRegex(re, `context "${name}"`);
   return re;
 }
