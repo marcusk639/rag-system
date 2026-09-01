@@ -78,19 +78,42 @@ function abaValid(d: string): boolean {
  * prose — the failure that looks like success. Every pattern below is therefore
  * either delimiter-anchored or checksum-gated.
  *
- * ⚠ Bare 9-digit runs are NOT treated as SSNs. In this corpus they are far more
- * often amounts or IDs, and the resulting over-redaction would destroy the SOPs
- * the assistant exists to answer from. Context-gated only (see `account`).
+ * ⚠ Bare 9-digit runs are NOT treated as SSNs by the pattern list. In this
+ * corpus they are far more often amounts or IDs, and blanket over-redaction
+ * would destroy the SOPs the assistant exists to answer from. They are
+ * reachable two other ways: an adjacent SSN/TIN/ITIN label (the `ssn` pattern
+ * below), and `redactIdentifierColumns`, which requires identifier vocabulary
+ * AND repetition.
+ *
+ * (An earlier version of this comment pointed at a context-gated `account`
+ * pattern. No such pattern ever existed — the only 9-digit rule was
+ * ABA-checksummed and gated on *banking* vocabulary, which never matches an
+ * SSN column.)
  */
 const PATTERNS: {
   kind: RedactionKind;
   re: RegExp;
   validate?: (m: string) => boolean;
 }[] = [
-  // 123-45-6789 — delimiter-anchored, so a form number cannot match.
-  { kind: "ssn", re: /\b\d{3}-\d{2}-\d{4}\b/g },
-  // 12-3456789
-  { kind: "ein", re: /\b\d{2}-\d{7}\b/g },
+  // 123-45-6789 and 123 45 6789 — delimiter-anchored, so a form number cannot
+  // match. Space is accepted because `tri-scanner.ts` accepts it: when this
+  // redactor was dash-only it was strictly WEAKER than the scanner in the same
+  // package, so a spaced identifier passed redaction, got embedded and sent to
+  // the hosted model, and was only then blocked at generation — disclosed and
+  // unanswerable at once. The two must agree.
+  { kind: "ssn", re: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/g },
+  // 12-3456789 and 12 3456789 — same parity requirement.
+  { kind: "ein", re: /\b\d{2}[-\s]\d{7}\b/g },
+  // A bare 9-digit run that an adjacent SSN/TIN/ITIN token identifies. Mirrors
+  // `SSN-unformatted` in tri-scanner.ts — the OCR shape, where the separators
+  // are lost but the field label survives.
+  {
+    kind: "ssn",
+    // Lookbehind, so only the DIGITS are masked. Matching the whole span would
+    // swallow the label and any prose between it and the number, turning
+    // "Client SSN on file: 123456789" into a single mask.
+    re: /(?<=\b(?:SSN|SSNs|social\s+security(?:\s+(?:number|no\.?|#))?|TIN|ITIN)\b[\s\S]{0,40}?)\b\d{9}\b/gi,
+  },
   // 9-digit runs only when the ABA checksum passes AND routing vocabulary is near.
   {
     kind: "routing",
@@ -104,6 +127,31 @@ const PATTERNS: {
     validate: (m) => luhnValid(m.replace(/[ -]/g, "")),
   },
 ];
+
+/**
+ * Identifier vocabulary anywhere in the document. Deliberately narrower than
+ * `ACCOUNT_CONTEXT`: this gates a whole-document sweep, so it must not fire on
+ * ordinary banking prose.
+ */
+const IDENTIFIER_VOCAB =
+  /\b(ssn|ssns|social\s+security|tin|itin|taxpayer\s+id)\b/i;
+
+/**
+ * Minimum bare 9-digit runs before the tabular sweep fires.
+ *
+ * The corpus screen's worst document held 522 SSN-shaped values in a
+ * spreadsheet. Parsed to markdown a row reads `| Smith, John | 123456789 |
+ * 45,200 |` — the "SSN" header sits rows away, so no adjacent-label rule can
+ * reach it, and the ABA gate does not fire on a non-routing number. It was
+ * caught by nothing.
+ *
+ * DENSITY separates a roster from a procedure: a roster carries a column of
+ * them, an SOP carries none or one incidental reference number. Requiring
+ * repetition AND vocabulary targets the roster shape without redacting the
+ * documents the assistant exists to answer from. Three is low enough to catch a
+ * short roster, high enough that a lone reference number is safe.
+ */
+const COLUMN_DENSITY_THRESHOLD = 3;
 
 /** Vocabulary that must appear near a candidate for the weak patterns to fire. */
 const ACCOUNT_CONTEXT =
@@ -137,6 +185,22 @@ export function redactText(input: string): RedactionResult {
       counts.set(kind, (counts.get(kind) ?? 0) + 1);
       return MASK[kind];
     });
+  }
+
+  // Tabular sweep. A roster's SSN column has its header rows away, so no
+  // adjacent-label rule reaches it. Gated on vocabulary AND repetition so a
+  // procedure document with one incidental reference number is untouched.
+  // Density is measured against the ORIGINAL input: the label-gated pattern
+  // above may already have masked the first value in the column, and counting
+  // the survivors would drop a genuine roster below the threshold.
+  if (IDENTIFIER_VOCAB.test(input)) {
+    const bare = input.match(/\b\d{9}\b/g) ?? [];
+    if (bare.length >= COLUMN_DENSITY_THRESHOLD) {
+      text = text.replace(/\b\d{9}\b/g, () => {
+        counts.set("ssn", (counts.get("ssn") ?? 0) + 1);
+        return MASK.ssn;
+      });
+    }
   }
 
   const findings = [...counts.entries()].map(([kind, count]) => ({
