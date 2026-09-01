@@ -1,8 +1,8 @@
-# TWK Readiness — Manual Intervention Runbook
+# Pilot Readiness — Manual Intervention Runbook
 
 **Audience:** Marcus, acting as the de facto technical/ops lead for this engagement — not a CPA, not an attorney. Every item below requires human judgment, a business/legal decision, real infrastructure access, or another person's domain expertise (Doug's, Chris's, or counsel's) — none of it can be done by writing code, and none of it should be silently resolved by an AI agent on your behalf.
 
-**Companion document:** `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` — everything that IS a code/test/config fix lives there instead. Where an item below depends on that plan (or vice versa), it's called out explicitly.
+**Companion document:** `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` — everything that IS a code/test/config fix lives there instead. Where an item below depends on that plan (or vice versa), it's called out explicitly.
 
 **How to use this:** Work items in the stated order within each priority tier — later items in P0 generally depend on earlier ones being at least started. Each item has a **Why**, an **Exact steps** section, a **Done when** checkpoint, and a **Depends on / blocks** line. Nothing here is legal advice; item 2 exists specifically because you need real legal advice, not this document's approximation of it.
 
@@ -31,7 +31,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 **Do this WITH Chris or Doug, not solo.** You (Marcus) are an external consultant — recognizing an SSN or EIN in a document is universal, but reliably telling a de-identified research memo apart from an actual client engagement file often requires firm-specific/CPA context you may not have. Pull Doug or Chris in for the actual folder-by-folder review in step 2-3 below rather than making this judgment call alone.
 
-**Why:** The technical classification gate that's supposed to block client-confidential content isn't wired yet (`docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 1 fixes the code; until it ships AND you've confirmed what's already synced, you don't actually know what's sitting in the database). This is the single fastest way to find out whether there's already a problem, independent of any code fix.
+**Why:** The technical classification gate that's supposed to block client-confidential content isn't wired yet (`docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` Task 1 fixes the code; until it ships AND you've confirmed what's already synced, you don't actually know what's sitting in the database). This is the single fastest way to find out whether there's already a problem, independent of any code fix.
 
 **Exact steps:**
 
@@ -77,7 +77,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ### 3. Verify the database backup/restore path actually works
 
-**Why:** `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` doesn't build this for you (a backup-and-restore drill requires real Railway production access and a willingness to actually test a restore, which isn't something to automate blindly), but the assessment found this is currently unverified — the sole store for chunks, embeddings, sources, and the compliance audit log has no confirmed, tested recovery path.
+**Why:** `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` doesn't build this for you (a backup-and-restore drill requires real Railway production access and a willingness to actually test a restore, which isn't something to automate blindly), but the assessment found this is currently unverified — the sole store for chunks, embeddings, sources, and the compliance audit log has no confirmed, tested recovery path.
 
 **Exact steps:**
 
@@ -110,7 +110,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 1. Register an Azure AD (Entra ID) application in the firm's tenant for this app — redirect URI, client secret, tenant ID. This is a ~15-30 minute task in the Azure/Microsoft 365 admin portal, not a code task; Chris or whoever manages the firm's M365 tenant may need to do this or grant you access.
 2. Create a `RAG-Admins` security group in the same tenant, add yourself (and later Chris/Doug as appropriate) to it, and note its object ID for `RAG_ADMINS_GROUP_ID`.
-3. Generate a real `AUTH_SECRET` (NextAuth's session-signing key — `openssl rand -base64 32` is the standard way) and the existing `INTERNAL_SCOPE_JWT_SECRET` per Task 3's now-enforced 64-character minimum (see `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 3).
+3. Generate a real `AUTH_SECRET` (NextAuth's session-signing key — `openssl rand -base64 32` is the standard way) and the existing `INTERNAL_SCOPE_JWT_SECRET` per Task 3's now-enforced 64-character minimum (see `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` Task 3).
 4. Deploy using the now-existing `apps/web/Dockerfile`/`railway.json` (or the `docker/compose.prod.yml` `web` service if self-hosting), confirm you personally can sign in and ask a real question against the firm-SOP index.
 5. Write the 2-minute "how do I ask a question" doc for staff — a screenshot-driven one-pager is enough. This is the single highest-leverage artifact currently missing: the code that makes this feel like a real tool instead of an engineering project already exists.
 
@@ -122,7 +122,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ### 5. Decide the docs-gap-digest privacy tradeoff (Tier 2)
 
-**Why:** `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 13 builds a SAFE version of the weekly digest — an aggregate count of weak-result queries, with no question text retained anywhere, matching the existing privacy-by-design decision already baked into this codebase. But the actual thing promised to Chris ("5 questions came in this week the KB couldn't answer. Top one: what's our intake checklist for Schedule F filings?") requires retaining at least a paraphrase of what was asked — a real reversal of a deliberate privacy decision made earlier in this project, not a bug to just fix.
+**Why:** `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` Task 13 builds a SAFE version of the weekly digest — an aggregate count of weak-result queries, with no question text retained anywhere, matching the existing privacy-by-design decision already baked into this codebase. But the actual thing promised to Chris ("5 questions came in this week the KB couldn't answer. Top one: what's our intake checklist for Schedule F filings?") requires retaining at least a paraphrase of what was asked — a real reversal of a deliberate privacy decision made earlier in this project, not a bug to just fix.
 
 **Exact steps:**
 
@@ -164,7 +164,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 - **`pnpm eval:real` (the real-embedder path) has never been run at all** — `docs/EVAL-BASELINE.md` says so directly. The only numbers that exist (97%+ recall, MRR 1.000) are against a deliberately keyword-trivial 14-document synthetic corpus (Postgres tuning, gardening, sailing) under a bag-of-words `FakeEmbedder` — the doc's own words: "not meaningful evidence of retrieval quality."
 - **There is no answer-faithfulness/groundedness evaluation anywhere in the codebase** — no LLM-as-judge, no human-eval rubric. `ISSUES-AND-OPTIMIZATIONS.md` names this gap explicitly too. This item's real CPA questions are also the natural seed for closing that gap later, not just retrieval scoring.
 
-In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, and any future answer-faithfulness check are ALL currently guesses, not measurements, and stay that way until this item is done. `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 8 already made the harness capable of running against a real embedder at zero cost — but the actual questions in the test corpus are still 17 synthetic, vocabulary-distinctive ones. Building genuine confidence requires real questions a CPA would actually ask, with real "near-neighbor" distractor documents that are hard to tell apart semantically (not trivially keyword-separable, unlike the current corpus).
+In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, and any future answer-faithfulness check are ALL currently guesses, not measurements, and stay that way until this item is done. `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` Task 8 already made the harness capable of running against a real embedder at zero cost — but the actual questions in the test corpus are still 17 synthetic, vocabulary-distinctive ones. Building genuine confidence requires real questions a CPA would actually ask, with real "near-neighbor" distractor documents that are hard to tell apart semantically (not trivially keyword-separable, unlike the current corpus).
 
 **Exact steps:**
 
@@ -183,7 +183,7 @@ In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, an
 
 ### 8. Decide where off-host audit logs should actually ship
 
-**Why:** `docs/PLAN-TWK-READINESS-AUTOMATABLE.md` Task 14 builds a generic, vendor-agnostic webhook mechanism for shipping audit logs off the primary database — but "off-host" only means something once you've picked an actual destination.
+**Why:** `docs/PLAN-PILOT-READINESS-AUTOMATABLE.md` Task 14 builds a generic, vendor-agnostic webhook mechanism for shipping audit logs off the primary database — but "off-host" only means something once you've picked an actual destination.
 
 **Exact steps:**
 
@@ -199,7 +199,7 @@ In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, an
 
 ### 9. Decide build-vs-buy for the document type/class classifier
 
-**Update (2026-07-11):** a separate, cross-repo design effort (a generic `DocumentClassifier` engine in `rag-system` plus product-owned rule sets in `cpa-consulting`/`veteran-claims-app`) was explored and then explicitly deferred — see `cpa-consulting/docs/superpowers/specs/2026-07-11-classifier-migration-design.md`, now marked "Status: DEFERRED... Explicitly not required for the TWK KB launch." That effort is a possible future path if this item is ever revisited, but changes nothing about the decision below, which remains open.
+**Update (2026-07-11):** a separate, cross-repo design effort (a generic `DocumentClassifier` engine in `rag-system` plus product-owned rule sets in `cpa-consulting`/`veteran-claims-app`) was explored and then explicitly deferred — see `cpa-consulting/docs/superpowers/specs/2026-07-11-classifier-migration-design.md`, now marked "Status: DEFERRED... Explicitly not required for the knowledge-base launch." That effort is a possible future path if this item is ever revisited, but changes nothing about the decision below, which remains open.
 
 **Why:** This item was excluded entirely from the automatable code plan — it's a genuine multi-day machine-learning feature build, and the firm's own planning docs (`~/dev/cpa-consulting/docs/rag/evaluations/document-classification-automation.md`) already frame this as an open "Slice A (build) vs. Slice B (buy SurePrep/GruntWorx for client tax documents)" decision that hasn't been made. Building it without that decision risks building the wrong thing.
 
@@ -208,7 +208,7 @@ In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, an
 1. Read `~/dev/cpa-consulting/docs/rag/evaluations/document-classification-automation.md` in full (or wherever the current version of this evaluation lives) to refresh on the actual build-vs-buy tradeoffs already identified there.
 2. Note that this classifier (SOP vs. template vs. research memo, with a confidence-gated human-approve queue) is about the document TYPE, which is a materially smaller, cheaper problem than what SurePrep/GruntWorx solve (client tax-document classification/extraction) — the "buy" option in that evaluation may be solving a different, bigger problem than what's actually needed here. Confirm you're comparing the right things before deciding.
 3. If "build" is the answer: this becomes a new, properly-scoped implementation plan of its own (not a bolt-on to the automatable plan above) — worth a fresh brainstorming/design pass given its size, not a quick addition to an existing task list.
-4. If "buy" or "defer": say so explicitly, and note in `docs/TWK-CPA-READINESS-ASSESSMENT-2026-07-08.md`'s priority list that this item is deliberately deferred pending that decision, not silently dropped.
+4. If "buy" or "defer": say so explicitly, and note in `docs/CPA-READINESS-ASSESSMENT-2026-07-08.md`'s priority list that this item is deliberately deferred pending that decision, not silently dropped.
 
 **Done when:** a decision is recorded, and if "build," a fresh planning pass is scheduled separately rather than folded into unrelated work.
 
@@ -230,7 +230,7 @@ In short: RRF weight tuning, the reranker on/off decision, chunk-size tuning, an
 
 **Done when:** the container's `\dt` output matches the full expected table list, and a fresh `pnpm --filter @rag/e2e test` run (against this container, not a disposable one) passes.
 
-**Depends on / blocks:** Independent of the P0 gates. Not urgent for TWK's actual production data (this is a _local dev_ container, not the live Railway deployment), but it should happen before trusting any future local e2e run against this container, and before deploying item 4's `apps/web` work if any local verification against this container is part of that process.
+**Depends on / blocks:** Independent of the P0 gates. Not urgent for the firm's actual production data (this is a _local dev_ container, not the live Railway deployment), but it should happen before trusting any future local e2e run against this container, and before deploying item 4's `apps/web` work if any local verification against this container is part of that process.
 
 ---
 

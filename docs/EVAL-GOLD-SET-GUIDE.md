@@ -3,7 +3,7 @@
 **Purpose:** produce the question set that makes "is the KB assistant any good?"
 a measurable question instead of an opinion. **Time:** ~90 minutes.
 **Who:** Doug (or another credentialed preparer) + Marcus. **Output:** entries in
-`tests/e2e/src/eval/twk-gold-set.ts`.
+`tests/e2e/src/eval/gold-set.ts`.
 
 > **Why this cannot be done without a CPA.** Marcus can write questions. He
 > cannot verify that an answer is correct tax or accounting practice — and a gold
@@ -91,9 +91,9 @@ and faithfulness, just not for professional correctness.
 ## Recording it
 
 ```ts
-export const TWK_GOLD_QUESTIONS: TwkGoldQuestion[] = [
+export const GOLD_QUESTIONS: GoldQuestion[] = [
   {
-    id: "twk-q-001",
+    id: "gold-q-001",
     query: "How do we handle a client who missed their estimated payment?",
     relevant: ["sharepoint:.../estimated-payments-sop"],
     tier: "tier2-cpa-verified",

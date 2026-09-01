@@ -76,7 +76,7 @@ This is not automatable and must not be faked:
   retrieved document and still be wrong, because the _document_ is outdated or
   wrong. Faithfulness catches hallucination. It cannot catch a bad source.
 
-`TwkGoldQuestion.expectedAnswer` carries `verifiedBy` + `verifiedOn`, and
+`GoldQuestion.expectedAnswer` carries `verifiedBy` + `verifiedOn`, and
 `validateGoldSet()` **rejects an expected answer without them**. An unattributed
 gold answer is not a gold answer — it is a guess wearing authority.
 
@@ -84,7 +84,7 @@ gold answer is not a gold answer — it is a guess wearing authority.
 
 ## The gold set — the actual bottleneck
 
-`tests/e2e/src/eval/twk-gold-set.ts` is **deliberately empty**. Questions
+`tests/e2e/src/eval/gold-set.ts` is **deliberately empty**. Questions
 reference real production documents by `externalId`, so no synthetic corpus is
 needed. See [`EVAL-GOLD-SET-GUIDE.md`](./EVAL-GOLD-SET-GUIDE.md) for authoring.
 
@@ -160,7 +160,7 @@ npx vitest run --root tests/e2e src/specs/eval-faithfulness.spec.ts
 | -------------------------------------------------- | ---------------------------------------------- |
 | The pipeline works end to end with a real embedder | ✅ Yes (2026-08-01)                            |
 | The system does not fabricate citations            | ✅ Yes, once faithfulness runs on real answers |
-| Retrieval quality on TWK's knowledge base          | ❌ **No** — needs the gold set                 |
+| Retrieval quality on the firm's knowledge base     | ❌ **No** — needs the gold set                 |
 | Dense/sparse weighting is tuned correctly          | ❌ **No** — corpus cannot distinguish settings |
 | Reranking would help                               | ❌ **No** — unmeasurable at MRR 1.000          |
 | Answers are correct CPA practice                   | ❌ **No** — Tier 2, needs Doug                 |

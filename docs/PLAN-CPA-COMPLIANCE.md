@@ -28,7 +28,7 @@
   always async via pg-boss; embeddings immutable per (provider, model, dimensions).
 - **The MVP gate is binary per the source doc:** CR-1, CR-12, CR-8, CR-6/CR-7, CR-4, CR-16, CR-13,
   CR-5, CR-18 must all be true **before any real client data** goes through this system in
-  production. Several of these already involve real TWK CPA Firm client documents ingested today
+  production. Several of these already involve real the operating tenant client documents ingested today
   (see `docs/PLAN-KB-SYNC.md`) — treat closing these gaps as urgent, not aspirational.
 
 ---

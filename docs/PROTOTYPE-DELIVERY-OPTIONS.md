@@ -4,7 +4,7 @@
 the answer. **Status:** decision doc, not a record of work done.
 
 > **The headline.** The Azure-subscription blocker
-> ([`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) P1 #4) blocks the **Teams
+> ([`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) P1 #4) blocks the **Teams
 > bot**. It does **not** block shipping a usable prototype. The web app needs no
 > Azure subscription, and its sign-in needs no admin consent.
 
@@ -18,11 +18,11 @@ index_ and _who can reach it_ — not by how polished the deployment is.
 
 **Verified in production 2026-08-01:**
 
-| Source                            | Kind       | `data_class` | Docs    |
-| --------------------------------- | ---------- | ------------ | ------- |
-| `TWK SharePoint — Knowledge Base` | sharepoint | `general`    | **844** |
-| `TWK RAGTestSite`                 | sharepoint | `general`    | 14      |
-| `TWK CPA Firm`                    | sharepoint | `general`    | 0       |
+| Source                                     | Kind       | `data_class` | Docs    |
+| ------------------------------------------ | ---------- | ------------ | ------- |
+| `the tenant's SharePoint — Knowledge Base` | sharepoint | `general`    | **844** |
+| `the tenant's test site`                   | sharepoint | `general`    | 14      |
+| `the operating tenant`                     | sharepoint | `general`    | 0       |
 
 Everything indexed comes from **SharePoint**; there is no Onvio content and no
 QuickBooks data. That connection scope is a fact and still holds.
@@ -126,7 +126,7 @@ A Teams **tab** is an app manifest pointing at a hosted URL. Only the
 resource — and that is the piece needing a subscription. A tab does not.
 
 **Needs:** Option 1 done, a Teams app manifest, and the tenant to permit custom
-app upload (a tenant setting — ⚠ **unverified** whether TWK allows it; may need
+app upload (a tenant setting — ⚠ **unverified** whether the firm allows it; may need
 an admin toggle).
 
 **Trade-off:** no @mention, no proactive notifications. For a prototype whose

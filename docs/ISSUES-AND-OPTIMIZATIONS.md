@@ -49,7 +49,7 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 
 ## 2. High
 
-### 🔴 C3 — `run-real-eval.ts` truncates the database; a TWK gold-set runner must not be copied from it
+### 🔴 C3 — `run-real-eval.ts` truncates the database; a gold-set runner must not be copied from it
 
 **Raised 2026-08-01.** `tests/e2e/src/eval/run-real-eval.ts:108` calls
 `truncateAll(db)`, which executes
@@ -57,25 +57,25 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 (`tests/e2e/src/helpers/db.ts:21`).
 
 **That is correct where it is.** The runner seeds its own synthetic corpus and
-needs a clean slate. **The hazard is what happens next:** the TWK gold-set runner
+needs a clean slate. **The hazard is what happens next:** the firm gold-set runner
 (C4 below) must query the **real, already-indexed** corpus — and the obvious way
 to write it is to copy the only existing real-embedder runner and change the
 question source. **Doing that and pointing it at production destroys the index**
 (currently ~858 documents), and the failure is silent until someone asks a
 question and gets nothing.
 
-**Recommendation:** a TWK runner must never truncate, never seed, and should open
+**Recommendation:** a runner must never truncate, never seed, and should open
 a **read-only** connection so the mistake is impossible rather than merely
 discouraged. Add an explicit guard — refuse to run if the target database is not
 the test database — and a comment on `truncateAll` naming this hazard at the
 definition site, not just at the call site. **Effort:** S. **Value:** high — this
 is a data-loss class, not a quality one.
 
-### 🔴 C4 — `pnpm eval:twk` is documented but does not exist
+### 🔴 C4 — `pnpm eval:gold` is documented but does not exist
 
-**Raised 2026-08-01.** `tests/e2e/src/eval/twk-gold-set.ts:32` instructs the
+**Raised 2026-08-01.** `tests/e2e/src/eval/gold-set.ts:32` instructs the
 reader: _"Append entries below. Nothing else in the harness changes — `pnpm
-eval:twk` picks them up automatically and refuses to run while the set is
+eval:gold` picks them up automatically and refuses to run while the set is
 empty."_ **No such script is defined in any `package.json`.** The only eval
 scripts are `eval` (vitest specs, FakeEmbedder) and `eval:real`
 (`run-real-eval.ts`, synthetic corpus).
@@ -86,7 +86,7 @@ completes the CPA gold-set session will follow it, find nothing, and either give
 up or — worse — reach for `eval:real`, which measures a **different, synthetic
 corpus** and would report healthy numbers that say nothing about the real KB.
 
-**What it must do:** load `TWK_GOLD_QUESTIONS`, run `validateGoldSet` and refuse
+**What it must do:** load `GOLD_QUESTIONS`, run `validateGoldSet` and refuse
 on any issue, refuse on an empty set, query the **production** index read-only
 (see C3), score retrieval (`metrics.ts`) plus faithfulness (`faithfulness.ts`) for
 `tier1-automatable` questions, and **report `tier2-cpa-verified` questions as
@@ -110,9 +110,9 @@ client-identifying material. That is currently classified internal-only _by
 default, not because anyone checked_. Build the screen into the first pass;
 retrofitting it costs a second full read of the corpus. **Effort:** S.
 
-### 🟠 H0 — Citations carry no last-modified date (blocks the TWK "index as-is" decision)
+### 🟠 H0 — Citations carry no last-modified date (blocks the "index as-is" decision)
 
-**Raised 2026-08-01**, when TWK decided to index its SharePoint knowledge base **as it currently exists** rather than wait for a cleanup pass with no owner and no date. That decision is sound — the bot's retrieval and gap logs become a far better cleanup queue than working through folders alphabetically — but it puts **superseded documents in the index alongside current ones**, and the system has no way to distinguish them.
+**Raised 2026-08-01**, when the firm decided to index its SharePoint knowledge base **as it currently exists** rather than wait for a cleanup pass with no owner and no date. That decision is sound — the bot's retrieval and gap logs become a far better cleanup queue than working through folders alphabetically — but it puts **superseded documents in the index alongside current ones**, and the system has no way to distinguish them.
 
 **Why the citation is the right place to fix it.** A person browsing SharePoint sees the folder, the modified date, and the near-duplicates beside a file, and hesitates. A citation reads as authoritative. Under Circular 230 §10.35 the citation is the entire basis of the defensibility argument, so a citation to a 2019 procedure is worse than no answer — it manufactures confidence instead of prompting a check.
 
@@ -126,7 +126,7 @@ retrofitting it costs a second full read of the corpus. **Effort:** S.
 
 **Effort:** S. **Value:** high — it is the difference between a dated KB being usable and being a liability.
 
-**Related, same decision, config-only:** scope the TWK source to named `driveId`/`folderPath` values rather than the whole site. Both config keys already exist in the SharePoint connector.
+**Related, same decision, config-only:** scope the firm's source to named `driveId`/`folderPath` values rather than the whole site. Both config keys already exist in the SharePoint connector.
 
 ### 🟠 H1 — No reranking stage (largest retrieval-quality gap) ⚠ **likely stale — verify before actioning**
 
@@ -357,7 +357,7 @@ This system is being stood up over a **CPA firm's** corpus — SharePoint engage
 - **Column-level encryption for `documents.content`/`chunks.text`:** relies on the managed Postgres provider's disk/volume encryption (`docs/DEPLOYMENT.md` recommends Neon/Supabase/RDS — verify encryption-at-rest is actually enabled for whichever one a given deployment uses; this is an operational setting the code can't assert). Application-level column encryption was evaluated and explicitly NOT pursued this pass: it would break `hybridSearch`'s full-text (`tsvector`/GIN) search on encrypted content without a much larger redesign (searchable encryption, or decrypt-then-search which defeats the point), plus real key-management/rotation infrastructure this repo has no precedent for. Worth a dedicated design pass if a client's threat model specifically requires it, not a quick addition.
 - **`audit_log` retention policy (deferred 2026-07-31 — explicit decision, "get something working first"):** distinct from the source/document purge above, which does **not** touch `audit_log`. Nothing deletes audit rows, so the Circular 230 §10.22 requirement that the trail _exist_ is satisfied by construction — the gap is that "how long do you keep it?" currently answers "forever, because nothing removes it," which is an implementation accident rather than a stated policy. **The build is small and the schema is already right for it:** `audit_log.created_at` exists with `audit_log_created_idx` on it, so a windowed purge is one indexed `DELETE` plus a scheduler entry (pg-boss is already the job runner) plus a guard against premature deletion.
   **What must be decided before building, not during:** (a) the window itself — a number counsel gives us, not one we pick; and (b) whether `principal_subject` should age out on a _shorter_ clock than the rest of the row. That second one is the real design question: the same table is simultaneously a **compliance record**, where indefinite retention is the safe default, and a **per-user identity log** (it stores the raw AAD oid, deliberately unhashed), where indefinite retention is the unsafe default. A single retention number cannot be correct for both. Splitting the clocks — purge or null the subject early, keep the rest for the compliance window — is probably the answer, but it should be a decision with counsel's number attached, not a guess baked into a migration.
-  **Not blocking the TWK Phase 1 pilot:** the log holds internal Class A/B SOP questions from ~3 pilot users and no client data by design, so indefinite retention costs nothing and risks little at this scale. Revisit when Phase 2 brings client data near the log, or when accumulated staff-identity history becomes material — whichever comes first.
+  **Not blocking the Phase 1 pilot:** the log holds internal Class A/B SOP questions from ~3 pilot users and no client data by design, so indefinite retention costs nothing and risks little at this scale. Revisit when Phase 2 brings client data near the log, or when accumulated staff-identity history becomes material — whichever comes first.
 - **Finer-grained deletion (single-client within a multi-client source):** discovered to be blocked on a missing schema concept, not just a missing query — `documents`/`chunks` have no per-document `clientId` at all today; only `source_client_assignments` exists, and that's an access-control mapping (which staff/clients may query a source), not a per-document tag. A source CAN serve multiple clients (the table is many-to-many), but nothing records which documents within it belong to which client, so there's no way to selectively purge one client's data from a shared source without first adding that tagging (folder-path inference, or manual admin tagging — both real design choices). Deferred until a concrete need for multi-client-source deletion exists, rather than building speculative infrastructure now; whole-source purge (already shipped) covers the common case of a per-engagement, single-client source.
 
 ### ✅ H5 — No rate limiting (RESOLVED)

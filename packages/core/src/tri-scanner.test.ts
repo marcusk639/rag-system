@@ -250,7 +250,8 @@ describe("scanForTRI", () => {
 });
 
 describe("identifyingTRIPatterns", () => {
-  // Why this split exists: a screen of the TWK corpus (858 documents) flagged
+  // Why this split exists: a screen of a representative accounting-firm SOP
+  // corpus (858 documents) flagged
   // 41% of it, but the classes are not alike. `tax-form+amount` matched 316
   // documents and its hits are what a procedure explaining how to review a
   // return looks like. `SSN`/`EIN` matched 24, one of which held 260 distinct
@@ -301,7 +302,8 @@ describe("unformatted tax identifiers", () => {
   // The `SSN` pattern matches only FORMATTED identifiers, and its comment used
   // to justify that narrowness by saying unformatted 9-digit strings "are
   // caught by taxpayer+amount and tax-form+amount". Once those two moved to the
-  // contextual class — which the default `triPolicy = "warn"` does not block —
+  // contextual class — which `triPolicy = "warn"` does not block (the
+  // default has since moved to `block`, but `warn` remains available) —
   // that backstop was gone: an OCR'd return carrying `SSN 123456789` scanned as
   // contextual-only and was disclosed to a third-party model.
   //

@@ -1,4 +1,4 @@
-# Ask the Firm Knowledge Base
+# Ask the Knowledge Base in Microsoft Teams
 
 **Status:** ⛔ **NOT YET FOR DISTRIBUTION** — updated 2026-08-03.
 **Why:** the Teams bot described below is **not deployed** (blocked on an Azure
@@ -22,7 +22,7 @@ was **incorrect**. Do not hand this to staff until both are resolved.
 
 **In a direct message (recommended):**
 
-1. In Teams, search for **TWK KB** in the chat/search bar and open a chat with it (or find it in your Teams apps).
+1. In Teams, search for **the knowledge base** in the chat/search bar and open a chat with it (or find it in your Teams apps).
 2. Type your question in plain English and send. Examples:
    - "What's our intake checklist for a new 1040 client?"
    - "What's the SOP for a BOI filing?"
@@ -31,7 +31,7 @@ was **incorrect**. Do not hand this to staff until both are resolved.
 
 **In a channel:**
 
-- **@mention** the bot: `@TWK KB what's our engagement letter template?`
+- **@mention** the bot: `@the knowledge base what's our engagement letter template?`
 - Everyone in the channel sees the answer, so in channels the bot only uses **firm-wide** documents that everyone already has access to. For anything tied to your personal access, ask it in a **direct message** instead.
 
 ---

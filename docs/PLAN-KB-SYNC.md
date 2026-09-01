@@ -6,7 +6,7 @@
 > **Status:** COMPLETE — executed 2026-07-02. Source `b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14`
 > created, `API_PRINCIPALS` deployed to rag-api + rag-mcp, full sync ran to completion,
 > E2E verification passed (substantive answer, 5 unique documents cited, all citation
-> URLs point to `twkcpafirmllc.sharepoint.com/sites/twkcpafirmstaff/...`, no scoping bleed,
+> URLs point to `<tenant>.sharepoint.com/sites/<staff-site>/...`, no scoping bleed,
 > no oversize/error log entries).
 > **Date authored:** 2026-06-29
 >
@@ -27,8 +27,10 @@ a fresh session needs.
 # Production API
 export API_URL="https://rag-api-production-07b4.up.railway.app"
 
-# SharePoint site (TWK Team)
-export SITE_ID="twkcpafirmllc.sharepoint.com,c9985f6c-0b9a-4a13-967a-1227cf3e0464,7b9b0b1a-8de5-4a07-87fa-b83deb432eed"
+# SharePoint site (firm team site)
+# Get this from Graph: GET /sites/<host>:/sites/<site-path>  -> the "id" field.
+# Format is "<host>,<site-guid>,<web-guid>" — all three parts are required.
+export SITE_ID="<tenant>.sharepoint.com,<site-guid>,<web-guid>"
 
 # "Documents" = Shared Documents library (the only drive we want)
 export DRIVE_ID="b!bF-YyZoLE0qWehInzz4EZBoLm3vljQdKh_q4PetDLu12KwPuu-7AQb7A96resDeQ"
@@ -37,14 +39,14 @@ export DRIVE_ID="b!bF-YyZoLE0qWehInzz4EZBoLm3vljQdKh_q4PetDLu12KwPuu-7AQb7A96res
 export FOLDER_PATH="Knowledge Base"
 
 # Existing source UUIDs already in deploy_tokens.sh:
-#   52bb403e-2e59-472b-935a-c83f2eee7e4c  TWK CPA Firm
-#   d3461cbe-b99f-4253-aded-b3610afe56de  TWK RAGTestSite
+#   52bb403e-2e59-472b-935a-c83f2eee7e4c  the operating tenant
+#   d3461cbe-b99f-4253-aded-b3610afe56de  the tenant's test site
 # The new SharePoint source UUID is unknown until Phase 1 creates it.
 ```
 
 Other drives on the site (NOT syncing — for reference only):
 
-- `TWK Training` — separate document library
+- `the firm's training` — separate document library
 - `Teams Wiki Data` — wiki, not relevant
 
 ---
@@ -76,7 +78,7 @@ curl -fsS -X POST "$API_URL/sources" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
-    \"name\": \"TWK SharePoint — Knowledge Base\",
+    \"name\": \"the tenant's SharePoint — Knowledge Base\",
     \"kind\": \"sharepoint\",
     \"config\": {
       \"siteId\": \"$SITE_ID\",
@@ -94,14 +96,14 @@ export SOURCE_ID="<uuid-from-response>"
 
 ### Verification checklist
 
-- [ ] Response is HTTP 201 with `kind: "sharepoint"`, `name: "TWK SharePoint — Knowledge Base"`
+- [ ] Response is HTTP 201 with `kind: "sharepoint"`, `name: "the tenant's SharePoint — Knowledge Base"`
 - [ ] `GET $API_URL/sources/$SOURCE_ID` returns the record (config fields stripped from response)
 
 ### Anti-pattern guards
 
 - ❌ Do NOT set `folderPath: "Documents/Knowledge Base"` — the drive is already scoped to
   the Documents library; the path is **relative to the drive root**, so `"Knowledge Base"` alone is correct.
-- ❌ Do NOT omit `driveId` — without it, the connector would also enumerate TWK Training and
+- ❌ Do NOT omit `driveId` — without it, the connector would also enumerate the firm's training and
   Teams Wiki Data on every sync.
 
 ---
@@ -221,11 +223,11 @@ curl -fsS -X POST "$API_URL/ask" \
 ```
 
 Expected: substantive answer, at least one citation with a `url` pointing to
-`twkcpafirmllc.sharepoint.com/sites/twkcpafirmstaff/...`.
+`<tenant>.sharepoint.com/sites/<staff-site>/...`.
 
 ### 4.3 Spot-check a specific document
 
-Browse to `https://twkcpafirmllc.sharepoint.com/sites/twkcpafirmstaff/Shared%20Documents/Knowledge%20Base`
+Browse to `https://<tenant>.sharepoint.com/sites/<staff-site>/Shared%20Documents/Knowledge%20Base`
 in a browser and pick a document title. Ask about it specifically to confirm the content is
 indexed correctly.
 
@@ -233,7 +235,7 @@ indexed correctly.
 
 ```bash
 # This should return results only from the Knowledge Base source,
-# not from TWK CPA Firm or RAGTestSite:
+# not from the operating tenant or its test site:
 curl -fsS -X POST "$API_URL/ask" \
   -H "Authorization: Bearer $MARCUS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -248,7 +250,7 @@ curl -fsS -X POST "$API_URL/ask" \
 
 - [ ] Source status is not `"error"` after sync completes
 - [ ] `/ask` returns a non-empty, substantive answer with citations
-- [ ] Citation URLs point to `twkcpafirmllc.sharepoint.com/sites/twkcpafirmstaff/...`
+- [ ] Citation URLs point to `<tenant>.sharepoint.com/sites/<staff-site>/...`
 - [ ] No documents from other sources appear in citation list when scoped to `$SOURCE_ID`
 - [ ] `documentsSkippedOversize` in worker logs is 0 or low (KB folder likely has small docs)
 

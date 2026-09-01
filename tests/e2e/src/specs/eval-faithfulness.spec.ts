@@ -9,8 +9,8 @@ import {
 import {
   validateGoldSet,
   isGoldSetUsable,
-  type TwkGoldQuestion,
-} from "../eval/twk-gold-set.js";
+  type GoldQuestion,
+} from "../eval/gold-set.js";
 
 const chunk = (doc: string, text = "some text") => ({
   chunkId: `${doc}-c1`,
@@ -132,8 +132,8 @@ describe("aggregateFaithfulness", () => {
 });
 
 describe("gold set validation", () => {
-  const base: TwkGoldQuestion = {
-    id: "twk-q-001",
+  const base: GoldQuestion = {
+    id: "gold-q-001",
     query: "What is our PTO policy?",
     relevant: ["doc-1"],
     tier: "tier1-automatable",

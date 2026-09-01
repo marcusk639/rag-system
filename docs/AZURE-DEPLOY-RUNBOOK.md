@@ -1,15 +1,15 @@
-# TWK — Azure / Entra + Railway Deployment Runbook
+# Azure / Entra + Railway Deployment Runbook
 
 **Audience:** Marcus (technical/ops lead). Every step here is human/infra work — Azure portal clicks, secret generation, Railway config. None of it can be done by an AI agent; the application code is already built and merged.
 
-**Scope:** Stand up the two staff-facing surfaces of the RAG knowledge base for TWK:
+**Scope:** Stand up the two staff-facing surfaces of the RAG knowledge base for the firm:
 
 1. **`apps/web`** — the Next.js chat app (Entra SSO, per-user scope).
 2. **`apps/teams-bot`** — the Microsoft Teams conversational bot (Entra SSO, per-user scope, adaptive-card answers).
 
 Both are BFFs over the same `apps/api` HTTP API and share the same identity model (`oid`) and the same `INTERNAL_SCOPE_JWT_SECRET`.
 
-> **GATE — do not deploy for real staff use until the P0 gates in `docs/TWK-MANUAL-RUNBOOK.md` are done:** (1) content audit of what's indexed, (2) counsel + carrier sign-off, (3) backup/restore drill. This runbook stands the infrastructure up; the P0 gates decide whether real staff may use it. It is fine to do this runbook against a **pilot/you-only** deployment first.
+> **GATE — do not deploy for real staff use until the P0 gates in `docs/PILOT-MANUAL-RUNBOOK.md` are done:** (1) content audit of what's indexed, (2) counsel + carrier sign-off, (3) backup/restore drill. This runbook stands the infrastructure up; the P0 gates decide whether real staff may use it. It is fine to do this runbook against a **pilot/you-only** deployment first.
 
 ---
 
@@ -42,14 +42,14 @@ The web app's admin pages (`/admin/access`, source management) are gated on memb
 2. Add yourself as a member (add Chris/Doug later only if they should administer access grants).
 3. Open the group → copy its **Object Id** → this is `RAG_ADMINS_GROUP_ID`.
 
-> Note: onboarding a Phase-1 firm-SOP-only user still requires an admin to grant them the firm-SOP source via `/admin/access` — the grant model is per-client, so a firm-wide index is a small manual grant today (see `docs/TWK-MANUAL-RUNBOOK.md` item 4). This does not block deploy.
+> Note: onboarding a Phase-1 firm-SOP-only user still requires an admin to grant them the firm-SOP source via `/admin/access` — the grant model is per-client, so a firm-wide index is a small manual grant today (see `docs/PILOT-MANUAL-RUNBOOK.md` item 4). This does not block deploy.
 
 ---
 
 ## 2. Entra app registration — web app (`apps/web`)
 
 1. Entra admin center → **App registrations → New registration**.
-   - Name: `TWK KB — Web`.
+   - Name: `the knowledge base — Web`.
    - Supported account types: **Single tenant** (this org only).
    - Redirect URI: **Web** → `https://<web-app-domain>/api/auth/callback/microsoft-entra-id` (the NextAuth Microsoft Entra provider callback; fill `<web-app-domain>` with the Railway domain from §6, come back and update if you deploy before you know it).
 2. From **Overview**: copy **Application (client) ID** → `AUTH_ENTRA_CLIENT_ID`; copy **Directory (tenant) ID** → `AUTH_ENTRA_TENANT_ID`.
@@ -65,7 +65,7 @@ The web app's admin pages (`/admin/access`, source management) are gated on memb
 The Teams bot needs its own identity (an Azure Bot resource, which creates/uses an Entra app) plus an SSO configuration.
 
 1. Azure portal → **Create a resource → Azure Bot**.
-   - Bot handle: `twk-kb-bot`.
+   - Bot handle: `<tenant>-kb-bot`.
    - **Type of App: Single Tenant.**
    - App creation: **Create new Microsoft App ID** (or use an existing app registration you create manually — single-tenant either way).
 2. After creation, open the bot's Entra app registration (Azure Bot → **Configuration → Manage** next to the Microsoft App ID):
@@ -146,7 +146,7 @@ The Teams app manifest lives at `apps/teams-bot/manifest/manifest.json` with `${
 2. **Teams bot:** DM the bot a question → confirm an adaptive-card answer with citations + disclaimer. @mention it in a test channel → confirm it answers only from firm-wide (channel-safe) sources.
 3. **Audit:** confirm the queries appear in the `audit_log` table with `channel` = `api` (web) / `teams` (bot) and your `oid` as `principal_subject`.
 
-**Done when:** you have personally gotten a real answer from both surfaces against real infrastructure. Real-staff rollout stays gated on the P0 items in `docs/TWK-MANUAL-RUNBOOK.md`.
+**Done when:** you have personally gotten a real answer from both surfaces against real infrastructure. Real-staff rollout stays gated on the P0 items in `docs/PILOT-MANUAL-RUNBOOK.md`.
 
 ---
 

@@ -10,7 +10,7 @@ import { env } from "../env.js";
 import { openTestDb } from "../helpers/db.js";
 
 /**
- * The audit-log-shipping job (TWK Task 14) — second recurring (pg-boss
+ * The audit-log-shipping job — second recurring (pg-boss
  * `schedule()`) job in this codebase after docsGapDigest. Two things here
  * specifically need a real Postgres rather than a mock:
  *   1. `getAuditLogRowsSince`/`advanceAuditLogShipperWatermark` against the
@@ -41,7 +41,7 @@ function fakeJob(id: string) {
   return { id } as unknown as Parameters<typeof handleShipAuditLog>[0];
 }
 
-describe("E2E: handleShipAuditLog (TWK Task 14)", () => {
+describe("E2E: handleShipAuditLog", () => {
   let db: Db;
   let close: () => Promise<void>;
 

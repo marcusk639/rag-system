@@ -1,6 +1,6 @@
-# Backup & Restore Drill — TWK KB
+# Backup & Restore Drill — the knowledge base
 
-**P0 gate #3** from `TWK-LAUNCH-STATUS.md`. Runbook item 3 in `TWK-MANUAL-RUNBOOK.md`.
+**P0 gate #3** from `PILOT-LAUNCH-STATUS.md`. Runbook item 3 in `PILOT-MANUAL-RUNBOOK.md`.
 
 **Drill run:** 2026-07-31 · **Result:** ✅ **complete — local mechanism AND production data both proven**
 

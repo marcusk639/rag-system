@@ -17,7 +17,7 @@
  * a tax/accounting determination, epistemic constraint C2 forbids AI making
  * one, and a system grading its own professional correctness is precisely the
  * liability the strategy documents warn about. Substantive correctness is
- * Tier 2 and requires a credentialed reviewer (see twk-gold-set.ts).
+ * Tier 2 and requires a credentialed reviewer (see gold-set.ts).
  *
  * The distinction matters practically, not just legally: an answer can be
  * perfectly faithful to a retrieved document and still be wrong, because the

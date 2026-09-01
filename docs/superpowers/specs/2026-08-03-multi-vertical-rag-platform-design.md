@@ -116,7 +116,7 @@ scanners:
     kind: contextual # a signal for review, never a verdict
 ```
 
-This distinction is load-bearing and was learned expensively. Screening TWK's
+This distinction is load-bearing and was learned expensively. Screening the firm's
 858-document corpus, the contextual pattern `tax-form+amount` matched **316
 documents** and every inspected hit was a legitimate SOP, while `ssn`/`ein`
 matched **24**, one of which held 522 SSN-shaped values — a real client roster.
@@ -242,7 +242,7 @@ document **widens the sensitivity boundary** — so a deployment-level
 "scrubbing: off" switch is the tier gate disabled under another name.
 
 - **Identifying scanners are not disableable from configuration.** Their definitions and dispositions are pack-resident and `protected` (§4.2).
-- **Contextual scanners are DB-tunable** — a deployment may quiet them. They are advisory by construction, and on TWK's corpus the contextual patterns produced **316 flags, all false positives**, so tuning them is a genuine operational need. The half that caught the 522-SSN roster stays on.
+- **Contextual scanners are DB-tunable** — a deployment may quiet them. They are advisory by construction, and on the firm's corpus the contextual patterns produced **316 flags, all false positives**, so tuning them is a genuine operational need. The half that caught the 522-SSN roster stays on.
 
 #### ⚠ This reorders the pipeline's most sensitive section
 
@@ -349,24 +349,24 @@ no engagement has needed it. Deployment-wide now; the catalog key is namespaced
 
 **The test: does changing this require review?**
 
-| Item                                                    | Where    | Rationale                                                                   |
-| ------------------------------------------------------- | -------- | --------------------------------------------------------------------------- |
-| Tier definitions and `indexable`                        | Pack     | Widening changes what is legally allowed in the index                       |
-| Scanner patterns and `kind`                             | Pack     | Weakening a scanner is a compliance change                                  |
-| Scanner `disposition` (exclude/redact/flag)             | Pack     | Determines whether a match keeps material out (§3.7)                        |
-| Whether an _identifying_ scanner runs at all            | Pack     | Disabling one widens the sensitivity boundary                               |
-| Whether a _contextual_ scanner flags                    | DB       | Advisory only; 316 false positives on TWK made this a real operational need |
-| `ingest.scrubBeforeIndex` (redaction on/off)            | DB       | Applies removal; does not change what counts as sensitive (§3.8)            |
-| System prompt                                           | Pack     | It is the grounding contract                                                |
-| Disclaimer                                              | Pack     | Often a regulatory requirement                                              |
-| Classification rule _shapes_ — what a rule may match on | Pack     | Defines what classification can express at all                              |
-| Sources to index                                        | DB       | Deployment fact                                                             |
-| Classification _patterns_ — this client's folder names  | DB       | Client-specific instances of a pack-defined shape (§3.3)                    |
-| Folder exclusions                                       | DB       | Client-specific; changes during engagement                                  |
-| Staff roster                                            | DB       | Changes with hiring                                                         |
-| Retrieval knobs (`topK`, weights, rerank on/off)        | DB       | Tuning, no policy content                                                   |
-| Vocabulary additions                                    | DB       | Additive, harmless                                                          |
-| Branding (`APP_NAME`)                                   | DB / env | Cosmetic                                                                    |
+| Item                                                    | Where    | Rationale                                                                        |
+| ------------------------------------------------------- | -------- | -------------------------------------------------------------------------------- |
+| Tier definitions and `indexable`                        | Pack     | Widening changes what is legally allowed in the index                            |
+| Scanner patterns and `kind`                             | Pack     | Weakening a scanner is a compliance change                                       |
+| Scanner `disposition` (exclude/redact/flag)             | Pack     | Determines whether a match keeps material out (§3.7)                             |
+| Whether an _identifying_ scanner runs at all            | Pack     | Disabling one widens the sensitivity boundary                                    |
+| Whether a _contextual_ scanner flags                    | DB       | Advisory only; 316 false positives on the firm made this a real operational need |
+| `ingest.scrubBeforeIndex` (redaction on/off)            | DB       | Applies removal; does not change what counts as sensitive (§3.8)                 |
+| System prompt                                           | Pack     | It is the grounding contract                                                     |
+| Disclaimer                                              | Pack     | Often a regulatory requirement                                                   |
+| Classification rule _shapes_ — what a rule may match on | Pack     | Defines what classification can express at all                                   |
+| Sources to index                                        | DB       | Deployment fact                                                                  |
+| Classification _patterns_ — this client's folder names  | DB       | Client-specific instances of a pack-defined shape (§3.3)                         |
+| Folder exclusions                                       | DB       | Client-specific; changes during engagement                                       |
+| Staff roster                                            | DB       | Changes with hiring                                                              |
+| Retrieval knobs (`topK`, weights, rerank on/off)        | DB       | Tuning, no policy content                                                        |
+| Vocabulary additions                                    | DB       | Additive, harmless                                                               |
+| Branding (`APP_NAME`)                                   | DB / env | Cosmetic                                                                         |
 
 ### 4.1 The safety property — two axes, not one
 
@@ -564,7 +564,7 @@ synthetic test.
 **But the report must never carry client data.** If it included document titles
 or chunk text and the client emailed it, that would be a disclosure — for a HIPAA
 or 42 CFR Part 2 client, a reportable one, caused by diagnostic tooling. This is
-concrete: ~30 of TWK's own document titles carry a personal name in `Surname, Firstname` form, 9 of them as `(YYYY Package)` client deliverables.
+concrete: ~30 of the firm's own document titles carry a personal name in `Surname, Firstname` form, 9 of them as `(YYYY Package)` client deliverables.
 
 **Design:** a differential test needing **no ground truth**. Run the same N
 questions before and after an upgrade against the same corpus, and report only
@@ -579,7 +579,7 @@ rolling forward. Runs only at the client, only on demand, read-only via
 
 ## 7. Out of scope
 
-- **Publishing `@rag/*` to npm.** There is no external developer consuming libraries; the delivery unit is an image set plus a pack plus an env file. Publishing would also place TWK corpus findings currently embedded in `tri-scanner.ts` and `config.ts` comments on a public registry for no benefit.
+- **Publishing `@rag/*` to npm.** There is no external developer consuming libraries; the delivery unit is an image set plus a pack plus an env file. Publishing would also place the firm corpus findings currently embedded in `tri-scanner.ts` and `config.ts` comments on a public registry for no benefit.
 - **A multi-tenant control plane or hosted service.** Contradicts the per-client isolation model.
 - **Query rewriting, HyDE, multi-query, parent-document retrieval.** Measured as neutral-to-negative for these corpora.
 - **Dynamic plugin loading.** Static, in-image extensions only.
@@ -603,7 +603,7 @@ disclaimer (`ask.ts:51-59`) made pack-supplied; the CPA pack skeleton created.
 No schema migration, no pipeline change. This is what delivers "core is not
 opinionated about any domain." _Days._
 
-The one real hazard is behavioural, not structural: the live TWK pilot's answers
+The one real hazard is behavioural, not structural: the live the firm pilot's answers
 change the moment the default prompt goes neutral, so the core change and the
 pack that restores its prompt must land in a single deploy.
 
@@ -613,7 +613,7 @@ scanners moved behind pack policy; the §3.7 pipeline reorder; the §3.8
 `processingVersion` column (migration #2). _Weeks._ Gated on two things:
 
 - **the tier migration's own design pass** (§10) — `dataClass` gates ingestion at `pipeline.ts:245`, and the current enum collapses Class C and D, so any change that lets C through lets D through;
-- **the TWK content-boundary work** ([`../plans/2026-08-03-kb-content-boundary.md`](../plans/2026-08-03-kb-content-boundary.md) Phase 1) having removed confirmed Class D data from the live index. Refactoring the sensitivity machinery while a client roster is retrievable is the wrong order.
+- **the firm content-boundary work** ([`../plans/2026-08-03-kb-content-boundary.md`](../plans/2026-08-03-kb-content-boundary.md) Phase 1) having removed confirmed Class D data from the live index. Refactoring the sensitivity machinery while a client roster is retrievable is the wrong order.
 
 The pipeline reorder deserves its own tests regardless of the migrations:
 today's ordering means a document that _should_ be excluded is already in the
@@ -674,6 +674,6 @@ slice ships its docs with it.
 
 - **The tier migration is the highest-risk change in this design.** `dataClass` gates ingestion, and the current enum collapses Class C and D into one value — so, per `cpa-consulting/docs/rag/findings/r5-compliance-gate.md`, _"any change that lets C through lets D through."_ This warrants its own spec before implementation, not just a task.
 - **Generic admin UIs are a support surface.** Every exposed setting is something a client can set badly. Start with the smallest `adminEditable` list that works and widen on demand.
-- **The drift check depends on a stable question set per client.** Without one it cannot run. For TWK that set does not exist yet and is blocked on the same gold-set session as retrieval tuning.
+- **The drift check depends on a stable question set per client.** Without one it cannot run. For the firm that set does not exist yet and is blocked on the same gold-set session as retrieval tuning.
 - **Exclusion at ingest is silent by construction, and silence is the failure mode.** A document excluded by §3.7 leaves an `ingest_log` row and nothing else — no chunks, no search hit, no answer citing it. To a user it is indistinguishable from a document that was never synced. This is correct behaviour and a poor experience: "the KB doesn't know about our onboarding SOP" is a support call whose answer lives only in a log table. An operator-visible view of what was excluded and why should ship with slice 1b — alongside the exclusion behaviour itself, not after the first confused user.
-- **Scanner false-negatives are unbounded and unmeasurable.** The design treats an identifying-scanner match as authoritative, but nothing establishes what the scanners _miss_. TWK's screen found a 522-SSN roster because SSNs are formatted; a client name in prose trips nothing. Exclusion is therefore a floor, not a guarantee, and the human review in the content-boundary plan remains load-bearing rather than a formality this replaces.
+- **Scanner false-negatives are unbounded and unmeasurable.** The design treats an identifying-scanner match as authoritative, but nothing establishes what the scanners _miss_. the firm's screen found a 522-SSN roster because SSNs are formatted; a client name in prose trips nothing. Exclusion is therefore a floor, not a guarantee, and the human review in the content-boundary plan remains load-bearing rather than a formality this replaces.

@@ -13,7 +13,7 @@
 | ------------------------ | ------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------- | --------------------------------------- |
 | **Core**                 | `rag-system` (one versioned codebase + Docker images)                     | nothing per tenant                  | tenant config, domain rules                          | — (it IS the source of truth)           |
 | **Vertical plugin**      | a package, e.g. `@rag/plugin-cpa`, in the product repo (`cpa-consulting`) | domain (CPA vs veteran-claims vs …) | tenant secrets/sources, the confidentiality boundary | bump its `@rag/core` dependency version |
-| **Tenant config + data** | `tenants/<name>.env` + the tenant's own DB                                | firm/business (TWK vs firm B)       | any code                                             | it's just config — nothing to "update"  |
+| **Tenant config + data** | `tenants/<name>.env` + the tenant's own DB                                | firm/business (the pilot vs firm B) | any code                                             | it's just config — nothing to "update"  |
 
 **The load-bearing rule:** the confidentiality/scoping/audit boundary (per-user scope, `dataClass` gate, `resolveSourceIdsForUser`, `InternalScopeAuthProvider`) lives **only in core**. Plugins add domain _behavior_ (classification, prompting, connectors) but can never widen or reimplement the security boundary — same rule the Teams-bot design enforced.
 
@@ -23,7 +23,7 @@
 
 ## 2. Per-tenant provisioning template
 
-**Goal:** `provision-tenant twk` → a fully isolated, running TWK instance on the same images every other tenant runs.
+**Goal:** `provision-tenant kb` → a fully isolated, running the firm instance on the same images every other tenant runs.
 
 ### 2.1 Isolation guarantees (decision D5, `PLAN-LAUNCH-READINESS.md`)
 
@@ -39,7 +39,7 @@ Every value below flows through `loadConfig()`; nothing is hard-coded. Grouped:
 
 ```
 # --- identity / storage (isolated per tenant) ---
-TENANT_NAME=twk
+TENANT_NAME=kb
 DATABASE_URL=postgres://…/<tenant-db>        # own DB
 DATABASE_SSL=require
 OBJECT_STORE_…=<tenant bucket/prefix>        # own originals store
@@ -59,7 +59,7 @@ INTERNAL_SCOPE_JWT_SECRET / PARSER_SECRET     # openssl rand -hex 32
 # --- vertical plugin selection (§3) ---
 PLUGINS=cpa
 # --- branding ---
-APP_NAME="TWK Knowledge Base"  /  domain
+APP_NAME="<Firm> Knowledge Base"  /  domain
 ```
 
 ### 2.4 `scripts/provision-tenant.sh <name>` — the one command
@@ -136,7 +136,7 @@ plugin-cpa/
   package.json      # deps: @rag/core, @rag/rag
 ```
 
-`register()` calls `reg.registerClassifier("cpa", …)`, `reg.registerGenerator("cpa", …)`, etc. A TWK tenant sets `PLUGINS=cpa` + `CLASSIFIER=cpa` in its env; the image includes `@rag/plugin-cpa`. Firm B on the same vertical reuses the _same plugin_, different tenant config. A different business writes its own plugin; core is untouched.
+`register()` calls `reg.registerClassifier("cpa", …)`, `reg.registerGenerator("cpa", …)`, etc. A firm's tenant sets `PLUGINS=cpa` + `CLASSIFIER=cpa` in its env; the image includes `@rag/plugin-cpa`. Firm B on the same vertical reuses the _same plugin_, different tenant config. A different business writes its own plugin; core is untouched.
 
 ### 3.4 What a plugin must NOT do (the boundary's hard edges)
 
@@ -148,7 +148,7 @@ plugin-cpa/
 
 ## 4. How this delivers exactly what was asked ("core forked per problem, each updated from core")
 
-- **"A KB for firm A vs firm B"** → two **tenant instances** (`tenants/twk.env`, `tenants/firmB.env`), same images + same `@rag/plugin-cpa`. Different SharePoint, creds, DB, branding — all config.
+- **"A KB for firm A vs firm B"** → two **tenant instances** (`tenants/kb.env`, `tenants/firmB.env`), same images + same `@rag/plugin-cpa`. Different SharePoint, creds, DB, branding — all config.
 - **"A different business"** → its own tenant instance + (if its domain differs) its own plugin package. Core unchanged.
 - **"Each gets updated from core"** → `redeploy-tenant <name>` pulls the new core image tag. Security fixes reach every tenant by redeploy, not by N merges. Plugins bump a dependency version.
 - **A genuine hard fork** is reserved for a deployment that will _never_ re-sync (a permanent divergence) — the opposite of "updated from core", so not used here.
@@ -160,7 +160,7 @@ plugin-cpa/
 1. **Registry refactor in core** (non-breaking): introduce `PluginRegistry` + `RagPlugin`; convert `createConnector`/`createGenerator`/`createReranker`/`createChunker` to register built-ins into it; `buildCoreDeps` loads `config.plugins`. Ship a `DocumentClassifier` interface + a default no-op classifier.
 2. **Provisioning template**: `tenants/<name>.env` contract + `scripts/provision-tenant.sh` + `scripts/redeploy-tenant.sh`, mapped to Railway (per-tenant project) with the worker-first migration order.
 3. **`@rag/plugin-cpa`** (in `cpa-consulting`): the CPA `DocumentClassifier` first (the real domain value), then optional generator/reranker.
-4. **Provision TWK** as tenant #1 through the template (local embeddings + chosen external generator, `PLUGINS=cpa`), once the content-audit gate clears.
+4. **Provision the firm** as tenant #1 through the template (local embeddings + chosen external generator, `PLUGINS=cpa`), once the content-audit gate clears.
 
 ## 6. Out of scope
 
