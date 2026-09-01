@@ -87,7 +87,7 @@ the Entra consent conversation Chris must have anyway for the web app and Teams
 bot.
 
 ⚠ **Do not ship these dumps to a personal cloud account.** It is the same
-problem already flagged for `docs/the firm's SOPs/` in the consulting repo: firm data in
+problem already flagged for the firm's SOP folder in the consulting repo: firm data in
 an individual's account, outside firm control, surviving past any engagement.
 The convenience is real and the exposure is worse. Marcus's _firm_ OneDrive is
 not the same thing as a personal account — but it is still tied to one person's

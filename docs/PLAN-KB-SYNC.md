@@ -6,7 +6,7 @@
 > **Status:** COMPLETE — executed 2026-07-02. Source `b54dbd7b-7a0a-4e45-b89a-3f0d20b8de14`
 > created, `API_PRINCIPALS` deployed to rag-api + rag-mcp, full sync ran to completion,
 > E2E verification passed (substantive answer, 5 unique documents cited, all citation
-> URLs point to `kbcpafirmllc.sharepoint.com/sites/kbcpafirmstaff/...`, no scoping bleed,
+> URLs point to `<tenant>.sharepoint.com/sites/<staff-site>/...`, no scoping bleed,
 > no oversize/error log entries).
 > **Date authored:** 2026-06-29
 >
@@ -28,7 +28,9 @@ a fresh session needs.
 export API_URL="https://rag-api-production-07b4.up.railway.app"
 
 # SharePoint site (firm team site)
-export SITE_ID="kbcpafirmllc.sharepoint.com,c9985f6c-0b9a-4a13-967a-1227cf3e0464,7b9b0b1a-8de5-4a07-87fa-b83deb432eed"
+# Get this from Graph: GET /sites/<host>:/sites/<site-path>  -> the "id" field.
+# Format is "<host>,<site-guid>,<web-guid>" — all three parts are required.
+export SITE_ID="<tenant>.sharepoint.com,<site-guid>,<web-guid>"
 
 # "Documents" = Shared Documents library (the only drive we want)
 export DRIVE_ID="b!bF-YyZoLE0qWehInzz4EZBoLm3vljQdKh_q4PetDLu12KwPuu-7AQb7A96resDeQ"
@@ -221,11 +223,11 @@ curl -fsS -X POST "$API_URL/ask" \
 ```
 
 Expected: substantive answer, at least one citation with a `url` pointing to
-`kbcpafirmllc.sharepoint.com/sites/kbcpafirmstaff/...`.
+`<tenant>.sharepoint.com/sites/<staff-site>/...`.
 
 ### 4.3 Spot-check a specific document
 
-Browse to `https://kbcpafirmllc.sharepoint.com/sites/kbcpafirmstaff/Shared%20Documents/Knowledge%20Base`
+Browse to `https://<tenant>.sharepoint.com/sites/<staff-site>/Shared%20Documents/Knowledge%20Base`
 in a browser and pick a document title. Ask about it specifically to confirm the content is
 indexed correctly.
 
@@ -233,7 +235,7 @@ indexed correctly.
 
 ```bash
 # This should return results only from the Knowledge Base source,
-# not from the operating tenant or RAGTestSite:
+# not from the operating tenant or its test site:
 curl -fsS -X POST "$API_URL/ask" \
   -H "Authorization: Bearer $MARCUS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -248,7 +250,7 @@ curl -fsS -X POST "$API_URL/ask" \
 
 - [ ] Source status is not `"error"` after sync completes
 - [ ] `/ask` returns a non-empty, substantive answer with citations
-- [ ] Citation URLs point to `kbcpafirmllc.sharepoint.com/sites/kbcpafirmstaff/...`
+- [ ] Citation URLs point to `<tenant>.sharepoint.com/sites/<staff-site>/...`
 - [ ] No documents from other sources appear in citation list when scoped to `$SOURCE_ID`
 - [ ] `documentsSkippedOversize` in worker logs is 0 or low (KB folder likely has small docs)
 
