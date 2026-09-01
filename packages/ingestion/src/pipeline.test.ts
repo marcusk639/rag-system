@@ -1,9 +1,43 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
-import type { Chunk, Connector, ConnectorListResult, Parser } from "@rag/core";
+import type {
+  Chunk,
+  Connector,
+  ConnectorListResult,
+  LoadedPack,
+  Parser,
+} from "@rag/core";
 import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
 import { runIngestion, type PipelineDeps } from "./pipeline.js";
+
+/**
+ * `packs/cpa/pack.yaml` doesn't exist yet (a later task authors it), so this
+ * suite builds the equivalent pack in memory — same shape as the scanners
+ * `redactText` used to hardcode. Only `ssn`/`ein` are needed: the "BLOCKS a
+ * document containing an SSN" test below depends on this pack actually
+ * finding the identifier, exactly as the pre-migration hardcoded patterns did.
+ */
+const TEST_PACK: LoadedPack = {
+  id: "test",
+  version: "1.0.0",
+  scanners: [
+    {
+      id: "ssn",
+      kind: "identifying",
+      disposition: "exclude",
+      re: /\b\d{3}-\d{2}-\d{4}\b/g,
+      contextWindow: 60,
+    },
+    {
+      id: "ein",
+      kind: "identifying",
+      disposition: "exclude",
+      re: /\b\d{2}-\d{7}\b/g,
+      contextWindow: 60,
+    },
+  ],
+};
 
 // Mock the @rag/db sinks so the pipeline's control flow (page loop, cursor
 // persistence, done reporting) can be tested without a live Postgres.
@@ -124,6 +158,7 @@ function makeDeps(): PipelineDeps {
     chunker,
     embedder,
     logger,
+    pack: TEST_PACK,
   };
 }
 
@@ -633,6 +668,29 @@ describe("TRI compliance scanning at ingest", () => {
     // Only the "ingested" event — no tri-flagged.
     expect(logIngestEventMock).toHaveBeenCalledOnce();
     expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ action: "ingested" }),
+    );
+  });
+});
+
+describe("PipelineDeps.pack — fails closed when unconfigured", () => {
+  it("quarantines the document rather than indexing it unredacted when no pack is wired", async () => {
+    // `pack` is optional on PipelineDeps only because no production caller
+    // (apps/worker) wires a real one in yet. Until it does, ingestOne must
+    // refuse to index ANY document rather than skip redaction — this pins
+    // that fail-closed behaviour (Ruling R7).
+    const deps = { ...makeDeps(), pack: undefined };
+    const { connector } = makeConnector([
+      { documents: ["doc-1"], nextCursor: null, done: true },
+    ]);
+    const result = await runIngestion("src-id", connector, null, OPTS, deps);
+
+    // Nothing was indexed: no chunks, no upsert.
+    expect(result.chunksCreated).toBe(0);
+    expect(upsertDocumentMock).not.toHaveBeenCalled();
+    expect(replaceChunksMock).not.toHaveBeenCalled();
+    expect(logIngestEventMock).not.toHaveBeenCalledWith(
       deps.db,
       expect.objectContaining({ action: "ingested" }),
     );

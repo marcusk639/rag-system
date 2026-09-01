@@ -15,6 +15,9 @@
  * call would itself become an egress path.
  */
 
+import { scanText, type ScanMatch } from "./pack/scan.js";
+import type { LoadedPack } from "./pack/load.js";
+
 /** A single redaction, recorded so a run can be audited without the value. */
 export interface RedactionFinding {
   kind: RedactionKind;
@@ -40,105 +43,55 @@ const MASK: Record<RedactionKind, string> = {
   account: "[REDACTED-ACCT]",
 };
 
-/** Luhn check — cheap and precise, kills most false card matches. */
-function luhnValid(digits: string): boolean {
-  let sum = 0;
-  let double = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = digits.charCodeAt(i) - 48;
-    if (d < 0 || d > 9) return false;
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
-
-/** ABA routing checksum. Same rationale as Luhn: precision over recall. */
-function abaValid(d: string): boolean {
-  if (d.length !== 9) return false;
-  // Weighted 3-7-1 repeating. Written as a loop rather than indexed arithmetic
-  // so it type-checks under noUncheckedIndexedAccess without non-null casts.
-  const weights = [3, 7, 1];
-  let sum = 0;
-  for (let i = 0; i < 9; i++) {
-    const digit = d.charCodeAt(i) - 48;
-    if (digit < 0 || digit > 9) return false;
-    sum += digit * (weights[i % 3] as number);
-  }
-  return sum % 10 === 0;
-}
-
 /**
- * A tax SOP legitimately contains form numbers, dates, dollar amounts, section
- * references and percentages. Redacting those turns the document into unusable
- * prose — the failure that looks like success. Every pattern below is therefore
- * either delimiter-anchored or checksum-gated.
+ * Apply replacements for HIGH-confidence matches only, right-to-left.
  *
- * ⚠ Bare 9-digit runs are NOT treated as SSNs. In this corpus they are far more
- * often amounts or IDs, and the resulting over-redaction would destroy the SOPs
- * the assistant exists to answer from. Context-gated only (see `account`).
+ * Right-to-left matters: replacing left-to-right shifts every later offset by the
+ * difference between the match length and the mask length, silently corrupting
+ * subsequent replacements in a dense document.
  */
-const PATTERNS: {
-  kind: RedactionKind;
-  re: RegExp;
-  validate?: (m: string) => boolean;
-}[] = [
-  // 123-45-6789 — delimiter-anchored, so a form number cannot match.
-  { kind: "ssn", re: /\b\d{3}-\d{2}-\d{4}\b/g },
-  // 12-3456789
-  { kind: "ein", re: /\b\d{2}-\d{7}\b/g },
-  // 9-digit runs only when the ABA checksum passes AND routing vocabulary is near.
-  {
-    kind: "routing",
-    re: /\b\d{9}\b/g,
-    validate: (m) => abaValid(m),
-  },
-  // 13–19 digits, Luhn-valid, optionally space/dash grouped.
-  {
-    kind: "card",
-    re: /\b(?:\d[ -]?){12,18}\d\b/g,
-    validate: (m) => luhnValid(m.replace(/[ -]/g, "")),
-  },
-];
+export function applyRedaction(
+  text: string,
+  matches: ScanMatch[],
+  mask: (m: ScanMatch) => string,
+): string {
+  const high = matches
+    .filter((m) => m.confidence === "high")
+    .sort((a, b) => b.start - a.start);
+  let out = text;
+  for (const m of high)
+    out = out.slice(0, m.start) + mask(m) + out.slice(m.end);
+  return out;
+}
 
-/** Vocabulary that must appear near a candidate for the weak patterns to fire. */
-const ACCOUNT_CONTEXT =
-  /\b(account|acct|routing|aba|bank|iban|swift|deposit|wire)\b/i;
+/** Maps a pack scanner id onto the legacy RedactionKind for the mask table. */
+function kindFor(scannerId: string): RedactionKind | undefined {
+  return (["ssn", "ein", "routing", "card", "account"] as const).find(
+    (k) => k === scannerId,
+  );
+}
 
 /**
- * Redact structured identifiers from parsed document text.
+ * Redact structured identifiers from parsed document text, using every scanner
+ * declared by `pack`.
  *
  * **This is the floor, not the whole answer.** It cannot detect a client's
  * *name*, which is the most common identifier in this corpus and is why
  * `isExcludedPath` (structural exclusion) does more of the real work.
  */
-export function redactText(input: string): RedactionResult {
+export function redactText(input: string, pack: LoadedPack): RedactionResult {
+  const matches = scanText(input, pack);
+  const text = applyRedaction(input, matches, (m) => {
+    const k = kindFor(m.scannerId);
+    return k ? MASK[k] : `[REDACTED-${m.scannerId.toUpperCase()}]`;
+  });
+
   const counts = new Map<RedactionKind, number>();
-  let text = input;
-
-  for (const { kind, re, validate } of PATTERNS) {
-    text = text.replace(new RegExp(re.source, re.flags), (match, offset) => {
-      if (validate && !validate(match)) return match;
-
-      // Checksum-only patterns still need context, or every 9-digit number that
-      // happens to satisfy ABA gets masked.
-      if (kind === "routing") {
-        const window = text.slice(
-          Math.max(0, Number(offset) - 60),
-          Number(offset) + match.length + 60,
-        );
-        if (!ACCOUNT_CONTEXT.test(window)) return match;
-      }
-
-      counts.set(kind, (counts.get(kind) ?? 0) + 1);
-      return MASK[kind];
-    });
+  for (const m of matches) {
+    if (m.confidence !== "high") continue;
+    const k = kindFor(m.scannerId);
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
   }
-
   const findings = [...counts.entries()].map(([kind, count]) => ({
     kind,
     count,
@@ -225,9 +178,12 @@ export class ContentSafetyError extends Error {
  * worse than having none at all, because it manufactures confidence — the same
  * class of failure as an unmonitored backup.
  */
-export function redactOrThrow(input: string): RedactionResult {
+export function redactOrThrow(
+  input: string,
+  pack: LoadedPack,
+): RedactionResult {
   try {
-    return redactText(input);
+    return redactText(input, pack);
   } catch (err) {
     throw new ContentSafetyError(
       "redaction failed; document must be quarantined, not indexed",

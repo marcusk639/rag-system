@@ -10,6 +10,7 @@ import {
   type DocumentClass,
   type DocumentMetadata,
   type EmbeddingProvider,
+  type LoadedPack,
   type ObjectStore,
   type Parser,
   type SourceDocument,
@@ -80,6 +81,16 @@ export interface PipelineDeps {
    * ingested and searchable; it just won't be downloadable).
    */
   objectStore?: ObjectStore | null;
+  /**
+   * The loaded identifier-scanner pack `redactOrThrow` runs before anything
+   * downstream (see 1b below). Optional ONLY because no production caller
+   * wires a real pack in yet — `packs/cpa/pack.yaml` doesn't exist until a
+   * later task, and this task's brief scopes it out of touching
+   * `apps/worker`. `ingestOne` fails CLOSED when this is missing: every
+   * document is quarantined rather than indexed unredacted. See the loud
+   * error thrown just above the `redactOrThrow` call below.
+   */
+  pack?: LoadedPack;
 }
 
 export interface PipelineRunResult {
@@ -296,7 +307,22 @@ async function ingestOne(
   //     change is a redaction does not silently reuse a stale embedding.
   let redacted;
   try {
-    redacted = redactOrThrow(parsed.markdown);
+    if (!deps.pack) {
+      // Fail CLOSED, loudly: no pack means we cannot tell an SSN from a form
+      // number, so every document must be quarantined until this is fixed —
+      // not silently skipped, and not indexed unredacted. Thrown as
+      // ContentSafetyError (not a bare Error) so it flows through the SAME
+      // catch below as a genuine redaction failure: quarantine, don't crash
+      // the run.
+      throw new ContentSafetyError(
+        "PipelineDeps.pack is not configured — no identifier-scanner pack " +
+          "was wired into WorkerDeps, so redaction cannot run. Ingestion " +
+          "cannot proceed until a LoadedPack (see @rag/core loadPack) is " +
+          "supplied to PipelineDeps.pack; every document will be quarantined " +
+          "until then.",
+      );
+    }
+    redacted = redactOrThrow(parsed.markdown, deps.pack);
   } catch (err) {
     // Fail CLOSED: quarantine by skipping, never index raw.
     log.error(
