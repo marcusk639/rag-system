@@ -1,0 +1,38 @@
+# Pattern definitions for the CPA vertical. This file is DATA — the scan engine
+# in @rag/core knows nothing about tax. Adding a pattern here does not require a
+# code change; adding a new `validator` or `context` name does (see
+# packages/core/src/pack/registry.ts).
+pack:
+  id: cpa
+  version: 1.0.0
+  requiresCore: "^1.0.0"
+
+scanners:
+  # 123-45-6789 — delimiter-anchored, so a form number cannot match, and a bare
+  # 9-digit run is deliberately NOT an SSN.
+  - id: ssn
+    kind: identifying
+    disposition: exclude
+    pattern: '\b\d{3}-\d{2}-\d{4}\b'
+
+  # 12-3456789
+  - id: ein
+    kind: identifying
+    disposition: exclude
+    pattern: '\b\d{2}-\d{7}\b'
+
+  # 9-digit runs only when the ABA checksum passes AND routing vocabulary is near.
+  - id: routing
+    kind: identifying
+    disposition: exclude
+    pattern: '\b\d{9}\b'
+    validator: aba
+    context: account-vocab
+    contextWindow: 60
+
+  # 13-19 digits, Luhn-valid, optionally space/dash grouped.
+  - id: card
+    kind: identifying
+    disposition: exclude
+    pattern: '\b(?:\d[ -]?){12,18}\d\b'
+    validator: luhn
