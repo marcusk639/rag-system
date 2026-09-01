@@ -113,3 +113,171 @@ describe("retryOnRateLimit", () => {
     expect(delays[2]).toBe(5000); // Retry-After floor
   });
 });
+
+describe("server-provided retry guidance", () => {
+  // The helper previously understood only the `Retry-After` HEADER. Google's
+  // convention for quota errors is `google.rpc.RetryInfo` in the error BODY,
+  // and @google/genai's exported `ApiError` carries `status` but no `headers`
+  // at all — so any guidance Gemini sent was discarded and the backoff fell
+  // back to its own schedule. OpenAI does send the header, and this same
+  // helper serves that path, so both shapes have to work.
+
+  const run = (err: unknown, sleeps: number[]) =>
+    retryOnRateLimit(() => Promise.reject(err), {
+      maxRetries: 1,
+      baseDelayMs: 10, // tiny, so any wait we see came from the server
+      sleep: async (ms: number) => {
+        sleeps.push(ms);
+      },
+      random: () => 0,
+    }).catch(() => undefined);
+
+  it("honors RetryInfo in a structured error body", async () => {
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        error: {
+          code: 429,
+          status: "RESOURCE_EXHAUSTED",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.RetryInfo",
+              retryDelay: "7s",
+            },
+          ],
+        },
+      },
+      sleeps,
+    );
+    expect(sleeps).toEqual([7000]);
+  });
+
+  it("honors RetryInfo embedded as JSON in the message", async () => {
+    // The shape actually observed: the SDK stringifies the response body into
+    // the Error message and exposes no structured body.
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        message:
+          'Gemini embedding failed: {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"12s"}]}}',
+      },
+      sleeps,
+    );
+    expect(sleeps).toEqual([12000]);
+  });
+
+  it("parses fractional retryDelay", async () => {
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        error: {
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.RetryInfo",
+              retryDelay: "1.5s",
+            },
+          ],
+        },
+      },
+      sleeps,
+    );
+    expect(sleeps).toEqual([1500]);
+  });
+
+  it("still honors the Retry-After header (OpenAI path)", async () => {
+    const sleeps: number[] = [];
+    await run({ status: 429, headers: { "retry-after": "9" } }, sleeps);
+    expect(sleeps).toEqual([9000]);
+  });
+
+  it("takes the larger when both header and RetryInfo are present", async () => {
+    // Both are floors, not targets. Waiting the shorter one would ignore
+    // guidance the server also gave.
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        headers: { "retry-after": "3" },
+        error: {
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.RetryInfo",
+              retryDelay: "8s",
+            },
+          ],
+        },
+      },
+      sleeps,
+    );
+    expect(sleeps).toEqual([8000]);
+  });
+
+  it("ignores malformed RetryInfo rather than throwing", async () => {
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        error: {
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.RetryInfo",
+              retryDelay: "not-a-duration",
+            },
+          ],
+        },
+      },
+      sleeps,
+    );
+    // Falls back to the jittered schedule: base 10ms, random()=0 => 0.5x => 5ms
+    expect(sleeps).toEqual([5]);
+  });
+
+  it("ignores unrelated detail types", async () => {
+    const sleeps: number[] = [];
+    await run(
+      {
+        status: 429,
+        error: {
+          details: [
+            { "@type": "type.googleapis.com/google.rpc.Help", links: [] },
+          ],
+        },
+      },
+      sleeps,
+    );
+    expect(sleeps).toEqual([5]);
+  });
+
+  it("is still clamped by maxDelayMs", async () => {
+    // A hostile or misconfigured RetryInfo must not stall the worker, same
+    // guarantee the header path already had.
+    const sleeps: number[] = [];
+    await retryOnRateLimit(
+      () =>
+        Promise.reject({
+          status: 429,
+          error: {
+            details: [
+              {
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                retryDelay: "3600s",
+              },
+            ],
+          },
+        }),
+      {
+        maxRetries: 1,
+        baseDelayMs: 10,
+        maxDelayMs: 30_000,
+        sleep: async (ms: number) => {
+          sleeps.push(ms);
+        },
+        random: () => 0,
+      },
+    ).catch(() => undefined);
+    expect(sleeps).toEqual([30_000]);
+  });
+});
