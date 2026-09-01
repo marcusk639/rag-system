@@ -24,8 +24,9 @@
  * Run with: pnpm db:migrate
  */
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { sql } from "drizzle-orm";
@@ -89,10 +90,47 @@ async function main(): Promise<void> {
   await applyMigrations(url);
 }
 
-// Only auto-run when executed directly (`tsx src/migrate.ts`) — importing
-// this module as a library (e.g. from `tests/e2e`) must not also trigger a
-// CLI run against `process.env.DATABASE_URL`.
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Is this module the process entrypoint?
+ *
+ * Exported and written defensively because the obvious version —
+ * `import.meta.url === ` + "`file://${process.argv[1]}`" + ` — is false in the
+ * deployed image for two independent reasons, and fails SILENTLY in both:
+ * `main()` never runs, the process exits 0, and the deploy reports a migration
+ * that never happened.
+ *
+ *   1. `process.argv[1]` is whatever the caller typed, so a relative path
+ *      produces `file://dist/migrate.js` rather than an absolute URL.
+ *   2. pnpm symlinks workspace packages into `node_modules/.pnpm/`. Node
+ *      resolves `import.meta.url` through the symlink to the real path while
+ *      argv keeps the symlink path, so the two can never be equal. Measured in
+ *      the production image:
+ *        argv  file:///app/node_modules/@rag/db/dist/migrate.js
+ *        real  file:///app/node_modules/.pnpm/@rag+db@.../dist/migrate.js
+ *
+ * Resolving BOTH sides to a real path is what makes the comparison sound.
+ */
+export function isMainModule(
+  moduleUrl: string,
+  entrypoint: string | undefined,
+): boolean {
+  if (!entrypoint) return false;
+  try {
+    const self = realpathSync(fileURLToPath(moduleUrl));
+    const main = realpathSync(resolvePath(entrypoint));
+    return self === main;
+  } catch {
+    // A path that cannot be resolved is not the entrypoint. Never throw here:
+    // this guard runs at import time, and throwing would break every library
+    // consumer of this module.
+    return false;
+  }
+}
+
+// Only auto-run when executed directly — importing this module as a library
+// (e.g. from `tests/e2e`) must not also trigger a CLI run against
+// `process.env.DATABASE_URL`.
+if (isMainModule(import.meta.url, process.argv[1])) {
   main().catch((err: unknown) => {
     process.stderr.write(
       `Migration failed: ${(err as Error).stack ?? String(err)}\n`,
