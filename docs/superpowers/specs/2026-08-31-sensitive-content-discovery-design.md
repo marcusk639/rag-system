@@ -29,13 +29,13 @@ collapses all of them onto one pack-declared set.
 
 ## 2. Decisions taken in brainstorming
 
-| #   | Decision                                                                                                                                                                                              |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Scope is **discovery + inventory**: a read-only pass producing evidence. No automated remediation.                                                                                                    |
+| #   | Decision                                                                                                                                                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Scope is **discovery + inventory**: a read-only pass producing evidence. No automated remediation.                                                                                                                                                                                        |
 | D2  | **Raw identifier values are never stored — including inside stored context.** Findings carry a locator and shape-preserving masks; context windows are themselves redacted before persistence. The true value is resolved on demand from the source under the reviewer's own permissions. |
-| D3  | Patterns are **pack data**, not code. The scanner engine is generic; TRI-ness lives in `packs/cpa/`.                                                                                                  |
-| D4  | The registry and its API live in **`apps/api` with their own tables**; the scan runs as a job independent of ingestion. Designed for later extraction into a separate app.                            |
-| D5  | Where PR #41 and the multi-vertical spec conflict, **the spec governs**: disposition is pack-declared with `exclude` as the default for `identifying`. PR #41 is the engine, not the policy.          |
+| D3  | Patterns are **pack data**, not code. The scanner engine is generic; TRI-ness lives in `packs/cpa/`.                                                                                                                                                                                      |
+| D4  | The registry and its API live in **`apps/api` with their own tables**; the scan runs as a job independent of ingestion. Designed for later extraction into a separate app.                                                                                                                |
+| D5  | Where PR #41 and the multi-vertical spec conflict, **the spec governs**: disposition is pack-declared with `exclude` as the default for `identifying`. PR #41 is the engine, not the policy.                                                                                              |
 
 ## 3. The pack scanner slice
 
@@ -135,13 +135,13 @@ Disposition is a function of **`(scanner kind, document class)`**, not scanner
 alone. A stray SSN in a genuine SOP and an SSN in a client roster are the same
 match and warrant opposite treatment.
 
-| Document class                                 | `identifying` hit                       | `contextual` hit       |
-| ---------------------------------------------- | --------------------------------------- | ---------------------- |
-| Client file (Layer 2 path, or Layer 3 class D) | **exclude**                             | exclude                |
-| Procedure / SOP                                | **redact** the span, index the document | **flag**, index intact |
+| Document class                                 | `identifying` hit                       | `contextual` hit        |
+| ---------------------------------------------- | --------------------------------------- | ----------------------- |
+| Client file (Layer 2 path, or Layer 3 class D) | **exclude**                             | exclude                 |
+| Procedure / SOP                                | **redact** the span, index the document | **flag**, index intact  |
 | Unclassified                                   | exclude                                 | flag — see caveat below |
 
-**On `Unclassified` + `contextual` → `flag`.** This row is *not* fail-closed, and
+**On `Unclassified` + `contextual` → `flag`.** This row is _not_ fail-closed, and
 calling it so would be false. A known client file with a contextual-only hit is
 excluded; an unknown document with the identical signature is indexed. True
 fail-closed reasoning would match the worst class the document could plausibly be —
@@ -160,8 +160,8 @@ The matrix above is the target state, not current behaviour, and the distinction
 load-bearing enough to belong here rather than in §8.
 
 `PURGE-RECORD-2026-08-03.md` records that classification is currently **per-source
-and human-declared**: all three sources carry `data_class = general`, so *"every
-document is stamped Class A regardless of content."* There is no per-document
+and human-declared**: all three sources carry `data_class = general`, so _"every
+document is stamped Class A regardless of content."_ There is no per-document
 classifier running. Layer 2 (structural path exclusion) and Layer 3 (document
 classification) — the two things that would supply the `document class` axis — are
 on PR #41, not `main`.
@@ -263,7 +263,7 @@ masked, never raw. Closing the leak costs nothing — the engine is already in t
 path.
 
 **But it does cost locatability, and precisely where locating matters most.** In that
-same roster, the text around any one match is *other identifiers*; masked, it becomes
+same roster, the text around any one match is _other identifiers_; masked, it becomes
 a run of near-identical tokens (`1XX-XX-XXX9`, `1XX-XX-XXX8`, …) that cannot
 distinguish row 47 from row 200. The context leg of the locator is close to useless
 for dense-identifier documents, which is the highest-risk class. For those,
@@ -293,6 +293,7 @@ The locator is therefore three fields working together:
   Nothing in the parser contract maps an offset back to the table it came from. That
   plumbing has to be designed, and it matters most in exactly the dense-identifier
   document where the sheet name is the only useful hint.
+
 - `masked_context_*` — enough surrounding prose to find the spot by eye or by search,
   with any identifiers inside it masked.
 - `parsed_offset` — exact, but only meaningful against the parsed text whose hash is
