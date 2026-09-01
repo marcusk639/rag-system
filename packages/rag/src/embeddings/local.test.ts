@@ -60,6 +60,10 @@ describe("LocalEmbeddingProvider", () => {
       return Promise.resolve(makeTensor(texts.length, 768));
     });
     mockPipeFn.tokenizer = mockTokenizerFn;
+    // Reset the tokenizer's declared limit. One test below overrides it, and
+    // without this the override leaked forward into every later test.
+    delete (mockTokenizerFn as unknown as { model_max_length?: number })
+      .model_max_length;
     // Default: approximate real BPE tokenization (~4 chars/token) so ordinary
     // short test strings stay well under the 512-token limit and never
     // trigger a spurious truncation warning. Tests that need to exercise
@@ -246,7 +250,11 @@ describe("LocalEmbeddingProvider", () => {
       expect(results).toHaveLength(1);
       expect(logger.warn).toHaveBeenCalledTimes(1);
       const [details, message] = logger.warn.mock.calls[0]!;
-      expect(details).toMatchObject({ tokenCount: 750, limit: 512 });
+      expect(details).toMatchObject({
+        overlongCount: 1,
+        maxTokenCount: 750,
+        limit: 512,
+      });
       expect(message).toMatch(/512/);
     });
 
@@ -271,7 +279,7 @@ describe("LocalEmbeddingProvider", () => {
 
       expect(logger.warn).toHaveBeenCalledTimes(1);
       const [details] = logger.warn.mock.calls[0]!;
-      expect(details).toMatchObject({ textIndex: 1, tokenCount: 900 });
+      expect(details).toMatchObject({ maxTokenIndex: 1, maxTokenCount: 900 });
     });
 
     it("still succeeds (does not throw) when a chunk requires truncation", async () => {
@@ -295,7 +303,7 @@ describe("LocalEmbeddingProvider", () => {
 
       expect(logger.warn).toHaveBeenCalledTimes(1);
       const [details] = logger.warn.mock.calls[0]!;
-      expect(details).toMatchObject({ tokenCount: 300, limit: 256 });
+      expect(details).toMatchObject({ maxTokenCount: 300, limit: 256 });
 
       delete (mockPipeFn.tokenizer as unknown as { model_max_length?: number })
         .model_max_length;
@@ -359,6 +367,89 @@ describe("LocalEmbeddingProvider", () => {
       const p = new LocalEmbeddingProvider();
       await p.embed("warmup");
       expect(mockHFEnv["cacheDir"]).toBe("/opt/models/hf");
+    });
+  });
+
+  describe("overlong-chunk warnings are aggregated per batch", () => {
+    // One warn per oversized chunk saturated Railway's log pipeline in
+    // production: 500 logs/sec, ~12,000 messages dropped, during a sync where
+    // roughly half the corpus exceeded the limit. Dropped logs are worse than
+    // terse ones — the aggregate is what an operator needs anyway ("how much of
+    // this document is being truncated"), and per-chunk detail was never
+    // actionable at that volume.
+    it("emits ONE warning for a batch with many overlong texts", async () => {
+      mockTokenizerFn.mockImplementation((text: string) => ({
+        input_ids: new Array(text.startsWith("long") ? 900 : 50).fill(0),
+      }));
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch([
+        "long a",
+        "short",
+        "long b",
+        "long c",
+        "short",
+        "long d",
+      ]);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the count, the worst case, and how many were fine", async () => {
+      // The numbers an operator acts on: how widespread, and how far past the
+      // limit the worst chunk is — which is what decides whether CHUNK_SIZE
+      // needs lowering or a document needs splitting.
+      mockTokenizerFn.mockImplementation((text: string) => ({
+        input_ids: new Array(
+          text === "a" ? 900 : text === "b" ? 1400 : 50,
+        ).fill(0),
+      }));
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["a", "b", "ok", "ok"]);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [details, message] = logger.warn.mock.calls[0]!;
+      expect(details).toMatchObject({
+        overlongCount: 2,
+        batchSize: 4,
+        maxTokenCount: 1400,
+        limit: 512,
+      });
+      expect(message).toMatch(/2 of 4/);
+    });
+
+    it("still says WHICH text was worst, so a single offender stays findable", async () => {
+      // Aggregating must not lose the thread when there is only one bad chunk —
+      // that was the useful half of the old per-chunk log.
+      mockTokenizerFn.mockImplementation((text: string) => ({
+        input_ids: new Array(text === "overlong" ? 900 : 50).fill(0),
+      }));
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["short one", "overlong", "short two"]);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [details] = logger.warn.mock.calls[0]!;
+      expect(details).toMatchObject({
+        overlongCount: 1,
+        maxTokenIndex: 1,
+        maxTokenCount: 900,
+      });
+      expect(String(details.maxTokenPreview)).toContain("overlong");
+    });
+
+    it("stays silent when every text fits", async () => {
+      mockTokenizerFn.mockReturnValue({ input_ids: new Array(100).fill(0) });
+      const logger = { warn: vi.fn() };
+      const p = new LocalEmbeddingProvider({ logger });
+
+      await p.embedBatch(["a", "b", "c"]);
+
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 });
