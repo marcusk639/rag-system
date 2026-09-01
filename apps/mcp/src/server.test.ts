@@ -63,6 +63,7 @@ function makeDeps(): Deps {
     } as Deps["embedder"],
     queue: {} as Deps["queue"],
     generator: null,
+    objectStore: null,
     close: async () => {},
     logger: pino({ level: "silent" }),
   };

@@ -6,7 +6,7 @@
 > [`plans/2026-06-26-launch-readiness-consolidated.md`](./plans/2026-06-26-launch-readiness-consolidated.md),
 > which says so in its own header. Keep this file for its detailed
 > copy-the-pattern references; do not use it as the work queue.
-> For what is true right now, see [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md).
+> For what is true right now, see [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md).
 >
 > ⚠ **`DECISION-CPA-KB-RAG-CONVERGENCE.md` still points new contributors here.**
 > That pointer is stale; it has been corrected in that file.
@@ -23,7 +23,7 @@
 >
 > Everything in this plan that rests on "LOW–MODERATE sensitivity" — including
 > D1, D2, and the demotion of Phase G1 — inherits that error. See the correction
-> in [`TWK-LAUNCH-STATUS.md`](./TWK-LAUNCH-STATUS.md) and the remediation in
+> in [`PILOT-LAUNCH-STATUS.md`](./PILOT-LAUNCH-STATUS.md) and the remediation in
 > [`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md).
 > Note D2a below — _"curate client examples out of scope"_ — was the right
 > instinct, and it is the one decision here that was never executed.

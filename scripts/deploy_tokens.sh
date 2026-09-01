@@ -30,12 +30,27 @@ PRINCIPALS=$(./scripts/gen-tokens.sh "$@" "service-admin::isAdmin")
 # access-control boundary: omitting a user from argv silently revokes them, and
 # nothing here would say so. Print what is deployed now, so the operator can see
 # what they are about to overwrite before it happens.
+# SHAPE ONLY — never the token values. An earlier version of this block printed
+# the raw API_PRINCIPALS JSON on both sides, which put every live bearer token
+# (the admin one included) into stderr, and therefore into any `2>&1 | tee`, CI
+# log, or terminal scrollback. The operator needs to see WHO is being granted
+# WHAT, which a fingerprint conveys just as well as the secret does.
+summarize_principals() {
+  jq -r '
+    to_entries[]
+    | "  [\(.key)] sources=\(.value.allowedSourceIds | length)"
+      + (if .value.isAdmin then "  ADMIN (unrestricted)" else "" end)
+      + "  token=" + (.value.token | .[0:6] + "…" + .[-4:])
+  ' 2>/dev/null || echo "  (unparseable)"
+}
+
 echo "Current API_PRINCIPALS on rag-api (about to be REPLACED):" >&2
-railway variables --service rag-api --kv 2>/dev/null | grep '^API_PRINCIPALS=' >&2 \
+railway variables --service rag-api --kv 2>/dev/null \
+  | sed -n 's/^API_PRINCIPALS=//p' | summarize_principals >&2 \
   || echo "  (none set, or could not be read)" >&2
 echo "" >&2
 echo "New principal set:" >&2
-echo "$PRINCIPALS" | tr ',' '\n' | sed 's/^/  /' >&2
+printf '%s' "$PRINCIPALS" | summarize_principals >&2
 echo "" >&2
 
 echo "Setting API_PRINCIPALS on rag-api..." >&2

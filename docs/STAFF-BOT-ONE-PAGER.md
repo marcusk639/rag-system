@@ -1,24 +1,10 @@
 # Ask the Knowledge Base in Microsoft Teams
 
-**Status:** ⛔ **NOT YET FOR DISTRIBUTION** — updated 2026-08-03.
-**Why:** the Teams bot described below is **not deployed** (blocked on an Azure
-subscription), and the content-scope statement in an earlier version of this page
-was **incorrect**. Do not hand this to staff until both are resolved.
-
-> ### What changed, and what needs to happen first
->
-> 1. **Teams is not the live surface.** The bot is built and merged but needs an
->    Azure Bot resource, which needs an Azure subscription the firm does not
->    currently have (`docs/TWK-LAUNCH-STATUS.md` P1 #4). **The web app is what is
->    actually deployed.** Before sending this out, replace the Teams instructions
->    below with the web-app URL and sign-in steps.
-> 2. **The old "it does not have your client files" line was wrong** — see
->    [What's in it](#whats-in-it). That sentence must not go to staff in its
->    original form.
+The KB bot answers questions from the firm's internal SOPs, templates, and research — the stuff you'd normally interrupt someone to ask. It lives right in Teams.
 
 ---
 
-## How to ask — ⚠ describes a surface that is not live yet
+## How to ask
 
 **In a direct message (recommended):**
 
@@ -39,33 +25,9 @@ was **incorrect**. Do not hand this to staff until both are resolved.
 ## What to expect
 
 - **Every answer is a draft.** The bot marks each answer _"AI-generated draft — verify before relying on it."_ Treat it like a helpful starting point from a colleague, not a final authority. **Always confirm against the cited document before acting**, especially for anything client-facing or filing-related.
+- **It only knows the firm's internal knowledge base** — SOPs, templates, research notes. It does **not** have your client files, Onvio data, or anything outside the KB.
 - **It answers as you.** You only see answers built from documents you're allowed to see. If you get "you don't have access to any knowledge sources yet," ask an admin to grant you access.
-
-### What's in it
-
-It is connected to the **firm's SharePoint knowledge base only**. It is not
-connected to Onvio, the Z Drive, or QuickBooks, and it never will be — that
-boundary is a connection setting, not a promise about individual documents.
-
-⚠ **A previous version of this page said the knowledge base contains no client
-files. That was not correct**, and the correction matters more than the original
-claim did. A screen of the indexed SharePoint library found client-identifying
-material inside it — per-client billing and package files, engagement letters,
-and folders named after clients. Those documents are being removed from the index
-(`docs/superpowers/plans/2026-08-03-kb-content-boundary.md`), but until that work
-finishes and a firm reviewer signs it off:
-
-- **Assume a citation can name a client.** If you see one, that is a finding —
-  report it rather than ignoring it.
-- **Nothing from here goes into a client deliverable or a filed position.**
-- The pilot stays limited to named users. It is not firm-wide yet.
-
-### Signing in
-
-**The first time you use it**, it will ask you to sign in with your Microsoft
-account — the same one you use for Outlook and Teams. That is how it knows it is
-really you, and it is what limits your answers to documents you are allowed to
-see.
+- **First time in Teams**, it may ask you to sign in with your Microsoft account (the same one you use for Outlook/Teams) — that's how it knows it's really you.
 
 ---
 

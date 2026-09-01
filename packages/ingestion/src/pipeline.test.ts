@@ -638,3 +638,64 @@ describe("TRI compliance scanning at ingest", () => {
     );
   });
 });
+
+describe("Layer 2 observability when path metadata is absent", () => {
+  // Structural exclusion is described as "the cheapest and most reliable
+  // guard", but it reads `source.metadata.path`, and ONLY the SharePoint
+  // connector sets that field. On gdrive, gmail, outlook, git-markdown, ecfr
+  // and custom sources the guard evaluates undefined, returns not-excluded, and
+  // the document proceeds — indistinguishable in the logs from a document that
+  // was actually checked and cleared.
+  //
+  // A guard that cannot run must say so. Silence here reads as protection.
+  function warnMarkers(deps: PipelineDeps, warn: ReturnType<typeof vi.fn>) {
+    void deps;
+    return warn.mock.calls.map(
+      (c) => (c[0] as { marker?: string } | undefined)?.marker,
+    );
+  }
+
+  it("warns that Layer 2 could not evaluate when path is missing", async () => {
+    const deps = makeDeps();
+    const warn = vi.fn();
+    (deps.logger as unknown as Record<string, unknown>).warn = warn;
+    (deps.logger as unknown as Record<string, unknown>).child = () =>
+      deps.logger;
+
+    const { connector } = makeConnector([
+      { documents: ["doc-a"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    expect(warnMarkers(deps, warn)).toContain("ingest.path_unavailable");
+  });
+
+  it("does NOT warn when the connector supplied a path", async () => {
+    const deps = makeDeps();
+    const warn = vi.fn();
+    (deps.logger as unknown as Record<string, unknown>).warn = warn;
+    (deps.logger as unknown as Record<string, unknown>).child = () =>
+      deps.logger;
+
+    const { connector } = makeConnector([
+      { documents: ["doc-a"], nextCursor: null, done: true },
+    ]);
+    // Give the emitted document a path, as the SharePoint connector does.
+    const original = connector.list as ReturnType<typeof vi.fn>;
+    (connector as unknown as Record<string, unknown>).list = vi.fn(
+      async (opts: { cursor: string | null }) => {
+        const page = await original(opts);
+        return {
+          ...page,
+          documents: page.documents.map((d: { metadata: unknown }) => ({
+            ...d,
+            metadata: { path: "/Shared Documents/SOPs" },
+          })),
+        };
+      },
+    );
+    await runIngestion("src-id", connector, null, OPTS, deps);
+
+    expect(warnMarkers(deps, warn)).not.toContain("ingest.path_unavailable");
+  });
+});

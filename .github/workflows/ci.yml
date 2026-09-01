@@ -45,6 +45,22 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
+      # The repo is a generic RAG service; a tenant's name must not re-enter it.
+      # A de-tenanting pass and a feature PR merged 32 minutes apart, and the
+      # second silently reintroduced 134 occurrences plus a client-named
+      # top-level directory — including one in source. This grep is the check
+      # that would have caught all of it, and costs nothing.
+      #
+      # pnpm-lock.yaml is excluded: base64 integrity hashes contain the letters
+      # by coincidence.
+      - name: No tenant name in the repo
+        run: |
+          if git grep -niI 'twk' -- . ':!pnpm-lock.yaml' ':!.github/workflows/ci.yml'; then
+            echo "::error::Tenant name found above. rag-system is generic — de-identify before merging."
+            exit 1
+          fi
+          echo "clean: no tenant name in tracked files"
+
       - name: Unit tests
         run: pnpm test
 

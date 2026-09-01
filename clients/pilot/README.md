@@ -1,8 +1,8 @@
-# clients/twk/ — TWK CPAs
+# clients/<tenant>/ — pilot tenant work product
 
-**Owner: the firm.** Foreground work product under the pre-employment IP
+**Owner: the operating tenant.** Foreground work product under the pre-employment IP
 instrument — configuration, data, named analysis, and anything derived from
-TWK's corpus.
+the firm's corpus.
 
 ## The one rule, restated from the other side
 
@@ -14,11 +14,11 @@ SOP titles, not the gold-set questions, not the tenant configuration.
 
 ## What belongs here
 
-- TWK SharePoint index configuration and connection scope
-- The TWK gold set once the CPA session populates it
-- Corpus statistics measured against TWK material
+- the tenant's SharePoint index configuration and connection scope
+- The gold set once the CPA session populates it
+- Corpus statistics measured against the firm material
 - Deployment runbooks and launch status for this tenant
-- Anything naming TWK staff, clients, or systems
+- Anything naming the firm staff, clients, or systems
 
 ## Data-class boundary — the load-bearing one
 
@@ -32,8 +32,8 @@ violate by accident.
 
 ## Note on migration
 
-Existing TWK-specific material still sits at the repository root — the six
-`docs/TWK-*.md` files and `tests/e2e/src/eval/twk-gold-set.ts`. Those are already
+Existing the firm-specific material still sits at the repository root — the six
+`docs/the firm-*.md` files and `tests/e2e/src/eval/gold-set.ts`. Those are already
 enumerated as foreground in Schedule A §3, so the split is recorded correctly
 even before the files physically move. **Moving them here is housekeeping, not a
 legal fix** — do it when convenient, and do not let the move break the runbook
