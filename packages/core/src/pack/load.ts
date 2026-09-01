@@ -27,15 +27,32 @@ export interface LoadedPack {
   scanners: CompiledScanner[];
 }
 
-/** Minimal caret-range check. Only `^X.Y.Z` is supported, deliberately. */
-function satisfiesCaret(range: string, version: string): boolean {
+/**
+ * Minimal caret-range check. Only `^X.Y.Z` is supported, deliberately.
+ *
+ * 0.x pre-1.0 caret semantics (`^0.1.0` means `>=0.1.0 <0.2.0`, not the `1.x+`
+ * "any minor/patch within the same major" rule) are NOT implemented. Rather
+ * than silently apply the wrong rule, a 0.x range is rejected outright — this
+ * is unreachable while `PACK_CONTRACT_VERSION` stays >= 1.0.0, but guards the
+ * day someone sets a 0.x contract version.
+ */
+export function satisfiesCaret(range: string, version: string): boolean {
   const m = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range.trim());
   if (!m)
     throw new Error(
       `requiresCore must be a caret range like "^1.0.0", got "${range}"`,
     );
   const [rMaj, rMin, rPatch] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const v = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)!;
+  if (rMaj === 0)
+    throw new Error(
+      `requiresCore "${range}": 0.x pre-1.0 caret semantics are not implemented — ` +
+        `the pack contract version must stay >= 1.0.0`,
+    );
+  const v = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!v)
+    throw new Error(
+      `PACK_CONTRACT_VERSION must be a plain "X.Y.Z" version, got "${version}"`,
+    );
   const [maj, min, patch] = [Number(v[1]), Number(v[2]), Number(v[3])];
   if (maj !== rMaj) return false;
   if (min > rMin) return true;
