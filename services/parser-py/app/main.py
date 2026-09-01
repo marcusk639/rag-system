@@ -41,6 +41,7 @@ from typing import Any, Literal
 import magic
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from markitdown import MarkItDown
+import xlrd
 from openpyxl import load_workbook
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -184,8 +185,10 @@ async def parse(
     Convert any supported document to clean markdown + structured metadata.
 
     Routing:
-      1. .xlsx / .xls       → openpyxl with data_only=True (computed values);
-                              per-sheet classifier; structured headers+rows.
+      1. .xlsx              → openpyxl with data_only=True (computed values);
+         .xls (legacy OLE2) → xlrd; both give a per-sheet classifier and
+                              structured headers+rows. Chosen by content
+                              sniffing, not extension.
       2. .csv / .tsv        → stdlib csv with delimiter sniffing.
       3. Everything else    → MarkItDown first, Unstructured fallback.
 
@@ -371,31 +374,90 @@ def _parse_with_unstructured(path: Path, fname: str, mime: str) -> ParsedDocumen
 # ----------------------------------------------------------------------------
 # Spreadsheet path: XLSX + CSV → structured rows + per-sheet classification
 # ----------------------------------------------------------------------------
-def _parse_xlsx(raw: bytes, fname: str, mime: str) -> ParsedDocument:
+def _read_xlsx_sheets(
+    raw: bytes, fname: str
+) -> list[tuple[str, list[list[Any]], int]]:
     """
-    Parse an .xlsx/.xls workbook into a ParsedDocument with one ParsedTable
-    per sheet. Uses two openpyxl loads:
-      - data_only=True   to get COMPUTED values (formula results), not "=SUM(...)"
-      - data_only=False  to count formulas for the financial_model classifier
-    Both are in read_only mode for bounded memory on large workbooks.
+    (sheet_name, rows, formula_count) per sheet, via openpyxl (OOXML only).
+
+    Two loads: `data_only=True` yields COMPUTED values (formula results, not
+    "=SUM(...)"), and `data_only=False` is needed only to count formulas for the
+    financial_model classifier. Both stream in read_only mode so a large
+    workbook stays memory-bounded.
     """
     try:
         wb_values = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-        # Separate load just to detect formulas. We can avoid this for files
-        # without any formula cells by short-circuiting later if we want, but
-        # the read_only streaming pass is cheap.
         wb_formulas = load_workbook(io.BytesIO(raw), data_only=False, read_only=True)
     except Exception as e:
         logger.error("openpyxl failed for %s: %s", fname, e)
         raise HTTPException(status_code=422, detail=f"unreadable workbook: {e}") from e
 
+    formula_sheets = {ws.title: ws for ws in wb_formulas.worksheets}
+    out: list[tuple[str, list[list[Any]], int]] = []
+    for sheet in wb_values.worksheets:
+        rows = [list(r) for r in sheet.iter_rows(values_only=True)]
+        out.append(
+            (sheet.title, rows, _count_formulas(formula_sheets.get(sheet.title)))
+        )
+    return out
+
+
+def _read_xls_sheets(
+    raw: bytes, fname: str
+) -> list[tuple[str, list[list[Any]], int]]:
+    """
+    (sheet_name, rows, formula_count) per sheet, via xlrd (legacy OLE2 only).
+
+    xlrd>=2.0 dropped .xlsx and reads .xls exclusively, which is precisely the
+    half openpyxl cannot do. It returns the cached computed value for formula
+    cells — the same thing `data_only=True` gives us on the xlsx path — so the
+    values match across formats.
+
+    formula_count is always 0: xlrd surfaces cached results, not the formulas
+    that produced them, so we cannot distinguish a computed cell from a literal
+    one. The only consequence is that `_classify_sheet` will not label an .xls
+    sheet `financial_model`, so it row-groups like any other table rather than
+    being kept whole. That degrades chunking slightly for one sheet type; it is
+    strictly better than the previous behaviour, which was to reject the file.
+    """
+    try:
+        book = xlrd.open_workbook(file_contents=raw)
+    except Exception as e:
+        logger.error("xlrd failed for %s: %s", fname, e)
+        raise HTTPException(status_code=422, detail=f"unreadable workbook: {e}") from e
+
+    out: list[tuple[str, list[list[Any]], int]] = []
+    for sheet in book.sheets():
+        rows = [sheet.row_values(i) for i in range(sheet.nrows)]
+        out.append((sheet.name, rows, 0))
+    return out
+
+
+def _parse_xlsx(raw: bytes, fname: str, mime: str) -> ParsedDocument:
+    """
+    Parse an .xlsx or legacy .xls workbook into a ParsedDocument with one
+    ParsedTable per sheet. The reader is chosen by content signature — see
+    `_read_xlsx_sheets` / `_read_xls_sheets`.
+    """
+    # Dispatch on the CONTENT, not the extension. .xlsx is a zip (PK\x03\x04);
+    # legacy .xls is an OLE2 compound file (\xd0\xcf\x11\xe0). openpyxl reads
+    # only the former and xlrd>=2 only the latter, so sending an .xls to
+    # openpyxl fails with the opaque "File is not a zip file" — which is exactly
+    # what happened in production, on every .xls, while the docstring above and
+    # the router both advertised .xls as supported.
+    #
+    # Sniffing bytes rather than trusting `ext` also covers the mislabelled
+    # file: a .xlsx-named OLE2 workbook (common when someone renames rather
+    # than re-saves) now routes correctly instead of 422-ing.
+    if raw[:4] == b"\xd0\xcf\x11\xe0":
+        sheets, parser_name = _read_xls_sheets(raw, fname), "xlrd"
+    else:
+        sheets, parser_name = _read_xlsx_sheets(raw, fname), "openpyxl"
+
     tables: list[ParsedTable] = []
     markdown_sections: list[str] = []
 
-    formula_sheets = {ws.title: ws for ws in wb_formulas.worksheets}
-
-    for sheet in wb_values.worksheets:
-        all_rows = [list(r) for r in sheet.iter_rows(values_only=True)]
+    for sheet_name, all_rows, formula_count in sheets:
         # Trim trailing empty rows; openpyxl reports trailing blanks from the
         # max-used range, which inflates row_count and confuses the classifier.
         while all_rows and all(c is None or _cell_to_str(c).strip() == "" for c in all_rows[-1]):
@@ -410,16 +472,15 @@ def _parse_xlsx(raw: bytes, fname: str, mime: str) -> ParsedDocument:
         ncols = len(headers)
         data_rows = [r + [""] * max(0, ncols - len(r)) for r in data_rows]
 
-        formula_count = _count_formulas(formula_sheets.get(sheet.title))
         sheet_type = _classify_sheet(headers, data_rows, formula_count)
 
-        sheet_markdown = _rows_to_markdown(headers, data_rows, sheet.title)
+        sheet_markdown = _rows_to_markdown(headers, data_rows, sheet_name)
         markdown_sections.append(sheet_markdown)
 
         tables.append(
             ParsedTable(
                 markdown=sheet_markdown,
-                sheet_name=sheet.title,
+                sheet_name=sheet_name,
                 sheet_type=sheet_type,
                 headers=headers,
                 rows=data_rows,
@@ -437,7 +498,7 @@ def _parse_xlsx(raw: bytes, fname: str, mime: str) -> ParsedDocument:
         markdown="\n\n".join(markdown_sections),
         tables=tables,
         metadata={
-            "parser": "openpyxl",
+            "parser": parser_name,
             "mime_type": mime,
             "source_filename": fname,
             "sheet_count": len(tables),

@@ -16,6 +16,12 @@ unstructured[local-inference]==0.16.11
 # openpyxl: direct XLSX parsing with formula-value access (data_only=True).
 # Pulled in transitively by markitdown but pinned here because we import it directly.
 openpyxl==3.1.5
+# xlrd: legacy .xls (OLE2) only — xlrd>=2.0 deliberately dropped .xlsx, which
+# makes it the exact complement of openpyxl rather than an overlap. Needed
+# because openpyxl cannot open an OLE2 workbook at all; it fails with
+# "File is not a zip file", which is what every .xls hit in production while
+# the router advertised .xls as supported.
+xlrd==2.0.2
 # pydantic v2 for response models. Requires v2.5+ for alias_generators.to_camel.
 pydantic==2.10.4
 # python-magic for MIME sniffing when extension is missing
