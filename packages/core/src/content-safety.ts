@@ -44,24 +44,34 @@ const MASK: Record<RedactionKind, string> = {
 };
 
 /**
- * Apply replacements for HIGH-confidence matches only, right-to-left.
- *
- * Right-to-left matters: replacing left-to-right shifts every later offset by the
- * difference between the match length and the mask length, silently corrupting
- * subsequent replacements in a dense document.
+ * Apply replacements for HIGH-confidence matches only, in a single
+ * left-to-right pass.
  *
  * Ruling R9: overlapping `high` ranges are merged into a single masked span BEFORE
  * replacement, rather than replaced independently. Two overlapping replacements
- * applied right-to-left corrupt the text: the second (leftmost-start) match's
- * `end` offset was computed against the ORIGINAL text and goes stale the instant
- * the first (rightmost-start) replacement changes the string's length — the
- * observed failure mode was silent, with a mask token AND trailing document text
- * both disappearing. Merging the union and masking it once with a single token
+ * applied independently corrupt the text: the second (leftmost-start) match's
+ * `end` offset was computed against the ORIGINAL text and would go stale the
+ * instant an earlier replacement changed the string's length — the observed
+ * failure mode was silent, with a mask token AND trailing document text both
+ * disappearing. Merging the union and masking it once with a single token
  * cannot do that: every byte of every overlapping match's span is covered by
  * exactly one replacement, so no fragment of a redacted value can survive.
  * Merely ADJACENT matches (one's `end` equals the next's `start`) are NOT
- * merged — they don't corrupt each other under right-to-left replacement, and
- * merging them would mask text no scanner actually matched.
+ * merged — they don't corrupt each other, and merging them would mask text no
+ * scanner actually matched.
+ *
+ * Performance: after merging, `spans` is disjoint and start-sorted, so the
+ * output is built with a single left-to-right pass — copy the gap before each
+ * span, then the mask, advancing a cursor — collecting pieces into an array
+ * joined once at the end. This is O(text length + matches), not O(matches ×
+ * text length). The prior implementation rebuilt the whole string via
+ * `slice`+concat once per span (`out = out.slice(0, s) + mask + out.slice(e)`),
+ * which on a 1.6 MB document with 60,000 matches took ~6.9s on one core —
+ * long enough to block the worker's event loop, cause pg-boss to miss its
+ * heartbeat and reap the job as stalled, and have the retry repeat the same
+ * quadratic pass. There is no offset-staleness risk in switching directions
+ * here: spans are already disjoint and sorted, so each is resolved against
+ * the immutable input `text`, never against a partially-rebuilt string.
  */
 export function applyRedaction(
   text: string,
@@ -86,13 +96,14 @@ export function applyRedaction(
     }
   }
 
-  let out = text;
-  for (let i = spans.length - 1; i >= 0; i--) {
-    const span = spans[i];
-    if (!span) continue;
-    out = out.slice(0, span.start) + mask(span.token) + out.slice(span.end);
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const span of spans) {
+    parts.push(text.slice(cursor, span.start), mask(span.token));
+    cursor = span.end;
   }
-  return out;
+  parts.push(text.slice(cursor));
+  return parts.join("");
 }
 
 /** Maps a pack scanner id onto the legacy RedactionKind for the mask table. */
@@ -208,11 +219,30 @@ export class ContentSafetyError extends Error {
  * index it raw. A redactor that silently passes text through on failure is
  * worse than having none at all, because it manufactures confidence — the same
  * class of failure as an unmonitored backup.
+ *
+ * `LoadedPack` is an exported, structurally-constructible interface, so a
+ * caller (a test fixture, or a future direct construction of `WorkerDeps.pack`)
+ * can hand in a pack with `scanners: []`. `loadPack` enforces `scanners.min(1)`
+ * at load time, but nothing downstream re-checked that invariant: an
+ * empty-scanner pack made every guard pass — `scanText` loops zero times,
+ * `applyRedaction` returns the input verbatim, `findings` stays empty,
+ * `totalRedacted` is 0 — while raw identifiers went to the embedding provider
+ * on a run that looked completely healthy. This check closes that hole here,
+ * at the one function every redaction path funnels through, so the failure
+ * surfaces as a `ContentSafetyError` and flows into the same quarantine path
+ * as any other redaction failure, rather than a silent pass-through.
  */
 export function redactOrThrow(
   input: string,
   pack: LoadedPack,
 ): RedactionResult {
+  if (pack.scanners.length === 0) {
+    throw new ContentSafetyError(
+      `pack "${pack.id}" declares no scanners — refusing to redact; an ` +
+        "empty-scanner pack would let every document through unredacted " +
+        "while every guard reports a clean, healthy run",
+    );
+  }
   try {
     return redactText(input, pack);
   } catch (err) {

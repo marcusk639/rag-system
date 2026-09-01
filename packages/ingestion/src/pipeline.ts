@@ -134,12 +134,20 @@ export async function runIngestion(
   // compliance query would misread as "the pipeline saw sensitive content in
   // every one of these documents" rather than "nobody wired a pack in".
   // Fail loudly, exactly once, with no per-document audit rows at all.
-  if (!deps.pack) {
+  //
+  // A pack with `scanners: []` is treated identically to a missing pack: it
+  // is an exported, structurally-constructible `LoadedPack`, `loadPack`'s
+  // `scanners.min(1)` zod check only guards the loader path, and nothing
+  // downstream re-checked it — an empty-scanner pack passed `!deps.pack`,
+  // made `scanText` loop zero times, and let raw identifiers reach the
+  // embedding provider on a run every guard reported as healthy.
+  if (!deps.pack || deps.pack.scanners.length === 0) {
     throw new Error(
       "PipelineDeps.pack is not configured — no identifier-scanner pack " +
-        "was wired into WorkerDeps, so redaction cannot run. Ingestion " +
-        "cannot proceed until a LoadedPack (see @rag/core loadPack) is " +
-        "supplied to PipelineDeps.pack.",
+        "was wired into WorkerDeps (or it declares no scanners, which is " +
+        "just as unusable), so redaction cannot run. Ingestion cannot " +
+        "proceed until a LoadedPack with at least one scanner (see " +
+        "@rag/core loadPack) is supplied to PipelineDeps.pack.",
     );
   }
 
@@ -335,19 +343,21 @@ export async function ingestOne(
   //     change is a redaction does not silently reuse a stale embedding.
   let redacted;
   try {
-    if (!deps.pack) {
-      // Fail CLOSED, loudly: no pack means we cannot tell an SSN from a form
-      // number, so every document must be quarantined until this is fixed —
-      // not silently skipped, and not indexed unredacted. Thrown as
-      // ContentSafetyError (not a bare Error) so it flows through the SAME
-      // catch below as a genuine redaction failure: quarantine, don't crash
-      // the run.
+    if (!deps.pack || deps.pack.scanners.length === 0) {
+      // Fail CLOSED, loudly: no pack (or a pack with no scanners — just as
+      // unusable, since `scanText` would loop zero times) means we cannot
+      // tell an SSN from a form number, so every document must be
+      // quarantined until this is fixed — not silently skipped, and not
+      // indexed unredacted. Thrown as ContentSafetyError (not a bare Error)
+      // so it flows through the SAME catch below as a genuine redaction
+      // failure: quarantine, don't crash the run.
       throw new ContentSafetyError(
         "PipelineDeps.pack is not configured — no identifier-scanner pack " +
-          "was wired into WorkerDeps, so redaction cannot run. Ingestion " +
-          "cannot proceed until a LoadedPack (see @rag/core loadPack) is " +
-          "supplied to PipelineDeps.pack; every document will be quarantined " +
-          "until then.",
+          "was wired into WorkerDeps (or it declares no scanners), so " +
+          "redaction cannot run. Ingestion cannot proceed until a " +
+          "LoadedPack with at least one scanner (see @rag/core loadPack) " +
+          "is supplied to PipelineDeps.pack; every document will be " +
+          "quarantined until then.",
       );
     }
     redacted = redactOrThrow(parsed.markdown, deps.pack);
@@ -362,17 +372,19 @@ export async function ingestOne(
       // standard as the Layer 3 quarantine below: "Quarantining without a
       // durable record would prevent the disclosure but destroy the evidence
       // that the pipeline saw sensitive content... A logger warning is not
-      // an audit trail." Two distinct causes reach this branch — a missing
-      // pack (a config gap, nothing about THIS document) and a genuine
-      // redactOrThrow failure (something about this document's content) — so
-      // the reason string names which one, rather than reusing one generic
-      // phrase for both.
-      const rejectionReason = deps.pack
+      // an audit trail." Two distinct causes reach this branch — an unusable
+      // pack (a config gap, nothing about THIS document — missing OR
+      // declaring zero scanners) and a genuine redactOrThrow failure
+      // (something about this document's content) — so the reason string
+      // names which one, rather than reusing one generic phrase for both.
+      const packUsable = !!deps.pack && deps.pack.scanners.length > 0;
+      const rejectionReason = packUsable
         ? `redaction threw while processing this document: ${
             err.cause instanceof Error ? err.cause.message : err.message
           }`
-        : "no identifier-scanner pack was configured on PipelineDeps.pack; " +
-          "redaction cannot run until one is wired in";
+        : "no identifier-scanner pack was configured on PipelineDeps.pack " +
+          "(or it declares no scanners); redaction cannot run until a " +
+          "usable one is wired in";
       await logIngestEvent(deps.db, {
         sourceId,
         docId: null,

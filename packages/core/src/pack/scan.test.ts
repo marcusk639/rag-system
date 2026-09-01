@@ -137,6 +137,52 @@ describe("scanText", () => {
   });
 });
 
+describe("scanText — zero-width matches", () => {
+  it("throws, naming the scanner id, rather than inserting a mask token at every position", () => {
+    // Fix (MEDIUM, whole-branch review), and a DELIBERATE override of the
+    // reviewer's suggested `if (m[0].length === 0) continue;` fix: silently
+    // skipping a zero-width match would leave the scanner effectively
+    // disabled while everything downstream still reports a healthy run —
+    // the same silent-scanner-disablement shape as an empty-scanner pack.
+    // `(?=\d)` compiles fine and returns false for `.test("")` (the schema
+    // guard's check), but matches zero-width before every digit in real text.
+    const pack: LoadedPack = {
+      id: "test",
+      version: "1.0.0",
+      scanners: [
+        {
+          id: "zero-width-lookahead",
+          kind: "identifying",
+          disposition: "exclude",
+          re: /(?=\d)/g,
+          contextWindow: 60,
+        },
+      ],
+    };
+    expect(() => scanText("value 123 here", pack)).toThrow(
+      /zero-width-lookahead/,
+    );
+    expect(() => scanText("value 123 here", pack)).toThrow(/zero-width/);
+  });
+
+  it("throws for a bare \\b scanner pattern the same way", () => {
+    const pack: LoadedPack = {
+      id: "test",
+      version: "1.0.0",
+      scanners: [
+        {
+          id: "word-boundary",
+          kind: "identifying",
+          disposition: "exclude",
+          re: /\b/g,
+          contextWindow: 60,
+        },
+      ],
+    };
+    expect(() => scanText("hello world", pack)).toThrow(/word-boundary/);
+  });
+});
+
 describe("maskValue", () => {
   it("preserves shape and first/last character", () => {
     expect(maskValue("123-45-6789")).toBe("1XXXXXXXXX9");

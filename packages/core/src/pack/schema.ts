@@ -24,7 +24,21 @@ const ScannerDecl = z
     /** Registered name of a compiled-in context matcher, e.g. "account-vocab". */
     context: z.string().min(1).optional(),
     /** How far either side of a match the context matcher looks. */
-    contextWindow: z.number().int().positive().default(60),
+    contextWindow: z
+      .number()
+      .int()
+      .positive()
+      .max(
+        500,
+        "contextWindow must be at most 500 — it is a small neighbourhood " +
+          "around a match (the field's declared intent is a ±60-character " +
+          "window), not a document scan. scanText slices " +
+          "[start - contextWindow, end + contextWindow] for every match " +
+          "reaching the context gate, so an unbounded value on a broad " +
+          "pattern over a large document means slicing the whole document " +
+          "per match — unbounded copying with no error, hanging the worker.",
+      )
+      .default(60),
   })
   .transform((s) => ({
     ...s,
@@ -49,6 +63,24 @@ const ScannerDecl = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `scanner "${s.id}": pattern can match the empty string, which would redact every position in the document — patterns must require at least one character`,
+      });
+    }
+    // `.test("")` only catches an UNCONDITIONALLY zero-width pattern. A
+    // CONTEXT-DEPENDENT zero-width pattern — a lookaround (`(?=...)`,
+    // `(?!...)`, `(?<=...)`, `(?<!...)`) or a bare `\b` — returns `false` for
+    // `.test("")` (there's no adjacent character for it to assert against in
+    // an empty string) but still matches zero-width at real positions once
+    // run against actual document text, which is exactly the failure this
+    // guards against. This check is a cheap early signal for the common
+    // shapes only, not a complete classifier — it cannot detect every
+    // context-dependent zero-width pattern (e.g. a lookaround buried mid
+    // pattern). `scanText`'s runtime throw on any zero-length match is the
+    // real backstop; this just catches the obvious cases before a pack ever
+    // ships.
+    if (/^\(\?[=<!]/.test(s.pattern) || s.pattern === "\\b") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `scanner "${s.id}": pattern is structurally zero-width (starts with a lookaround, or is exactly "\\b") — it can never consume a character, so it will match zero-width at every position where its assertion holds, destroying the document when redacted`,
       });
     }
   });

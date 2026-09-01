@@ -10,6 +10,7 @@ import {
   DEFAULT_EXCLUDED_PATH_FRAGMENTS,
 } from "./content-safety.js";
 import type { ScanMatch } from "./pack/scan.js";
+import type { LoadedPack } from "./pack/load.js";
 import { loadPack } from "./pack/load.js";
 
 /**
@@ -193,6 +194,27 @@ describe("redactOrThrow — fails closed", () => {
       ContentSafetyError,
     );
   });
+
+  it("refuses to redact against a pack that declares no scanners, naming the pack id", () => {
+    // `LoadedPack` is an exported, structurally-constructible interface — a
+    // pack with `scanners: []` would otherwise pass every guard (`scanText`
+    // loops zero times, `findings` stays empty) and let raw identifiers
+    // through on what looks like a healthy run.
+    const emptyPack: LoadedPack = {
+      id: "empty-pack",
+      version: "1.0.0",
+      scanners: [],
+    };
+    expect(() => redactOrThrow("SSN 123-45-6789", emptyPack)).toThrow(
+      ContentSafetyError,
+    );
+    expect(() => redactOrThrow("SSN 123-45-6789", emptyPack)).toThrow(
+      /empty-pack/,
+    );
+    expect(() => redactOrThrow("SSN 123-45-6789", emptyPack)).toThrow(
+      /no scanners/,
+    );
+  });
 });
 
 describe("applyRedaction", () => {
@@ -297,5 +319,43 @@ describe("applyRedaction", () => {
     expect(applyRedaction(text, matches, (m) => `[${m.scannerId}]`)).toBe(
       "ab[m1][m2]ij",
     );
+  });
+
+  it("stays correct across several thousand disjoint matches (linear-rewrite regression)", () => {
+    // Fix (MEDIUM, whole-branch review): the previous implementation rebuilt
+    // the whole string via slice+concat once PER SPAN
+    // (`out = out.slice(0, s) + mask + out.slice(e)`), which is
+    // O(matches × textLength) — 1.6 MB with 60,000 matches measured at 6.9s
+    // on one core, long enough to stall the worker's event loop and cause
+    // pg-boss to reap the job as stalled. This does not re-time the rewrite
+    // (a timing assertion would be flaky and slow the suite); it exercises
+    // several thousand matches to prove the single left-to-right pass stays
+    // byte-correct at a scale the old quadratic code would visibly struggle
+    // with, without adding a slow benchmark to the suite.
+    const N = 5000;
+    const token = "1234567890"; // 10 chars, never overlapping/adjacent
+    const textParts: string[] = [];
+    const matches: ScanMatch[] = [];
+    let cursor = 0;
+    for (let i = 0; i < N; i++) {
+      textParts.push(token);
+      matches.push({
+        scannerId: "x",
+        kind: "identifying",
+        disposition: "exclude",
+        confidence: "high",
+        start: cursor,
+        end: cursor + token.length,
+        maskedSample: "x",
+      });
+      cursor += token.length;
+      if (i < N - 1) {
+        textParts.push("|");
+        cursor += 1;
+      }
+    }
+    const text = textParts.join("");
+    const result = applyRedaction(text, matches, () => "[X]");
+    expect(result).toBe(Array(N).fill("[X]").join("|"));
   });
 });

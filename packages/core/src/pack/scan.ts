@@ -32,6 +32,24 @@ export function maskValue(v: string): string {
  *
  * Matching runs against the unmodified input, so `start`/`end` remain valid for
  * every match regardless of what a caller later does with the text.
+ *
+ * **Deliberately throws on a zero-width match.** `schema.ts`'s `compiled.test("")`
+ * guard catches an unconditionally-empty pattern (e.g. `\d*`), but NOT a
+ * context-dependent zero-width pattern — `(?=\d)`, `\b`, `(?<=x)` all compile,
+ * all return `false` for `.test("")`, and all then match zero-width at many
+ * real positions once matched against actual document text. Each such match
+ * has `start === end` and an empty `maskedSample`, none of them coalesce in
+ * `applyRedaction`, and the result is a mask token inserted at every matched
+ * position — destroying the document. The tempting fix is to skip a
+ * zero-length match and move on, but that silently disables the scanner while
+ * everything downstream still reports a healthy run — the exact same
+ * silent-scanner-disablement failure shape as an empty-scanner pack. It is
+ * also precisely the "skip the degenerate case" reasoning that created the
+ * original validator-failure hole this engine was built to close (see the
+ * confidence-rule note above). So instead: throw. A pack whose pattern
+ * matches zero-width is malformed, and a malformed pack must halt loudly, not
+ * degrade silently. This is `scanText`'s first throw path, and that is
+ * intentional.
  */
 export function scanText(text: string, pack: LoadedPack): ScanMatch[] {
   const out: ScanMatch[] = [];
@@ -47,6 +65,15 @@ export function scanText(text: string, pack: LoadedPack): ScanMatch[] {
     for (const m of text.matchAll(re)) {
       const value = m[0];
       const start = m.index;
+
+      if (value.length === 0) {
+        throw new Error(
+          `scanner "${s.id}": pattern matched zero-width (an empty string) ` +
+            `at position ${start}, which indicates a malformed pack — a ` +
+            "scanner pattern must always consume at least one character",
+        );
+      }
+
       let confidence: Confidence = "high";
 
       if (s.validate && !s.validate(value)) confidence = "low";
