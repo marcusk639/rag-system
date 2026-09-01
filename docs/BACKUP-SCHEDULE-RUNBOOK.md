@@ -172,17 +172,30 @@ nobody can verify it from a script later. Screenshot it once enabled.
 Recorded so nobody re-does it. Service `rag-backup` exists in the `rag-system`
 project, production environment.
 
-| Setting        | Value                                        |
-| -------------- | -------------------------------------------- |
-| Config file    | `services/backup/railway.json`               |
-| `BACKUP_DEST`  | `s3` (Railway bucket — stopgap)              |
-| Cron           | `0 8 * * *` UTC = 3 a.m. CDT / 2 a.m. CST    |
-| Restart policy | **NEVER** — see below                        |
-| Credentials    | Railway **reference variables**, no literals |
+| Setting              | Value                                                 |
+| -------------------- | ----------------------------------------------------- |
+| Config file          | `services/backup/railway.json`                        |
+| `BACKUP_DEST`        | `s3` (Railway bucket — stopgap)                       |
+| `BACKUP_NAME_PREFIX` | unset → `kb` (artifact FILENAME prefix)               |
+| `BACKUP_PREFIX`      | unset → `backups` (upload FOLDER — a different thing) |
+| Cron                 | `0 8 * * *` UTC = 3 a.m. CDT / 2 a.m. CST             |
+| Restart policy       | **NEVER** — see below                                 |
+| Credentials          | Railway **reference variables**, no literals          |
+
+> `BACKUP_NAME_PREFIX` and `BACKUP_PREFIX` are two different identifiers and
+> are easy to confuse. The first names the FILE (`<prefix>-<stamp>.sql.gz`);
+> the second names the upload FOLDER. Setting the wrong one relocates every
+> backup to a folder no verification step, retention rule, or restore glob is
+> watching — while the job still exits 0 and the heartbeat still fires. If you
+> change either on a deployment with existing archives, re-run the
+> verification listing in both the old and the new location.
 
 First run 2026-08-01: dumped **35,551,090 bytes**, gzip verified, uploaded
-`kb-2026-08-01T051051Z.sql.gz` (**33.9 MiB** confirmed present in the
-bucket), container exited **Completed**.
+the artifact `<prefix>-2026-08-01T051051Z.sql.gz` (**33.9 MiB** confirmed present
+in the
+bucket), container exited **Completed**. That run predates
+`BACKUP_NAME_PREFIX`, so the stored object carries the prefix hard-coded at the
+time — look it up in the bucket rather than assuming today's default.
 
 ⚠ **Two settings here look wrong and are not.** `restartPolicyType: NEVER`,
 because a restart-looping failure keeps the deployment **Active** and Railway
@@ -383,7 +396,11 @@ it, following the production procedure in
 
 ```bash
 # decrypt first if AGE_RECIPIENT was used
-age -d -i kb-backup.key kb-<stamp>.sql.gz.age > kb-<stamp>.sql.gz
+age -d -i <age-key-file> <prefix>-<stamp>.sql.gz.age > <prefix>-<stamp>.sql.gz
+# ^ <age-key-file> is whatever the private key is actually called on disk — it
+#   is named per deployment and is NOT derived from BACKUP_NAME_PREFIX. Get it
+#   from the vault. <prefix> is BACKUP_NAME_PREFIX, and historical artifacts
+#   carry the prefix in force when they were written, not today's default.
 
 railway ssh --service rag-postgres "createdb -U \$POSTGRES_USER rag_restore_drill"
 # ... stream the dump in, then run the verification queries from the drill doc

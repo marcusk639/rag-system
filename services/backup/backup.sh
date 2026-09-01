@@ -26,13 +26,20 @@ set -euo pipefail
 : "${BACKUP_DEST:?BACKUP_DEST is required (sharepoint | s3 | azure)}"
 
 STAMP="$(date -u +%Y-%m-%dT%H%M%SZ)"
-# Artifact name prefix. Parameterised rather than hard-coded because it is an
+# Artifact FILENAME prefix. Parameterised rather than hard-coded because it is an
 # OPERATIONAL identifier, not a label: archives already written carry whatever
 # prefix produced them, and the restore procedure matches on it. A deployment
-# that has existing backups should set BACKUP_PREFIX to the prefix those use, or
-# its restore glob stops matching the older half of the archive.
-BACKUP_PREFIX="${BACKUP_PREFIX:-kb}"
-NAME="${BACKUP_PREFIX}-${STAMP}.sql.gz"
+# with existing backups should set BACKUP_NAME_PREFIX to the prefix those use,
+# or its restore glob stops matching the older half of the archive.
+#
+# Deliberately NOT called BACKUP_PREFIX: that name is already taken, further
+# down, for the upload FOLDER (`PREFIX="${BACKUP_PREFIX:-backups}"`). Assigning
+# BACKUP_PREFIX here would kill that default and silently relocate every upload
+# from `backups/` to the filename prefix — backups would keep succeeding, the
+# heartbeat would keep firing, and the runbook's own verification step would
+# keep listing the old folder full of healthy-looking historical files.
+BACKUP_NAME_PREFIX="${BACKUP_NAME_PREFIX:-kb}"
+NAME="${BACKUP_NAME_PREFIX}-${STAMP}.sql.gz"
 OUT="/tmp/${NAME}"
 
 log() { echo "[backup] $*"; }

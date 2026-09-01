@@ -26,6 +26,18 @@ fi
 
 PRINCIPALS=$(./scripts/gen-tokens.sh "$@" "service-admin::isAdmin")
 
+# This REPLACES the deployed principal set wholesale, and that set is an
+# access-control boundary: omitting a user from argv silently revokes them, and
+# nothing here would say so. Print what is deployed now, so the operator can see
+# what they are about to overwrite before it happens.
+echo "Current API_PRINCIPALS on rag-api (about to be REPLACED):" >&2
+railway variables --service rag-api --kv 2>/dev/null | grep '^API_PRINCIPALS=' >&2 \
+  || echo "  (none set, or could not be read)" >&2
+echo "" >&2
+echo "New principal set:" >&2
+echo "$PRINCIPALS" | tr ',' '\n' | sed 's/^/  /' >&2
+echo "" >&2
+
 echo "Setting API_PRINCIPALS on rag-api..." >&2
 railway variables --service rag-api --set "API_PRINCIPALS=$PRINCIPALS"
 
