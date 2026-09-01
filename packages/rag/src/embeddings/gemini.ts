@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { Embedding, EmbeddingProvider } from "@rag/core";
 import { EgressPolicy, EmbeddingError } from "@rag/core";
 import { retryOnRateLimit } from "./retry.js";
+import { createThrottle } from "./throttle.js";
 
 /**
  * Gemini embedding provider.
@@ -28,6 +29,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   private client: GoogleGenAI;
   private readonly maxRetries: number;
   private readonly _egressPolicy: EgressPolicy;
+  private readonly _throttle: <T>(fn: () => Promise<T>) => Promise<T>;
 
   constructor(opts: {
     apiKey: string;
@@ -35,6 +37,8 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     dimensions?: number;
     maxRetries?: number;
     egressPolicy?: EgressPolicy;
+    /** Pace embedding requests to at most N per minute. 0/undefined = unpaced. */
+    requestsPerMinute?: number;
   }) {
     if (!opts.apiKey) {
       throw new EmbeddingError("Gemini API key is required");
@@ -60,6 +64,11 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     this.dimensions = opts.dimensions ?? 768;
     this.maxRetries = opts.maxRetries ?? 5;
     this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
+    this._throttle = createThrottle({
+      ...(opts.requestsPerMinute !== undefined
+        ? { requestsPerMinute: opts.requestsPerMinute }
+        : {}),
+    });
   }
 
   async embed(text: string): Promise<Embedding> {
@@ -99,17 +108,19 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       const batchSize = 100;
       for (let i = 0; i < texts.length; i += batchSize) {
         const slice = texts.slice(i, i + batchSize);
-        const response = await retryOnRateLimit(
-          () =>
-            this.client.models.embedContent({
-              model: this.model,
-              contents: slice,
-              config: {
-                outputDimensionality: this.dimensions,
-                taskType,
-              },
-            }),
-          { maxRetries: this.maxRetries },
+        const response = await this._throttle(() =>
+          retryOnRateLimit(
+            () =>
+              this.client.models.embedContent({
+                model: this.model,
+                contents: slice,
+                config: {
+                  outputDimensionality: this.dimensions,
+                  taskType,
+                },
+              }),
+            { maxRetries: this.maxRetries },
+          ),
         );
         const embeddings = response.embeddings ?? [];
         if (embeddings.length !== slice.length) {
