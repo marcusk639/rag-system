@@ -32,7 +32,7 @@ collapses all of them onto one pack-declared set.
 | #   | Decision                                                                                                                                                                                              |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | D1  | Scope is **discovery + inventory**: a read-only pass producing evidence. No automated remediation.                                                                                                    |
-| D2  | **Raw identifier values are never stored.** Findings carry a locator and a shape-preserving mask; the true value is resolved on demand from the source document under the reviewer's own permissions. |
+| D2  | **Raw identifier values are never stored — including inside stored context.** Findings carry a locator and shape-preserving masks; context windows are themselves redacted before persistence. The true value is resolved on demand from the source under the reviewer's own permissions. |
 | D3  | Patterns are **pack data**, not code. The scanner engine is generic; TRI-ness lives in `packs/cpa/`.                                                                                                  |
 | D4  | The registry and its API live in **`apps/api` with their own tables**; the scan runs as a job independent of ingestion. Designed for later extraction into a separate app.                            |
 | D5  | Where PR #41 and the multi-vertical spec conflict, **the spec governs**: disposition is pack-declared with `exclude` as the default for `identifying`. PR #41 is the engine, not the policy.          |
@@ -173,14 +173,47 @@ scan_finding    run_id, external_id, scanner_id,
                 kind,               -- 'identifying' | 'contextual'
                 confidence,         -- 'high' | 'low'
                 match_count,
-                first_offset, context_before, context_after,
-                masked_sample       -- e.g. '1XX-XX-XXX9'
+                masked_sample,      -- e.g. '1XX-XX-XXX9'
+                parsed_offset,      -- into the PARSED markdown, not the source file
+                locator_hint,       -- sheet name, or nearest markdown heading
+                masked_context_before,   -- redacted before persistence
+                masked_context_after     -- redacted before persistence
 ```
 
 **There is no column for the raw value, and that absence is the design** (D2).
 Remediation needs _where_ and _what kind_; it does not need a second permanent copy
-of the identifier. A reviewer opens the document at `path` + `first_offset` under
-their own SharePoint permissions.
+of the identifier.
+
+#### The context columns are themselves redacted, and that is not optional
+
+Storing a raw window around each match would break D2 precisely where it matters
+most. The worst document in the 2026-08-01 screen held **522 SSN-shaped and 518
+EIN-shaped values** — parsed, that is a table of identifiers. A raw context window
+around match #1 contains matches #2 and #3 in the clear, and `scan_finding` becomes
+a curated extract of exactly the material the purge removed.
+
+Both context columns are therefore passed through the same redactor before they are
+persisted: `masked_context_before` and `masked_context_after` are stored already
+masked, never raw. This costs nothing — the engine is already in the call path — and
+it keeps a finding locatable without carrying the values.
+
+#### Why `parsed_offset` alone cannot be the locator
+
+The offset is into the **parsed markdown**, which a reviewer never sees; they open a
+`.docx` or `.xlsx` in SharePoint. There is no general mapping from a markdown offset
+back to a page or cell, and the parser does not supply one — `ParsedDocument` carries
+`markdown`, `tables[]` (with `sheetName`), and freeform `metadata`, but no page index.
+
+The locator is therefore three fields working together:
+
+- `locator_hint` — the parser's `sheetName` for tabular sources, otherwise the
+  nearest preceding markdown heading. Structural, human-usable, and derivable from
+  what the parser already returns.
+- `masked_context_*` — enough surrounding prose to find the spot by eye or by search,
+  with any identifiers inside it masked.
+- `parsed_offset` — exact, but only meaningful against the parsed text whose hash is
+  recorded on `scan_document.content_sha256`. **If that hash does not match a fresh
+  parse, the offset is stale and must be treated as advisory.**
 
 `scan_document` carries a row for **every document enumerated**, not only those
 with hits. A `.pdf` that failed to parse is `scan_status='failed'` with a reason,
@@ -209,13 +242,40 @@ Findings are logged masked only, never raw.
 
 ### 5.4 Error handling and scale
 
-858+ documents, one parser round-trip each. A parse failure records `failed` and
-the run continues — one bad `.pdf` must not abort a scan. Microsoft Graph 429s use
-the connector's existing backoff. Runs resume via the connector cursor plus
+858+ documents, one parser round-trip each. A parse failure records `failed` and the
+run continues — one bad `.pdf` must not abort a scan. Microsoft Graph 429s use the
+connector's existing backoff. Runs resume via the connector cursor plus
 `(run_id, external_id)` idempotency, so an interrupted scan continues rather than
 restarting.
 
-### 5.5 Extractability
+**Budget.** Parser round-trips dominate; the scan is IO-bound, not CPU-bound. Default
+to **4 concurrent parses**, bounded so a scan cannot starve ingestion of the same
+sidecar, and expect a full pass over ~858 documents to run in tens of minutes rather
+than seconds. The concurrency is configurable because the right value depends on how
+the parser is deployed, and a scan competing with a live sync is the failure mode
+worth avoiding. `CLAUDE.md` already warns that SharePoint and Outlook share one Graph
+quota, so a scan running beside a bulk re-sync will throttle both.
+
+**A scan is safe to run against production**, because it writes only `scan_*` tables
+and never touches the corpus — but it is not free, and it should be scheduled rather
+than fired during an ingestion window.
+
+### 5.5 Migration and rollback
+
+Three new tables mean a Drizzle migration, and this repo has a specific contract for
+that which the rest of this design must respect:
+
+- `rag-worker` is the **single migration owner** via its `preDeployCommand`
+  (`pnpm --filter @rag/db migrate`). Do not add that command to `api` or `mcp` —
+  concurrent bootstrap contends. See `docs/DEPLOYMENT.md`.
+- On a schema-changing release, **deploy `rag-worker` first**, then `api`/`mcp`. The
+  new read endpoints in `apps/api` must not ship ahead of the tables they read.
+- Rollback is a plain `DROP` of the three tables. They are **append-only evidence
+  with no foreign keys into the corpus tables**, so dropping them cannot cascade into
+  documents or chunks — which is the main reason to keep the registry structurally
+  separate rather than hanging it off `documents`.
+
+### 5.6 Extractability
 
 The service depends only on `Connector`, the parser client, and the pack engine —
 all existing interfaces. Extracting it later means moving `packages/content-scan/`
@@ -231,8 +291,20 @@ RAG-internal coupling to unpick.
   report. One test, derived structurally from §3.1.
 - **The honesty property**: a parse failure produces a `scan_document` row with
   `scan_status='failed'`, not a missing row.
-- **Value-freeness**: a test asserting no raw match text reaches any `scan_finding`
-  column or any log line.
+- **Value-freeness**: no raw match text reaches any `scan_finding` column or any log
+  line. The decisive case is a fixture shaped like the real one that caused the purge —
+  a table of adjacent synthetic identifiers — asserting that a finding's
+  `masked_context_before` / `masked_context_after` contain no unmasked neighbour. A
+  test that only checks the matched span would pass while the design leaks.
+
+### 6.1 Two properties the API must not quietly violate
+
+- **Runs are only comparable within a pack version.** `scan_run` records `pack_id`
+  and `pack_version`; a diff across differing versions compares two definitions of
+  "finding" and must be refused or clearly labelled, not silently rendered.
+- **A scan is a point-in-time artifact of a live corpus.** `GET /admin/scans/:id`
+  returns `finished_at`; consumers should treat an old run as evidence of what was
+  true then, not what is true now.
 
 ## 7. Out of scope
 
