@@ -48,6 +48,9 @@ export function makeTestConfig(): Config {
       model: "fake-bow-768",
       dimensions: 768,
       apiKey: undefined,
+      // Unpaced: the local provider makes no network calls, so throttling it
+      // would only slow the suite down.
+      requestsPerMinute: 0,
       // Inert for the local deterministic embedder (it never rate-limits);
       // present only to satisfy the required EmbeddingConfig field.
       maxRetries: 0,

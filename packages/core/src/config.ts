@@ -33,6 +33,20 @@ export const Config = z
       // embeds ride out rate limits (esp. the Gemini free tier) instead of
       // failing whole documents. 0 disables retrying.
       maxRetries: z.number().int().min(0).default(5),
+      /**
+       * Client-side pacing: cap embedding requests at N per minute.
+       *
+       * `maxRetries` above reacts to a 429 AFTER it happens, which does not
+       * help when the burst is our own and predictable — a large document
+       * chunks into several back-to-back batch calls, trips the provider's
+       * per-minute limit, and every backoff lands in the same still-full
+       * window. That document then fails permanently while smaller ones around
+       * it succeed. This spaces the calls so the limit is never reached.
+       *
+       * 0 (the default) disables pacing, so nothing changes for deployments
+       * that were not hitting a limit.
+       */
+      requestsPerMinute: z.number().int().min(0).default(0),
     }),
 
     parser: z.object({
@@ -609,6 +623,7 @@ export function loadConfig(
         env.EMBEDDING_MAX_RETRIES !== undefined
           ? Number(env.EMBEDDING_MAX_RETRIES)
           : undefined,
+      requestsPerMinute: Number(env.EMBEDDING_REQUESTS_PER_MINUTE ?? 0),
     },
     parser: {
       url: env.PARSER_URL ?? "http://localhost:8000",
