@@ -172,14 +172,20 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * Backstop for the rare chunk that still exceeds the token limit after the
    * provider-aware CHUNK_SIZE cap (packages/core/src/config.ts). Tokenizes
    * each text WITHOUT truncation (bypassing the pipeline's hardcoded
-   * truncation) to find its true length, then logs — never throws — when a
-   * text will be truncated by the actual embedding call below. Detection is
-   * best-effort: any failure here is swallowed so it can never block the
-   * real embed.
+   * truncation) to find its true length, then emits a SINGLE aggregated
+   * warning — never throws — when any text will be truncated by the actual
+   * embedding call below. One log per offending chunk saturated the platform's
+   * log pipeline in production; see the comment at the emit site. Detection is
+   * best-effort: any failure here is swallowed so it can never block the real
+   * embed.
    */
   private warnOnOverlongText(pipe: HFPipeline, texts: string[]): void {
     try {
       const limit = pipe.tokenizer.model_max_length ?? this.maxTokens;
+      let overlongCount = 0;
+      let maxTokenCount = 0;
+      let maxTokenIndex = -1;
+      let maxTokenPreview = "";
       for (let i = 0; i < texts.length; i++) {
         const text = texts[i]!;
         let tokenCount: number;
@@ -196,19 +202,39 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
           continue;
         }
         if (tokenCount > limit) {
-          this.logger.warn(
-            {
-              textIndex: i,
-              tokenCount,
-              limit,
-              textPreview: text.length > 80 ? `${text.slice(0, 80)}…` : text,
-            },
-            `Local embedding input exceeds the ${limit}-token model limit ` +
-              `(${tokenCount} tokens) and will be truncated by ` +
-              `@huggingface/transformers, degrading retrieval quality for this ` +
-              `chunk. Lower CHUNK_SIZE or split this document further.`,
-          );
+          overlongCount += 1;
+          if (tokenCount > maxTokenCount) {
+            maxTokenCount = tokenCount;
+            maxTokenIndex = i;
+            maxTokenPreview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+          }
         }
+      }
+
+      // ONE warning per batch, not per chunk. Logging each offender saturated
+      // the platform's log pipeline in production (500 logs/sec, ~12k messages
+      // dropped) on a corpus where about half the chunks exceeded the limit —
+      // and dropped logs are strictly worse than terse ones. The aggregate is
+      // also the more actionable signal: how widespread the truncation is, and
+      // how far past the limit the worst chunk sits, is what decides whether
+      // CHUNK_SIZE needs lowering. The worst offender is still identified so a
+      // single bad document stays findable.
+      if (overlongCount > 0) {
+        this.logger.warn(
+          {
+            overlongCount,
+            batchSize: texts.length,
+            limit,
+            maxTokenCount,
+            maxTokenIndex,
+            maxTokenPreview,
+          },
+          `${overlongCount} of ${texts.length} embedding inputs exceed the ` +
+            `${limit}-token model limit (worst: ${maxTokenCount} tokens at ` +
+            `index ${maxTokenIndex}) and will be truncated by ` +
+            `@huggingface/transformers, degrading retrieval quality for those ` +
+            `chunks. Lower CHUNK_SIZE or split those documents further.`,
+        );
       }
     } catch {
       // any error during truncation detection is best-effort and must not
