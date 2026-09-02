@@ -13,6 +13,25 @@ markitdown[all]==0.0.1a4
 markdownify<0.13
 # Unstructured: fallback for difficult/scanned docs with OCR support.
 unstructured[local-inference]==0.16.11
+# torch/torchvision arrive transitively via unstructured[local-inference] →
+# unstructured-inference → layoutparser, and upstream pins neither. PyPI serves
+# the CUDA build, so a plain resolve drags in the whole nvidia-*/triton stack.
+# torch 2.14.0 (released 2026-09-02) moved that stack to CUDA 13 and pushed the
+# install past the GitHub runner's disk — CI died with
+# "OSError: [Errno 28] No space left on device" on a docs-only PR, having been
+# green the day before on the identical tree.
+#
+# Nothing here has a GPU: the sidecar runs OCR and layout detection on CPU in a
+# python:3.12-slim container. Pinning the +cpu wheels is 192 MB against 527 MB
+# plus several GB of nvidia-* wheels, and it stops an upstream torch release
+# from breaking this build again.
+#
+# The +cpu local version exists only on the PyTorch index, so the pin resolves
+# there and cannot silently fall back to PyPI's CUDA wheel. Keep the two
+# versions paired (torch 2.13 ↔ torchvision 0.28) when bumping.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
 # openpyxl: direct XLSX parsing with formula-value access (data_only=True).
 # Pulled in transitively by markitdown but pinned here because we import it directly.
 openpyxl==3.1.5
