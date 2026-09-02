@@ -53,7 +53,7 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 | Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC     |
 | Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent    |
 | pgBackRest WAL archiving (PITR)     | Point-in-time rewind; ~60s RPO               | ✅ **LIVE 2026-09-02** — see below         |
-| Restore FROM pgBackRest             | The PITR claim itself                        | ⛔ **FAILS** 2026-09-02 — err 088          |
+| Restore FROM pgBackRest             | The PITR claim itself                        | ✅ **PROVEN 2026-09-02** — manual/root only |
 | Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                   |
 | Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                     |
 | Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                            |
@@ -116,39 +116,71 @@ Railway *infrastructure* failure is not automatically a bucket failure.)
 second layer — pgBackRest failures and `pg_dump` failures do not correlate, and a
 plain SQL dump is restorable without pgBackRest present.
 
-⛔ **The PITR restore path is BROKEN — drilled 2026-09-02, it fails.** Archiving
-works; restoring does not. A drill service (`rag-pitr-drill`, fresh 50 GB volume,
-`WAL_RECOVER_FROM_*` + `POSTGRES_RECOVERY_TARGET_TIME=2026-09-02 19:40:10.243888+00`)
-reaches S3, resolves the backup set, accepts the time target — then aborts in ~30 ms,
-before restoring a single data file, and crash-loops:
+✅ **PITR is PROVEN — but only via a manual, root-run restore. The image's
+automated restore path is broken.** Drilled 2026-09-02 against production backup
+`20260902-191553F`.
+
+**The proof.** A marker table was planted in production's `postgres` database
+(deliberately outside the `rag` schema): row `before` at 19:40:01.976122+00, target
+recorded at 19:40:10.243888+00, row `after` at 19:40:13.266171+00, then six filler
+commits. Restored to the target, the fork contained **exactly one row**:
 
 ```
-INFO: repo1: restore backup set 20260902-191553F, recovery will start at 2026-09-02 19:15:53
+ id |  tag   |              at
+----+--------+-------------------------------
+  1 | before | 2026-09-02 19:40:01.976122+00
+```
+
+`pg_last_committed_xact()` = `305156 @ 19:40:06.071533+00` — after `before`, before
+the target. Restored `rag`: 47 documents, 210 chunks, 28 audit_log, 1 source,
+`vector 0.8.6`, HNSW probe returns rows. **The backups are good and point-in-time
+targeting is accurate to the second.**
+
+⛔ **The defect.** The image's own restore path fails with:
+
+```
 WARN: unknown group 'root' in backup manifest mapped to current group
-ERROR: [088]: unable to set ownership for '.../pgdata/postgresql.auto.conf': [1] Operation not permitted
-INFO: restore command end: aborted with exception [088]
+ERROR: [088]: unable to set ownership for '.../postgresql.auto.conf': [1] Operation not permitted
 ```
 
-Reproducible on a pristine volume (`PG_VERSION` and `PG_CONTROL` both missing, no
-partial `initdb`). The wrapper runs `gosu postgres pgbackrest ... restore`, i.e.
-non-root, while the backup manifest carries `root` group entries — the restoring
-user cannot apply that ownership. **Root cause is not fully established**; two
-earlier hypotheses (wrapper writing `auto.conf` as root before the restore gate; a
-wedged volume from an interrupted `initdb`) were both disproved by the pristine-volume
-rerun.
+Root cause: the Railway volume root `/var/lib/postgresql/data` is `root:root`, so a
+PGDATA created beneath it inherits group `root`. pgBackRest *creates*
+`postgresql.auto.conf` during restore (it writes the recovery options there), the file
+inherits group `root`, and pgBackRest then chowns it to match the manifest — which
+requires privilege. `wrapper.sh` runs `gosu postgres pgbackrest ... restore`, i.e.
+unprivileged, so it gets EPERM. Run as root, the identical restore completes:
+`restore size = 114.9MB, file total = 1873, completed successfully`.
 
-**What this does and does not tell us.** It is proven that the *image's automated
-restore* does not work against these backups. It is **not** established that the
-backup data is bad — the failure is in ownership handling, and pgBackRest read the
-manifest and backup set from S3 successfully. Restorability is therefore **unknown**,
-and the nightly `pg_dump` remains the only proven recovery path (see
-`BACKUP-RESTORE-DRILL.md`). Do not treat WAL archiving as a recovery guarantee until
-this is resolved.
+⚠ **The failure also wedges the volume permanently.** After the aborted restore, PGDATA
+holds partial files but no `PG_VERSION`/`pg_control`. The restore gate tests only those
+two, so it retries and fails forever; `initdb` sees a non-empty directory and refuses
+(`directory ... exists but is not empty`). Neither path can proceed — infinite crash
+loop. Recover by pointing `PGDATA` at a *fresh* subdirectory rather than deleting.
 
-**Open next step:** run `pgbackrest restore` manually as **root** in a throwaway
-container. If that succeeds, the backups are good and only the image's non-root
-restore path is broken — which yields a documented manual recovery procedure and an
-upstream bug report for `railwayapp-templates/postgres-ssl`.
+### Manual PITR recovery procedure (the one that works)
+
+1. New service, image `ghcr.io/railwayapp-templates/postgres-ssl:16.14`, fresh volume at
+   exactly `/var/lib/postgresql/data`. Set `PGDATA` to a subdirectory of it.
+2. Set `WAL_RECOVER_FROM_BUCKET` / `_ENDPOINT` / `_REGION` / `_KEY` / `_SECRET`, plus
+   **`_S3_URI_STYLE=host`** and **`_PATH=/pgbackrest/cluster-<system-id>`** (the cluster
+   anchor — the `/pgbackrest` default will not find the repo; read it from
+   `pgbackrest info` or the `.pgbackrest_repo_path` marker).
+3. Set **no** `WAL_ARCHIVE_*` — that absence is what stops the fork archiving into
+   production's repo. And leave `POSTGRES_RECOVERY_TARGET_TIME` **unset**, so the
+   container boots instead of crash-looping on the broken automatic path.
+4. `railway ssh` in (the container runs as root). Write a pgbackrest config from the
+   `WAL_RECOVER_FROM_*` env vars, then `chown postgres:postgres` + `chmod 0600` it —
+   `restore_command` runs as `postgres` and cannot read a root-owned config
+   (`ERROR: [041]: unable to open file ... Permission denied`).
+5. As **root**, into a fresh empty path:
+   `pgbackrest --config=<conf> --stanza=main --pg1-path=<new> --recovery-option=restore_command="pgbackrest --config=<conf> --stanza=main archive-get %f %p" restore --type=time --target="<ts>" --target-action=promote`
+6. `gosu postgres pg_ctl -D <new> -o "-p 5433" start`. Replay fetches WAL from S3 and
+   promotes; allow several minutes. `pg_ctl -w` can outlast an SSH session — it
+   daemonizes, so reconnect and poll `select pg_is_in_recovery()` until `f`.
+7. Verify before trusting it, then repoint applications.
+
+**Upstream:** worth filing against `railwayapp-templates/postgres-ssl` — automated PITR
+restore cannot succeed on a Railway volume as shipped.
 
 ---
 
