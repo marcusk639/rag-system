@@ -1,10 +1,18 @@
-# Pilot — Launch Status (current source of truth)
+# Pilot — Launch Status
+
+> ⛔ **Stale as of 2026-09-02 — this is no longer the source of truth for index
+> state.** The "index is EMPTY / do not re-sync" banner below describes
+> **2026-08-04** and has since been overtaken: the Knowledge Base source was
+> synced again on 2026-09-01, and a purge plus full re-sync is the operation
+> currently in flight. Read [`HANDOFF-2026-09-02.md`](./HANDOFF-2026-09-02.md)
+> **before** acting on anything in this file. The gate analysis and the P0 table
+> below remain useful; the corpus-state claims do not.
 
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
 material confirmed in the index); gate #3 is **partially closed**, not closed.
 Engineering table last verified 2026-07-16.
 
-> ✅ **Read first (updated 2026-08-04) — the index is EMPTY, by design.**
+> ✅ **Read first (updated 2026-08-04, superseded — see above) — the index is EMPTY, by design.**
 >
 > The entire indexed corpus (858 documents / ~6,175 chunks) was **deliberately
 > purged on 2026-08-03** because it contained TRI. Production now holds **0
