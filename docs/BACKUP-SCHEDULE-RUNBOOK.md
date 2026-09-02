@@ -52,7 +52,7 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 | Railway **volume backups**          | Corruption, bad migration, accidental delete | ✅ **Enabled 2026-08-01** (Daily + Weekly) |
 | Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC     |
 | Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent    |
-| pgBackRest WAL archiving (PITR)     | Sub-hour RPO on non-re-derivable tables      | ⬜ **Available, unused** — see below       |
+| pgBackRest WAL archiving (PITR)     | Point-in-time rewind; ~60s RPO               | ✅ **LIVE 2026-09-02** — see below         |
 | Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                   |
 | Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                     |
 | Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                            |
@@ -73,24 +73,51 @@ the private key trades a disclosure risk for a total-loss risk, and a key on a
 workstation is not a key that survives the disaster it guards against. **Revisit
 encryption as part of the SharePoint cutover**, when a real key home exists.
 
-⬜ **New since 2026-09-02: pgBackRest is now in the image.** `rag-postgres` was
-moved from `pgvector/pgvector:pg16` to Railway's official
-`ghcr.io/railwayapp-templates/postgres-ssl:16.14`, which bundles pgBackRest for
-continuous WAL archiving and point-in-time recovery. It is **off**: the
-entrypoint's backup watcher returns early while `WAL_ARCHIVE_BUCKET` is unset.
+✅ **pgBackRest WAL archiving — LIVE since 2026-09-02.** `rag-postgres` runs
+Railway's `ghcr.io/railwayapp-templates/postgres-ssl:16.14`, which bundles
+pgBackRest. Archiving is enabled and verified:
 
-Why it matters here: the nightly `pg_dump` leaves up to 24 hours of `audit_log`,
-`answer_feedback`, `staff_source_assignments`, and `client_assignments` — the
-four rows marked *not* re-derivable above — exposed to loss. WAL archiving takes
-that window to minutes, and it is a variable away rather than a build.
+| | |
+| --- | --- |
+| Destination | Railway bucket `rag-documents` (real S3 name `rag-documents-yivrrpkniny`), prefix `/pgbackrest/cluster-7652162958315024418` |
+| Endpoint | `https://t3.storageapi.dev` (Tigris), region `auto`, virtual-host URI style |
+| First full backup | `20260902-191553F` — 114.9 MB logical, **52.8 MB** in-repo (zstd-3), 1,873 files, 14s |
+| Schedule | watcher polls 60s; full every 7d, differential every 24h |
+| Retention | 4 fulls, 14 diffs (`WAL_BACKUP_RETENTION_FULL` / `_DIFF` defaults) |
+| RPO | `archive_mode=on`, `archive_timeout=60` → **~60 seconds** |
 
-What it does **not** fix: pointed at the Railway `rag-documents` bucket it stays
-single-provider, so it does nothing for the "project / account / provider loss"
-row. Pointed at **external S3** it improves both RPO and decorrelation — and
-that route needs neither SharePoint nor Chris's admin consent, which may make it
-a faster path to closing the open half of P0 gate #3 than waiting. **The
-external-vs-Railway bucket choice is the decision to make first**; everything
-else about enabling it follows from it.
+Config lives in six variables on `rag-postgres`: `WAL_ARCHIVE_BUCKET`,
+`WAL_ARCHIVE_ENDPOINT`, `WAL_ARCHIVE_REGION`, `WAL_ARCHIVE_S3_URI_STYLE`,
+`WAL_ARCHIVE_KEY`, `WAL_ARCHIVE_SECRET`. `WAL_ARCHIVE_PATH` is left at its
+`/pgbackrest` default, which keeps it clear of the KB documents and the nightly
+`backups/` prefix in the same bucket.
+
+⚠ **Two dependencies that are easy to break.**
+
+1. pgBackRest connects as `pg1-user=${PGUSER:-postgres}` / `pg1-database=${PGDATABASE:-postgres}`.
+   This deployment's superuser is `rag`, so it only works because a separate
+   `postgres` superuser role exists. **Dropping that role silently disables
+   backups** — the database keeps serving traffic.
+2. `WAL_ARCHIVE_BUCKET` must be the S3 bucket name, not the Railway bucket ID.
+   The entrypoint refuses UUID-shaped names outright (`uuid-shape`, override
+   `WAL_ARCHIVE_BUCKET_ALLOW_UUID=1`) precisely to catch that mix-up.
+
+**What this does and does not cover.** It closes the *rewind* gap: an
+irreversible mistake — a bad migration, or a source deletion cascading through
+`documents.source_id ON DELETE CASCADE` — is now recoverable to a chosen second
+rather than only to the previous 08:00 UTC dump. It does **not** decorrelate:
+the bucket lives in the same Railway project as the database, so project
+deletion or account loss still takes both. The off-Railway row above remains
+open. (Mild mitigation: the bucket is Tigris-backed, not Railway compute, so a
+Railway *infrastructure* failure is not automatically a bucket failure.)
+
+**Keep the nightly `pg_dump`.** It is a logically independent, format-independent
+second layer — pgBackRest failures and `pg_dump` failures do not correlate, and a
+plain SQL dump is restorable without pgBackRest present.
+
+**Not yet proven:** a restore *from pgBackRest*. `BACKUP-RESTORE-DRILL.md` proves
+the `pg_dump` path only. A PITR drill (`WAL_RECOVER_FROM_*` +
+`POSTGRES_RECOVERY_TARGET_TIME` on a throwaway fork) is still outstanding.
 
 ---
 

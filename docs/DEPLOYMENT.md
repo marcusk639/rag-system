@@ -58,8 +58,12 @@ Any Postgres 14+ with `pgvector` enabled works. Confirmed on:
   official Postgres image. Bundles pgvector (`postgresql-16-pgvector`), generates a self-signed cert on
   first boot (`ssl = on`), and ships pgBackRest for WAL archiving / point-in-time recovery. It hard-requires
   the volume mounted at exactly `/var/lib/postgresql/data` with `PGDATA=/var/lib/postgresql/data/pgdata` —
-  the entrypoint exits non-zero otherwise. pgBackRest is **opt-in and currently off**: the backup watcher
-  returns early unless `WAL_ARCHIVE_BUCKET` is set. See `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
+  the entrypoint exits non-zero otherwise. pgBackRest WAL archiving is
+  **enabled as of 2026-09-02** (six `WAL_ARCHIVE_*` variables on `rag-postgres`, targeting the
+  `rag-documents` bucket; `archive_mode=on`, `archive_timeout=60`). It is gated on `WAL_ARCHIVE_BUCKET` —
+  unset that and the watcher returns early, silently. Note pgBackRest connects as
+  `pg1-user=${PGUSER:-postgres}`, so the `postgres` superuser role must exist even though the application
+  role is `rag`. See `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
 
 After provisioning, run:
 
