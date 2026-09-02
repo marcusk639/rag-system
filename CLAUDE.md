@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠ Work in progress — read before touching production
+
+`docs/HANDOFF-2026-09-02.md` is the current source of truth for work in progress.
+It records an in-flight operation (a full re-sync of the SharePoint knowledge
+base) that was deliberately stopped one step short, the deployment facts needed to
+resume it safely, the machine-migration state (secrets, unpushed commits, retained
+corpus data), and two live threads unrelated to the re-sync. Read it before
+running a sync, a purge, or anything against the Railway deployment.
+
+Note that `docs/PILOT-LAUNCH-STATUS.md` is **stale** on index state and says the
+opposite; the handoff supersedes it.
+
+Delete this section and that file once the re-sync is complete and the migration
+is finished.
+
 ## What this repo is
 
 A generic Retrieval-Augmented Generation (RAG) service. The mental model:
