@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠ Work in progress — read before touching production
+
+`docs/HANDOFF-2026-09-02.md` records the state of an in-flight operation (a full
+re-sync of the SharePoint knowledge base) that was deliberately stopped one step
+short, plus the deployment facts needed to resume it safely. Read it before
+running a sync, a purge, or anything against the Railway deployment.
+
+Delete this section and that file once the re-sync is complete.
+
 ## What this repo is
 
 A generic Retrieval-Augmented Generation (RAG) service. The mental model:
