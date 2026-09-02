@@ -49,6 +49,26 @@ Port is bound to `127.0.0.1` (good), but `POST /parse` accepted arbitrary binari
 
 ## 2. High
 
+### 🟠 CI1 — The `parser` CI job exhausts runner disk; `main` is red for every PR `[found 2026-09-02]`
+
+`services/parser-py/requirements.txt:14` declares
+`unstructured[local-inference]==0.16.11`, whose extra pulls the layout-detection
+vision stack, and with it `torch`'s **GPU** wheel — nineteen `nvidia-*` /
+`cuda-*` / `triton` packages that nothing in this system can use, on CPU-only
+runners. `pip install` now dies with `[Errno 28] No space left on device`,
+failing both the `parser` job and — via `pnpm test` recursing into `@rag/e2e` —
+the `quality` job.
+
+**Why it's High rather than Medium:** it is latent on `main`, not branch-local. It
+appeared with no commit (transitive ML deps are unpinned, so upstream releases
+change the build), and it blocks every future PR until fixed.
+
+**Full analysis, options, and recommendation:**
+[`CI-PARSER-DISK-EXHAUSTION.md`](./CI-PARSER-DISK-EXHAUSTION.md). Short version —
+install CPU-only torch (largest and safest win), filter e2e out of the `quality`
+job (unrelated cheap correctness: that job's own comment calls it "infra-free"),
+then pin the transitive deps to make the build reproducible again.
+
 ### 🔴 C3 — `run-real-eval.ts` truncates the database; a gold-set runner must not be copied from it
 
 **Raised 2026-08-01.** `tests/e2e/src/eval/run-real-eval.ts:108` calls
