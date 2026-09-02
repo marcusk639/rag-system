@@ -52,6 +52,7 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 | Railway **volume backups**          | Corruption, bad migration, accidental delete | ✅ **Enabled 2026-08-01** (Daily + Weekly) |
 | Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC     |
 | Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent    |
+| pgBackRest WAL archiving (PITR)     | Sub-hour RPO on non-re-derivable tables      | ⬜ **Available, unused** — see below       |
 | Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                   |
 | Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                     |
 | Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                            |
@@ -71,6 +72,25 @@ new exposure is the `audit_log`. Encryption without a firm-controlled home for
 the private key trades a disclosure risk for a total-loss risk, and a key on a
 workstation is not a key that survives the disaster it guards against. **Revisit
 encryption as part of the SharePoint cutover**, when a real key home exists.
+
+⬜ **New since 2026-09-02: pgBackRest is now in the image.** `rag-postgres` was
+moved from `pgvector/pgvector:pg16` to Railway's official
+`ghcr.io/railwayapp-templates/postgres-ssl:16.14`, which bundles pgBackRest for
+continuous WAL archiving and point-in-time recovery. It is **off**: the
+entrypoint's backup watcher returns early while `WAL_ARCHIVE_BUCKET` is unset.
+
+Why it matters here: the nightly `pg_dump` leaves up to 24 hours of `audit_log`,
+`answer_feedback`, `staff_source_assignments`, and `client_assignments` — the
+four rows marked *not* re-derivable above — exposed to loss. WAL archiving takes
+that window to minutes, and it is a variable away rather than a build.
+
+What it does **not** fix: pointed at the Railway `rag-documents` bucket it stays
+single-provider, so it does nothing for the "project / account / provider loss"
+row. Pointed at **external S3** it improves both RPO and decorrelation — and
+that route needs neither SharePoint nor Chris's admin consent, which may make it
+a faster path to closing the open half of P0 gate #3 than waiting. **The
+external-vs-Railway bucket choice is the decision to make first**; everything
+else about enabling it follows from it.
 
 ---
 

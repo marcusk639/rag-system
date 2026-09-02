@@ -348,7 +348,10 @@ If production is ever lost, the sequence is:
 1. Retrieve the most recent `backup-YYYY-MM-DD.sql.gz`.
 2. Provision a Postgres **with the pgvector extension available**
    (`pgvector/pgvector:pg16` — a stock Postgres image will fail on
-   `CREATE EXTENSION vector`).
+   `CREATE EXTENSION vector`). To match production exactly, use
+   `ghcr.io/railwayapp-templates/postgres-ssl:16.14` instead — that is what
+   `rag-postgres` runs as of 2026-09-02, and its pgvector is 0.8.6. Either works
+   for a drill; the dump does not pin an extension version.
 3. Restore with `ON_ERROR_STOP=1` so a partial restore fails loudly rather than
    leaving a half-populated database.
 4. Run the four verification queries above **before** pointing any service at it.
