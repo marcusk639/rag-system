@@ -1,6 +1,11 @@
 # CI: the `parser` job exhausts runner disk
 
-**Status:** 🟠 open, unfixed. **Blocks every PR**, not just the one that found it.
+**Status:** ✅ **resolved 2026-09-02** by PR #52, which pinned the CPU torch
+wheels (option 1 below — 192 MB against 527 MB plus several GB of `nvidia-*`).
+`main` is green again at `ae563da`. The recommendation stands for the parts still
+undone: option 2 (filter e2e out of `quality`) and option 4 (pin the transitive
+ML deps, which is what makes the build reproducible) are **not** done, so the
+same class of breakage can recur without a commit.
 **Found:** 2026-09-02, on PR #50 (a docs-only change).
 **Merged over:** yes — PR #50 was merged with this red. Reasoning in [§7](#7-why-pr-50-was-merged-with-this-red).
 
