@@ -1,3 +1,4 @@
+import { isPostgresTlsActive } from "./postgres-tls.js";
 export { initMonitoring, captureException } from "./monitoring.js";
 
 import {
@@ -140,18 +141,17 @@ export async function buildCoreDeps(
   config: Config,
   logger: Logger,
 ): Promise<CoreDeps> {
-  const urlHasTls = /sslmode=(require|verify-ca|verify-full)/.test(
-    config.databaseUrl,
-  );
-  const tlsActive = config.databaseSsl
-    ? config.databaseSsl !== "disable"
-    : urlHasTls;
-  if (config.environment === "production" && !tlsActive) {
+  if (
+    config.environment === "production" &&
+    !isPostgresTlsActive(config.databaseSsl, config.databaseUrl)
+  ) {
     logger.warn(
       "Postgres connection has no TLS in production: DATABASE_SSL is unset/disable " +
-        "and DATABASE_URL has no sslmode=require. DB traffic may be unencrypted. " +
-        "Set DATABASE_SSL=require (or no-verify for managed certs), or add " +
-        "?sslmode=require to DATABASE_URL for pool+pg-boss+migration coverage.",
+        "and DATABASE_URL has no sslmode. DB traffic may be unencrypted. " +
+        "Add ?sslmode=no-verify to DATABASE_URL for pool+pg-boss+migration " +
+        "coverage. Do NOT use sslmode=require against a self-signed server cert " +
+        "(Railway's postgres-ssl image): pg-connection-string treats it as " +
+        "verify-full and the connection fails instead of encrypting.",
     );
   }
   const { db, close: closeDb } = createDb(config.databaseUrl, {

@@ -18,8 +18,12 @@ export const Config = z
      * Optional TLS mode for the app's Postgres connection pool, from
      * DATABASE_SSL: "require" (verify cert), "no-verify" (TLS, skip verify),
      * "disable"/unset (no explicit TLS on the pool). For uniform coverage
-     * (pool + pg-boss + migrations) prefer `?sslmode=require` in DATABASE_URL;
+     * (pool + pg-boss + migrations) prefer an `?sslmode=` in DATABASE_URL;
      * this field only configures the main app pool.
+     *
+     * ⚠ Against a self-signed server cert use `no-verify`, not `require`:
+     * pg-connection-string >= 2.10 aliases `require` to `verify-full`, which
+     * fails the connection instead of encrypting it.
      */
     databaseSsl: z.enum(["disable", "require", "no-verify"]).optional(),
 
@@ -642,7 +646,7 @@ export function loadConfig(
     },
     api: {
       host: env.API_HOST,
-      port: Number(env.API_PORT ?? 3000),
+      port: Number(env.API_PORT ?? env.PORT ?? 3000),
       tokens: parseMultiValueSecret(env.API_TOKENS ?? ""),
       // Throws loudly on malformed API_PRINCIPALS so a misconfig is caught at
       // startup rather than silently re-opening the corpus-wide read.
@@ -651,7 +655,7 @@ export function loadConfig(
     },
     mcp: {
       transport: env.MCP_TRANSPORT,
-      httpPort: Number(env.MCP_HTTP_PORT ?? 3001),
+      httpPort: Number(env.MCP_HTTP_PORT ?? env.PORT ?? 3001),
     },
     auth: {
       ...buildAuthConfig(env),

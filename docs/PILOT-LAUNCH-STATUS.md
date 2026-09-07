@@ -1,12 +1,19 @@
 # Pilot — Launch Status
 
-> ⛔ **Stale as of 2026-09-02 — this is no longer the source of truth for index
-> state.** The "index is EMPTY / do not re-sync" banner below describes
-> **2026-08-04** and has since been overtaken: the Knowledge Base source was
-> synced again on 2026-09-01, and a purge plus full re-sync is the operation
-> currently in flight. Read [`HANDOFF-2026-09-02.md`](./HANDOFF-2026-09-02.md)
-> **before** acting on anything in this file. The gate analysis and the P0 table
-> below remain useful; the corpus-state claims do not.
+> ⛔ **Corpus-state claims below are stale (they describe 2026-08-04).** The
+> purge-and-re-sync is **complete**: the index now holds **47 documents / 210
+> chunks**, all Class A, all `gemini-embedding-001`, with search and ask verified
+> working (queried 2026-09-07 — full evidence in
+> [`HANDOFF-2026-09-02.md`](./HANDOFF-2026-09-02.md) §0). The gate analysis and
+> the P0 table below remain useful; the "index is EMPTY" banner does not.
+>
+> **What this changes for the pilot.** P0 gate #1 — the content audit — was an
+> 858-document slog against a corpus known to contain TRI. It is now **47
+> documents, every one of them already screened by the TRI scanner and classed
+> A**, with the 8 that carried identifier patterns flagged or blocked at ingest.
+> The audit is a short review of a short list, and it is still the real gate:
+> the scanner catches identifier *patterns*, not client-confidential *content*,
+> which remains a firm-domain judgment for Chris/Doug.
 
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
 material confirmed in the index); gate #3 is **partially closed**, not closed.

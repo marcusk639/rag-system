@@ -389,3 +389,28 @@ describe("loadConfig — WORKER_SCANNER_PACK_DIR", () => {
     ).toThrow();
   });
 });
+
+describe("loadConfig — platform PORT fallback", () => {
+  it("prefers API_PORT / MCP_HTTP_PORT when set", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      API_PORT: "8080",
+      MCP_HTTP_PORT: "8080",
+      PORT: "9999",
+    });
+    expect(cfg.api.port).toBe(8080);
+    expect(cfg.mcp.httpPort).toBe(8080);
+  });
+
+  it("falls back to the platform-injected PORT", () => {
+    const cfg = loadConfig({ ...BASE_ENV, PORT: "8080" });
+    expect(cfg.api.port).toBe(8080);
+    expect(cfg.mcp.httpPort).toBe(8080);
+  });
+
+  it("falls back to the historical defaults when neither is set", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.api.port).toBe(3000);
+    expect(cfg.mcp.httpPort).toBe(3001);
+  });
+});
