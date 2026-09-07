@@ -163,7 +163,8 @@ guard, H3 dim-guard, C2 parser shared-secret). **Acceptance:** adoption-plan Pha
 - **At rest (CR-6):** enable Postgres encryption (managed-service TDE or disk-level); app-level
   AES-256-GCM on `chat_messages.content` (per `AUTH-AND-SESSIONS-RESEARCH.md` Part 2). Key in env→KMS.
 - **In transit (CR-7):** enforce TLS 1.2+ on every hop (connectors→parser→DB→API→channels→generation);
-  `sslmode=require` on Postgres; CI check rejecting plaintext HTTP on data endpoints.
+  `sslmode=no-verify` on Postgres (not `require` — it aliases to `verify-full` and fails against
+  Railway's self-signed cert); CI check rejecting plaintext HTTP on data endpoints.
 - **MFA (CR-8):** PropelAuth/IdP MFA on the web UI; Entra conditional-access MFA for Teams; MFA on
   DB/admin and CI secrets. No in-office exception (Pub 5708 2024).
 - **Acceptance:**
@@ -246,7 +247,9 @@ Execute **adoption-plan Phase 9**, plus the full-compliance final check below.
 - [ ] `pnpm typecheck && pnpm test && pnpm eval` green; eval meets the Phase F bar.
 - [ ] **TRI-egress-zero:** automated test proves embeddings run locally and no external call carries TRI (CR-1).
 - [ ] `grep -rn "enforcedSourceIds" apps/api apps/mcp` — ACL on every retrieval path; empty scope = deny (CR-5).
-- [ ] Encryption at rest + TLS 1.2+ verified; MFA on every human entry (CR-6/7/8).
+- [ ] Encryption at rest + TLS 1.2+ confirmed on every hop; MFA on every human entry (CR-6/7/8).
+      ("Confirmed" = the transport is TLS. The Postgres hop uses `sslmode=no-verify`, which does
+      **not** validate the server certificate — see `docs/PLAN-CPA-COMPLIANCE.md` Phase 3.)
 - [ ] Every answer carries a non-dismissible disclaimer; tax-position outputs gated by CPA review (CR-13/14).
 - [ ] `purgeByPrincipal` removes chunks + vectors; retention job runs; audit logs land off-host (CR-18/10).
 - [ ] WISP names the system + QI; breach runbook + tabletop done; vendor register + DPAs on file (CR-12/11/16/9).

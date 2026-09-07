@@ -247,7 +247,11 @@ per-message `tokenCount` (no re-tokenizing per request). Pipeline:
 - **Purge:** `purgeSession(id)` and `purgeByPrincipal(channel, externalUserId)` null content, set
   `purgedAt`, write an audit row — all in one transaction. Nightly pg-boss sweep for retention
   windows (e.g., 7y for engagement records, 90d for ephemeral threads).
-- **Encryption:** layer it — cloud full-disk (free baseline) + `sslmode=require` in transit +
+- **Encryption:** layer it — cloud full-disk (free baseline) + `sslmode=no-verify` in transit (not
+  `require`: `pg-connection-string` >= 2.10 aliases that to `verify-full`, which fails against
+  Railway's self-signed cert. Note `no-verify` encrypts but does **not** validate the server
+  certificate, so it does not defend against an on-path attacker — see
+  `docs/PLAN-CPA-COMPLIANCE.md` Phase 3) +
   **application-level AES-256-GCM on `chat_messages.content`** (key in env→KMS; keeps plaintext out
   of the DB process; schema stays `text`). Skip `pgcrypto` unless a specific DB-admin threat model
   demands it.

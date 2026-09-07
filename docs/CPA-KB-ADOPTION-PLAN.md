@@ -317,7 +317,7 @@ encryption/RLS and the non-developer operator experience (Marcus operates this).
 
 1. **P3 (decision, then code):** confirm a data-processing agreement with the embedding/LLM provider **or** switch to self-hosted embeddings before client tax data flows out. Record the decision in `docs/`.
 2. **P4 (deletion/retention):** `DELETE /sources/:id` + `purgeSource` (documents + chunks + jobs); plus the Phase 5 `purgeSession`/`purgeByPrincipal` for transcripts. Nightly pg-boss retention sweep. Documented retention policy.
-3. **Transcript protection** (research Part 2): application-level **AES-256-GCM on `chat_messages.content`** (key in env→KMS), `sslmode=require`, cloud full-disk encryption baseline, and **RLS** on `chat_sessions`/`chat_messages` keyed to `(channel, external_user_id)`.
+3. **Transcript protection** (research Part 2): application-level **AES-256-GCM on `chat_messages.content`** (key in env→KMS), `sslmode=no-verify` (not `require`, and it does not authenticate the server — see `docs/PLAN-CPA-COMPLIANCE.md` Phase 3), cloud full-disk encryption baseline, and **RLS** on `chat_sessions`/`chat_messages` keyed to `(channel, external_user_id)`.
 4. **OPT-E (operator UX):** config validation + "test connection" before first sync; an ingestion status view (`GET /sources/:id/status`); per-source credentials if onboarding multiple client tenants (`OPT-E4`).
 
 ### Documentation references
