@@ -301,8 +301,11 @@ provider-managed encryption over building custom crypto.
    than building app-level AES-256-GCM from scratch, unless the confirmation comes back negative.
 2. If confirmation is negative or ambiguous, evaluate migrating to a provider with encryption
    at rest documented by default, or add an encrypted volume at the infra layer.
-3. Set `DATABASE_SSL=require` (or `no-verify` if the managed provider's cert chain needs it) —
-   currently unset/optional (`packages/core/src/config.ts:18-24`) — explicitly in production env.
+3. Add `?sslmode=no-verify` to the production `DATABASE_URL` — this covers the pool, pg-boss and
+   migrations, whereas the `DATABASE_SSL` flag (`packages/core/src/config.ts:18-24`) only configures
+   the app pool. Do **not** use `sslmode=require`: `pg-connection-string` >= 2.10 aliases it to
+   `verify-full`, which fails outright against the self-signed cert Railway's `postgres-ssl` image
+   serves, rather than encrypting.
 4. Add a startup validation (alongside the existing `PARSER_SECRET` fail-loud pattern,
    `config.ts:228-237`) that rejects `http://` URLs for any external service config
    (`PARSER_URL`, API base URLs, etc.) when `NODE_ENV=production`.
@@ -310,8 +313,9 @@ provider-managed encryption over building custom crypto.
 ### Verification checklist
 
 - [ ] Written confirmation on file that the Postgres volume is encrypted at rest
-- [ ] `DATABASE_SSL=require` set in production; connection actually negotiates TLS (verify via pg
-      connection logs or `sslmode` confirmation)
+- [ ] `?sslmode=no-verify` set on the production `DATABASE_URL`; connection actually negotiates TLS
+      (verify with `pg_stat_ssl` joined to `pg_stat_activity`, not by trusting the variable — setting
+      a Railway variable does not reliably restart the service)
 - [ ] Startup fails loudly if a production `http://` URL is configured (new test)
 - [ ] `testssl` scan of all public endpoints shows no plaintext HTTP
 

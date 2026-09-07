@@ -247,7 +247,7 @@ per-message `tokenCount` (no re-tokenizing per request). Pipeline:
 - **Purge:** `purgeSession(id)` and `purgeByPrincipal(channel, externalUserId)` null content, set
   `purgedAt`, write an audit row — all in one transaction. Nightly pg-boss sweep for retention
   windows (e.g., 7y for engagement records, 90d for ephemeral threads).
-- **Encryption:** layer it — cloud full-disk (free baseline) + `sslmode=require` in transit +
+- **Encryption:** layer it — cloud full-disk (free baseline) + `sslmode=no-verify` in transit +
   **application-level AES-256-GCM on `chat_messages.content`** (key in env→KMS; keeps plaintext out
   of the DB process; schema stays `text`). Skip `pgcrypto` unless a specific DB-admin threat model
   demands it.
