@@ -187,7 +187,7 @@ export const Config = z
 
     generation: z
       .object({
-        provider: z.enum(["gemini", "openai"]).default("gemini"),
+        provider: z.enum(["gemini", "openai", "claude"]).default("gemini"),
         model: z.string().default("gemini-2.5-flash"),
         /**
          * Upper bound on generated answer length. Generous by default so
@@ -691,7 +691,7 @@ export function loadConfig(
     generation:
       env.GENERATION_PROVIDER && env.GENERATION_MODEL
         ? {
-            provider: env.GENERATION_PROVIDER as "gemini" | "openai",
+            provider: env.GENERATION_PROVIDER as "gemini" | "openai" | "claude",
             model: env.GENERATION_MODEL,
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)

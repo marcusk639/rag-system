@@ -211,6 +211,11 @@ export async function buildCoreDeps(
       generationApiKey: config.generation.apiKey,
       embeddingApiKey: config.embedding.apiKey,
       baseURL: config.generation.baseURL,
+      // Both supplied so key inheritance is gated on the vendors matching —
+      // without them a `claude` deployment would inherit the Gemini/OpenAI
+      // embedding key and mail it to Anthropic.
+      generationProvider: config.generation.provider,
+      embeddingProvider: config.embedding.provider,
     });
     if (credentials.kind === "disabled") {
       logger.warn(
