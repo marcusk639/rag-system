@@ -642,7 +642,7 @@ export function loadConfig(
     },
     api: {
       host: env.API_HOST,
-      port: Number(env.API_PORT ?? 3000),
+      port: Number(env.API_PORT ?? env.PORT ?? 3000),
       tokens: parseMultiValueSecret(env.API_TOKENS ?? ""),
       // Throws loudly on malformed API_PRINCIPALS so a misconfig is caught at
       // startup rather than silently re-opening the corpus-wide read.
@@ -651,7 +651,7 @@ export function loadConfig(
     },
     mcp: {
       transport: env.MCP_TRANSPORT,
-      httpPort: Number(env.MCP_HTTP_PORT ?? 3001),
+      httpPort: Number(env.MCP_HTTP_PORT ?? env.PORT ?? 3001),
     },
     auth: {
       ...buildAuthConfig(env),

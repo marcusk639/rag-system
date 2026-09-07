@@ -120,9 +120,39 @@ Both apps already have `Dockerfile` + `railway.json` (healthcheck `/api/health` 
 Env vars: `AUTH_ENTRA_CLIENT_ID`, `AUTH_ENTRA_CLIENT_SECRET`, `AUTH_ENTRA_TENANT_ID`, `AUTH_SECRET`, `RAG_ADMINS_GROUP_ID`, `INTERNAL_SCOPE_JWT_SECRET`, `RAG_API_URL` (the internal api URL), `DATABASE_URL`, `DATABASE_SSL`. Leave `WEB_AUTH_MODE` unset (defaults to Entra; `static-fallback` is the emergency bypass only).
 After deploy, note the domain and go back to §2 step 1 to set the redirect URI.
 
+> ✅ **Already done (2026-08-01).** `rag-web` is live at
+> `https://rag-web-production-1c0a.up.railway.app` against app registration
+> `c885331a-8e73-47c0-9dff-263756a81942`. This section is kept for a rebuild;
+> skip it on the Teams go-live pass.
+
 ### 6b. `rag-teams-bot` service
 
-Env vars: `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`, `MICROSOFT_APP_TENANT_ID`, `BOT_ENTRA_SSO_SCOPE`, `BOT_OAUTH_CONNECTION_NAME`, `INTERNAL_SCOPE_JWT_SECRET` (same as web/api), `RAG_API_URL`, `DATABASE_URL`, `DATABASE_SSL`, `PORT=3978`.
+Env vars: `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`, `MICROSOFT_APP_TENANT_ID`, `BOT_ENTRA_SSO_SCOPE`, `BOT_OAUTH_CONNECTION_NAME`, `INTERNAL_SCOPE_JWT_SECRET` (same as web/api), `RAG_API_URL`, `DATABASE_URL`, `DATABASE_SSL`.
+
+> ⚠ **Do NOT set `PORT`.** Railway injects `PORT=8080` and its V2 healthcheck
+> probes that port. The bot reads `PORT` natively (`apps/teams-bot/src/config.ts`),
+> so leaving it unset makes app, healthcheck, and domain agree. Pinning
+> `PORT=3978` means also retargeting the domain (`railway domain update … --port 3978`)
+> — the exact mismatch that failed `rag-api`'s healthcheck on 2026-08-01.
+> (`rag-api`/`rag-mcp` keep their explicit `API_PORT`/`MCP_HTTP_PORT=8080`;
+> `packages/core/src/config.ts` now falls back to `PORT` so a new service needs
+> no per-service magic number.)
+
+Once the §3/§4 Azure values exist, the whole service is one pass:
+
+```bash
+railway add --service rag-teams-bot
+railway variables --service rag-teams-bot \
+  --set MICROSOFT_APP_ID=... --set MICROSOFT_APP_PASSWORD=... \
+  --set MICROSOFT_APP_TENANT_ID=... --set BOT_ENTRA_SSO_SCOPE=... \
+  --set BOT_OAUTH_CONNECTION_NAME=... \
+  --set INTERNAL_SCOPE_JWT_SECRET="$(railway variables --service rag-api --kv | grep '^INTERNAL_SCOPE_JWT_SECRET=' | cut -d= -f2-)" \
+  --set RAG_API_URL=http://rag-api.railway.internal:8080 \
+  --set DATABASE_URL="$(railway variables --service rag-api --kv | grep '^DATABASE_URL=' | cut -d= -f2-)"
+railway up --service rag-teams-bot
+railway domain --service rag-teams-bot
+```
+
 After deploy, note the domain and go back to §3 step 3 to set the Azure Bot **messaging endpoint** to `https://<domain>/api/messages`.
 
 > The bot uses `MemoryStorage` for the SSO exchange dedupe/stash — keep it **single-instance** (1 replica). This is fine for a firm-scale pilot; multi-replica would need a shared store.
@@ -133,8 +163,23 @@ After deploy, note the domain and go back to §3 step 3 to set the Azure Bot **m
 
 The Teams app manifest lives at `apps/teams-bot/manifest/manifest.json` with `${...}` placeholders (see `apps/teams-bot/manifest/README.md`).
 
-1. Fill the placeholders: `MICROSOFT_APP_ID` (bot id + `webApplicationInfo.id`), `BOT_ENTRA_SSO_SCOPE` (`webApplicationInfo.resource`), your bot/company name, and real icon files (replace the placeholder `color.png` 192×192 and `outline.png` 32×32 with real branding — this is the one bit of design work).
-2. Zip `manifest.json` + the two icons into a Teams app package.
+1. Replace the placeholder icons with real branding — `color.png` 192×192 and
+   `outline.png` 32×32, transparent background. This is the one bit of design work.
+2. Build the package. **Do not hand-edit the manifest** — the builder substitutes
+   every placeholder and refuses ids that are well-formed but wrong (a `botid-`
+   prefix on the app id, or an SSO scope belonging to a different registration —
+   both produce a bot that authenticates nobody while looking correctly configured):
+
+   ```bash
+   MICROSOFT_APP_ID=<bot app guid> \
+   BOT_ENTRA_SSO_SCOPE=api://botid-<bot app guid>/access_as_user \
+   DEVELOPER_NAME="TWK CPA Firm" \
+   DEVELOPER_WEBSITE_URL=https://... DEVELOPER_PRIVACY_URL=https://... DEVELOPER_TERMS_OF_USE_URL=https://... \
+   pnpm --filter @rag/teams-bot package
+   ```
+
+   Output: `apps/teams-bot/manifest/dist/teams-app-<version>.zip`. The three
+   developer URLs must be real and reachable — Teams validates them at upload.
 3. Teams admin center → **Teams apps → Manage apps → Upload new app** (or sideload via **Apps → Manage your apps → Upload a custom app** for a personal pilot). For a firm rollout, publish to the org's app catalog.
 4. Install it for yourself, DM it a real question, and confirm you get an answer with citations.
 

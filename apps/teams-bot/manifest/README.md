@@ -15,17 +15,32 @@ and Entra app registration are provisioned:
 
 ## Packaging (human/infra step)
 
-This is intentionally **not automated** — it happens once per environment,
-after the Azure Bot resource + Entra app registration exist, as part of the
-companion Azure deploy runbook:
+Run once per environment, after the Azure Bot resource + Entra app
+registration exist:
 
-1. Substitute every `${...}` placeholder above with the real values (e.g.
-   `envsubst < manifest.json > manifest.rendered.json`, or by hand).
-2. Zip `manifest.rendered.json` (renamed to `manifest.json`) together with
-   `color.png` and `outline.png` into a single `.zip` — no subfolders.
-3. Upload the zip via Teams Admin Center ("Manage apps" → "Upload new app")
-   or `teams app package` (Teams Toolkit CLI) for org-wide/tenant
-   deployment, or sideload it directly for testing.
+```bash
+MICROSOFT_APP_ID=<bot app guid> \
+BOT_ENTRA_SSO_SCOPE=api://botid-<bot app guid>/access_as_user \
+DEVELOPER_NAME="TWK CPA Firm" \
+DEVELOPER_WEBSITE_URL=https://... \
+DEVELOPER_PRIVACY_URL=https://... \
+DEVELOPER_TERMS_OF_USE_URL=https://... \
+pnpm --filter @rag/teams-bot package
+```
+
+Output: `manifest/dist/teams-app-<version>.zip` (manifest + both icons, no
+subfolders). Upload it via Teams Admin Center ("Manage apps" → "Upload new
+app") for org-wide deployment, or sideload it (Apps → Manage your apps →
+Upload a custom app) for testing.
+
+**Substitute by hand at your peril.** `renderManifest` (`../src/manifest.ts`)
+rejects two mistakes that Teams itself accepts and that produce a bot which
+authenticates nobody while looking correctly configured: a `botid-`-prefixed
+value in `MICROSOFT_APP_ID` (the prefix belongs only inside the scope URI),
+and a `BOT_ENTRA_SSO_SCOPE` whose GUID belongs to a different app
+registration. The observable symptom of either is a sign-in card in reply to
+every message — which points at the OAuth connection setting, not at the id
+that is actually wrong.
 
 ## Icons
 
