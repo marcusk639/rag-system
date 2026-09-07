@@ -149,66 +149,62 @@ human/infra/legal; **gate #1 is not** — see its entry.
 
 ### P0 — hard gates (internal/unapproved pilot only until done)
 
-- [x] **0. ✅ RESOLVED 2026-09-07 — the §7216 guard was refusing a third of all
-      questions; `GENERATION_TRI_POLICY=warn` is now set on `rag-api` and `rag-mcp`.**
+- [x] **0. ✅ RESOLVED 2026-09-07 — the §7216 guard was refusing a third of all questions; `GENERATION_TRI_POLICY=warn` is now set on `rag-api` and `rag-mcp`.**
 
-      **Measured before and after, same instrument
-          (`scripts/check-kb-grounding.mjs`, 51 questions):**
+  Measured before and after with the same instrument
+  (`scripts/check-kb-grounding.mjs`, 51 questions, 0 errors both runs):
 
-          | | `block` (inherited) | `warn` (chosen) |
-          | --- | --- | --- |
-          | Answered | 33/51 | **51/51** |
-          | Blocked by the guard | 18 | **0** |
-          | Self-retrieval | 29/30 (96.7%) | **43/47 (91.5%)** |
-          | Refusal on out-of-corpus | 3/3 | **4/4** |
-          | Invalid citations | 0 | 0 |
+  - Answered: **33/51 → 51/51**
+  - Blocked by the guard: **18 → 0**
+  - Self-retrieval: 29/30 (96.7%) → **43/47 (91.5%)**
+  - Refusal on out-of-corpus: 3/3 → **4/4**
+  - Invalid citations: 0 → 0
 
-          The self-retrieval *rate* fell while the result improved: 29 correct
-          retrievals became 43, because the denominator grew from 30 to 47 as
-          previously-blocked questions started counting. 96.7% was measured over a
-          filtered, easier population. Refusal stayed perfect, so the change bought
-          coverage without buying confabulation.
+  The self-retrieval _rate_ fell while the result improved: 29 correct
+  retrievals became 43, because the denominator grew from 30 to 47 as
+  previously-blocked questions started counting. 96.7% was measured over a
+  filtered, easier population. Refusal stayed perfect, so the change bought
+  coverage without buying confabulation.
 
-          **Why it was blocking.** Production never set `GENERATION_TRI_POLICY`, so
-          it inherited the `block` default — which `packages/core/src/config.ts`
-          documents as deliberate, precisely so the permissive setting must be
-          chosen by a human rather than "inherited by saying nothing".
+  **Why it was blocking.** Production never set `GENERATION_TRI_POLICY`, so it
+  inherited the `block` default — which `packages/core/src/config.ts` documents
+  as deliberate, precisely so the permissive setting must be chosen by a human
+  rather than "inherited by saying nothing".
 
-          **Only three documents carried a trigger**, found by scanning every
-          blocked document with `scanForTRI`: `Payroll - SOP - 1099 Process Master
-          Workbook` (`1099+amount`), `Admin - Template - Fee and Scope Proposal`
-          (`1099+amount`), `Tax - Checklist - Entity Preparer Checklists`
-          (`W2+amount`). The other **14 were collateral** — the guard scans the
-          assembled generation input (question + every retrieved chunk), so a
-          question about a clean document is refused when a trigger lands in its
-          top-k. Three documents, 6% of the corpus, made ~36% of questions fail.
+  **Only three documents carried a trigger**, found by scanning every blocked
+  document with `scanForTRI`: `Payroll - SOP - 1099 Process Master Workbook`
+  (`1099+amount`), `Admin - Template - Fee and Scope Proposal` (`1099+amount`),
+  and `Tax - Checklist - Entity Preparer Checklists` (`W2+amount`). The other
+  **14 were collateral** — the guard scans the assembled generation input
+  (question + every retrieved chunk), so a question about a clean document is
+  refused when a trigger lands in its top-k. Three documents, 6% of the corpus,
+  made ~36% of questions fail.
 
-          ⚠ **An earlier draft of this entry said "the guard refuses 17 of 47
-          documents."** That was wrong: the guard blocks *questions*, not documents,
-          and the blocked set was mostly bystanders. Corrected above.
+  ⚠ **An earlier draft of this entry said "the guard refuses 17 of 47
+  documents."** That was wrong: the guard blocks _questions_, not documents, and
+  the blocked set was mostly bystanders. Corrected above.
 
-          **The blocking span, in full:** `1099 for any vendors "Less than $600"` —
-          the statutory reporting threshold, inside the SOP explaining how to run
-          the firm's 1099 process. No taxpayer, no identifier, no amount belonging
-          to a person.
+  **The blocking span, in full:** `1099 for any vendors "Less than $600"` — the
+  statutory reporting threshold, inside the SOP explaining how to run the firm's
+  1099 process. No taxpayer, no identifier, no amount belonging to a person.
 
-          **What `warn` does not weaken.** `896170e` (2026-08-03) split TRI policy by
-          pattern class for exactly this case. Identifying patterns (SSN /
-          unformatted SSN / EIN) **throw regardless of policy** and are untouched;
-          that class was tightened again afterwards by `19a7542`. A sweep of all 17
-          blocked documents found **0 containing an identifying pattern**. `warn`
-          also fires `onTriDetected`, so every contextual hit is audited rather than
-          silently allowed — verified live:
-          `marker="generation.tri.warned" triPatterns=["1099+amount"]`.
+  **What `warn` does not weaken.** `896170e` (2026-08-03) split TRI policy by
+  pattern class for exactly this case. Identifying patterns (SSN / unformatted
+  SSN / EIN) **throw regardless of policy** and are untouched; that class was
+  tightened again afterwards by `19a7542`. A sweep of all 17 blocked documents
+  found **0 containing an identifying pattern**. `warn` also fires
+  `onTriDetected`, so every contextual hit is audited rather than silently
+  allowed — verified live:
+  `marker="generation.tri.warned" triPatterns=["1099+amount"]`.
 
-          ⚠ **Scope of that evidence:** the sweep scanned stored (post-redaction)
-          markdown — exactly the text the retriever chunks and the guard scans. It
-          says what can reach the model, not what is in the original SharePoint files.
+  ⚠ **Scope of that evidence:** the sweep scanned stored (post-redaction)
+  markdown — exactly the text the retriever chunks and the guard scans. It says
+  what can reach the model, not what is in the original SharePoint files.
 
-          **This is a §7216 disclosure decision**, made by the operator on
-          2026-09-07 — which is what the `block` default exists to force. To revert:
-          set `GENERATION_TRI_POLICY=block` (or unset it). `COMPLIANCE_MODE=client-data`
-          would override it to `block` upstream regardless.
+  **This is a §7216 disclosure decision**, made by the operator on 2026-09-07 —
+  which is what the `block` default exists to force. To revert: set
+  `GENERATION_TRI_POLICY=block` (or unset it). `COMPLIANCE_MODE=client-data`
+  overrides it to `block` upstream regardless.
 
 - [ ] **1. Content audit** — ⚠ **IN PROGRESS WITH A FINDING (2026-08-03), not unstarted.** The deterministic client-identifier screen has now run against all 858 documents and found client-identifying material in the index (full correction **below**, under _Fastest defensible path_). ⛔ **Remediation has not started:** Phase 1 Task 1.1 — removing the flagged roster from the index — is an unchecked box, so assume it is still retrievable through the live deployment. Beyond that, closing this gate is **not** purely human work despite this file's "none of it is code" framing: it needs connector exclude-paths, a metadata/citation fix, and an ingest-time gate. The human half is a firm reviewer ruling on the residual. `superpowers/plans/2026-08-03-kb-content-boundary.md` sizes this at ~97 documents needing genuine review once structural folder exclusion removes the rest, and supplies the review instrument. Still firm domain judgment, still Chris/Doug, still not an attorney.
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
