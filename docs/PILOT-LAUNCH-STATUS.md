@@ -149,6 +149,44 @@ human/infra/legal; **gate #1 is not** — see its entry.
 
 ### P0 — hard gates (internal/unapproved pilot only until done)
 
+- [ ] **0. ⛔ NEW 2026-09-07 — ~36% of the corpus is retrievable but unanswerable.**
+      The generation-time §7216 guard refuses **17 of 47 documents** with
+      `422 COMPLIANCE_VIOLATION — TRI detected in generation input`, and they
+      cluster in exactly the domains staff would ask about most: payroll and tax
+      (`1099 Process Master Workbook`, `Register Schedule C to File W-2s for
+      Children`, `Payroll Tax Compliance and Deadlines`, `Quarterly and Annual
+      Payroll Tax Process`, the Louisiana entity formation/dissolution SOPs).
+
+      **These are false positives.** The rule fires on `1099+amount` /
+      `W2+amount` co-occurrence, which matches procedural text about *how to
+      file* a form — "issue 1099s over $600" in a checklist. There is no
+      taxpayer in these documents and therefore no taxpayer return information;
+      every one of them passed the ingest-time scanner and is classed A. The
+      user-facing symptom is a raw 422, not a graceful message.
+
+      Measured by `scripts/check-kb-grounding.mjs` (51 questions, 0 errors).
+      Everything else in that run was healthy: **0 invalid citations** across 33
+      answers, **29/30 (96.7%)** self-retrieval, **3/3** correct refusals. The
+      retrieval and generation stack works; a third of the corpus is simply
+      walled off from it.
+
+      Four ways out, in the order I would try them — the choice is a compliance
+      judgment, not an engineering one:
+      1. **Redact the matched spans before generation** rather than refusing the
+         whole answer. The document stays useful and the pattern never reaches
+         the model.
+      2. **Tighten the pattern** to require corroborating context (a name, SSN,
+         or EIN near the form reference) instead of any nearby number.
+      3. **Drop the 17 from the index** — honest, and stops an unanswerable
+         document from crowding out an answerable one in top-k.
+      4. **Leave it, fix only the UX** — turn the 422 into "I can't answer from
+         that document for compliance reasons." Cheapest; keeps the gap.
+
+      ⚠ Do not treat this as purely cosmetic. Refusing to send "1099" + "$600"
+      from an SOP to Gemini protects nothing real, and pilot users will judge
+      the product on the third of it that answers nothing.
+
+
 - [ ] **1. Content audit** — ⚠ **IN PROGRESS WITH A FINDING (2026-08-03), not unstarted.** The deterministic client-identifier screen has now run against all 858 documents and found client-identifying material in the index (full correction **below**, under _Fastest defensible path_). ⛔ **Remediation has not started:** Phase 1 Task 1.1 — removing the flagged roster from the index — is an unchecked box, so assume it is still retrievable through the live deployment. Beyond that, closing this gate is **not** purely human work despite this file's "none of it is code" framing: it needs connector exclude-paths, a metadata/citation fix, and an ingest-time gate. The human half is a firm reviewer ruling on the residual. `superpowers/plans/2026-08-03-kb-content-boundary.md` sizes this at ~97 documents needing genuine review once structural folder exclusion removes the rest, and supplies the review instrument. Still firm domain judgment, still Chris/Doug, still not an attorney.
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
 - [ ] 🟡 **3. Backup/restore drill — HALF-OPEN.** The _restore_ leg is proven; the _backup schedule_ is a stopgap and the off-Railway destination is blocked. `BACKUP-SCHEDULE-RUNBOOK.md` states it plainly: _"a restore has been watched succeed from an artifact **nobody took by hand**… Until then P0 gate #3 is half-open, whatever the checkbox says."_ Marking this `[x]` was exactly the stale-resolved-claim pattern this file exists to prevent. Open items are enumerated once, at the end of this entry. What **is** done, 2026-07-31, both legs: Local:
