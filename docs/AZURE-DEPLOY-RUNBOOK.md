@@ -149,6 +149,15 @@ railway variables --service rag-teams-bot \
   --set INTERNAL_SCOPE_JWT_SECRET="$(railway variables --service rag-api --kv | grep '^INTERNAL_SCOPE_JWT_SECRET=' | cut -d= -f2-)" \
   --set RAG_API_URL=http://rag-api.railway.internal:8080 \
   --set DATABASE_URL="$(railway variables --service rag-api --kv | grep '^DATABASE_URL=' | cut -d= -f2-)"
+```
+
+> The copied `DATABASE_URL` carries `?sslmode=no-verify` (set 2026-09-07, so the
+> pool, pg-boss and migrations all negotiate TLS). Keep it. Do **not** "upgrade"
+> it to `sslmode=require`: `pg-connection-string` >= 2.10 aliases `require` to
+> `verify-full`, and `postgres-ssl` serves a self-signed cert, so `require`
+> fails the connection instead of encrypting it.
+
+```bash
 railway up --service rag-teams-bot
 railway domain --service rag-teams-bot
 ```
