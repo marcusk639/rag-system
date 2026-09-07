@@ -10,7 +10,7 @@ const TEMPLATE = JSON.stringify({
 
 const ENV = {
   MICROSOFT_APP_ID: "11111111-2222-3333-4444-555555555555",
-  DEVELOPER_NAME: "TWK CPA Firm",
+  DEVELOPER_NAME: "Example Firm LLP",
   BOT_ENTRA_SSO_SCOPE: "api://botid-11111111-2222-3333-4444-555555555555/access_as_user",
 };
 
@@ -19,7 +19,7 @@ describe("renderManifest", () => {
     const out = JSON.parse(renderManifest(TEMPLATE, ENV));
     expect(out.id).toBe(ENV.MICROSOFT_APP_ID);
     expect(out.webApplicationInfo.id).toBe(ENV.MICROSOFT_APP_ID);
-    expect(out.developer.name).toBe("TWK CPA Firm");
+    expect(out.developer.name).toBe("Example Firm LLP");
   });
 
   it("names EVERY missing variable, not just the first", () => {
