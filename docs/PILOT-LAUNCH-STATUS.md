@@ -3,9 +3,29 @@
 > ⛔ **Corpus-state claims below are stale (they describe 2026-08-04).** The
 > purge-and-re-sync is **complete**: the index now holds **47 documents / 210
 > chunks**, all Class A, all `gemini-embedding-001`, with search and ask verified
-> working (queried 2026-09-07 — full evidence in
-> [`HANDOFF-2026-09-02.md`](./HANDOFF-2026-09-02.md) §0). The gate analysis and
-> the P0 table below remain useful; the "index is EMPTY" banner does not.
+> working. The gate analysis and the P0 table below remain useful; the "index is
+> EMPTY" banner does not.
+>
+> **Verified state (queried 2026-09-07).** The Knowledge Base source was purged
+> and recreated (new id `dbba75e2-…`, replacing `badac563-…`); a full sync ran
+> twice on 2026-09-02, 17:14 and 17:24 UTC.
+>
+> | Fact                | Value                                                                           |
+> | ------------------- | ------------------------------------------------------------------------------- |
+> | Index               | **47 documents / 210 chunks**, 1 source                                         |
+> | Embedding space     | 100% `gemini` / `gemini-embedding-001` — one coherent vector space              |
+> | Document class      | **47/47 Class A** — nothing else reached the index                              |
+> | Scanner disposition | `ingest_log`: 94 `ingested` (2 runs × 47), **6 `tri-flagged`**, **2 `blocked`** |
+> | TRI patterns caught | `1099+amount` ×4, `W2+amount` ×2; 2 escalated to Class D and quarantined        |
+> | Paths               | `metadata.path` on **47/47** — no `ingest.path_unavailable`                     |
+> | Delta cursor        | 5 drives, all carrying delta tokens                                             |
+> | Restore point       | pgBackRest WAL archiving live: 6,362 segments, **0 failures**                   |
+>
+> **Why 47 and not 858 — this trips people up.** The 858-document corpus was
+> deliberately destroyed on 2026-08-03 for containing TRI
+> (`PURGE-RECORD-2026-08-03.md`). 47 is the post-purge, TRI-screened rebuild, not
+> an under-listing bug: the connector saw ~50 items and the scanner rejected 8.
+> **Do not "fix" the document count.**
 >
 > **What this changes for the pilot.** P0 gate #1 — the content audit — was an
 > 858-document slog against a corpus known to contain TRI. It is now **47
@@ -325,6 +345,116 @@ The Teams bot added one deployment input beyond the web app's Entra setup:
 
 - **`docs/DEPLOYMENT-TARGET.md` is stale.** It records "single VM + docker-compose" (a 2026-06-14 decision), but the system actually runs on **Railway** (per `docs/PILOT-MANUAL-RUNBOOK.md` items 3–4 and the `railway.json` deploy configs on each app). Treat Railway as the live target; the VM+compose file (`docker/compose.prod.yml`) remains a valid self-host option but is not what's deployed.
 - **Plan checkboxes are not a status source.** `PLAN-PILOT-READINESS-AUTOMATABLE.md` and `PLAN-LAUNCH-READINESS.md` have mostly-unchecked boxes despite the work being complete — they were execution guides, not trackers. **This file is the status source; the manual runbook is the remaining-work source.**
+
+---
+
+## Carried-forward backlog
+
+Migrated here on 2026-09-07 when `HANDOFF-2026-09-02.md` was retired (its premise
+— that the re-sync had not run — stopped being true). These items were live at
+that point and none is owned.
+
+### Security / correctness
+
+- **Postgres TLS.** Worker and MCP log `DATABASE_SSL is unset/disable and
+  DATABASE_URL has no sslmode` on every boot; this corpus is tax return
+  information. Add `?sslmode=no-verify` to `DATABASE_URL` — that covers the pool,
+  pg-boss and migrations, whereas the `DATABASE_SSL` flag only configures the app
+  pool. **Do not use `sslmode=require`:** `pg-connection-string` >= 2.10 aliases
+  it to `verify-full`, which fails outright against the self-signed cert
+  Railway's `postgres-ssl` image serves. Verify with `pg_stat_ssl` joined to
+  `pg_stat_activity` — setting a Railway variable does not reliably restart the
+  service.
+- **Spreadsheet content is chunked from an unredacted field — dormant but real.**
+  Redaction rewrites only markdown (`pipeline.ts:379`, written back at `:422`),
+  but `chunker.chunk(parsed)` gets the whole object, and for spreadsheets
+  `composite-chunker.ts:42` routes on `document.tables` and `:55` chunks from
+  those rows, bypassing the redacted markdown. `parsed.tables` is never redacted.
+  It is currently contained only *indirectly*: the parser also renders tables
+  into `markdown`, so redaction finds the identifiers there, escalating the doc
+  to Class D and quarantining it before chunking. That protection is a side
+  effect of markdown rendering, not a guard on `tables`. Any change that stops
+  rendering tables into markdown — or a sheet whose rendering differs from its
+  rows — silently reopens it. The worst document in the 2026-08-03 screen was a
+  spreadsheet with 522 SSN-shaped values. Redact `parsed.tables` (or chunk from a
+  redacted copy) before relying on the disposition matrix.
+- **`disposition` is modeled everywhere and consumed nowhere.** Declared in
+  `pack.yaml`, defaulted in `schema.ts:95`, carried through `load.ts:88`, emitted
+  on every `ScanMatch` in `scan.ts:92` — and nothing branches on it. `exclude`,
+  `redact` and `flag` are indistinguishable today: every high-confidence match is
+  masked, and quarantined if its kind is a Class D identifier. A pack author
+  would reasonably read `flag` as index-with-a-note. Either wire it or say so in
+  the pack header.
+- **Credential rotation, deferred by explicit user decision** ("i'll worry about
+  rotating the token later"): admin bearer token, Gemini API key,
+  `OBJECT_STORE_SECRET_ACCESS_KEY`.
+- **Off-Railway backup remains unbuilt.** WAL archiving and the proven-restorable
+  2026-09-02 full backup both live in Railway's own bucket, so neither covers
+  project/account/provider loss.
+- **Unfixed PR #41 review findings:** #3 Class-C escalation dead code
+  (`pipeline.ts:325`); #5 no eval evidence; #6 object store writes raw unredacted
+  bytes (`pipeline.ts:424`); #10 titles never redacted and sent to the model
+  (`generator.ts:142`).
+- **From #42:** the design's stricter SSA-validity SSN pattern was silently
+  dropped in the follow-on plan (PR #44).
+- **From #43:** ~23 broken markdown links to renamed docs; `pnpm eval:gold` names
+  a script that does not exist; `b-renamed.md` and `c.md` are stray tracked files
+  in the repo root. (#43 also claimed `clients/pilot/README.md` references a
+  missing `methodology/` directory — **that is false**; `methodology/README.md`
+  is tracked and the reference resolves. Do not go looking for it.)
+
+### Deploy-gate hardening
+
+Railway has `preDeployCommand` and `healthcheckPath` but **no
+`postDeployCommand`**, so there is no post-cutover gate in config-as-code. In
+leverage order:
+
+1. Point `healthcheckPath` at `/ready` rather than `/health`, and give MCP a real
+   `/ready`. Minutes of work.
+2. Expose the build's git SHA on `/ready` and assert it — nothing else catches
+   the stale-image class. `RAILWAY_GIT_COMMIT_SHA` is already populated.
+3. Make `preDeployCommand` a real preflight: it runs the new image with full
+   production env before anything takes traffic. Assert DB + migration version,
+   parser reachable *and* authenticating, embedder reachable *and* billable,
+   object store writable. **Hard-fail on auth/config errors (401/403), warn-only
+   on transient 5xx** — otherwise a momentary Gemini blip crash-loops the deploy.
+
+None of this catches the `.xls` class (one document silently never ingesting);
+that needs per-document ingest failures surfaced as a metric, not a log line.
+
+### Open threads
+
+- **Pack scanner — slice 2 of 2 not started.** ⚠ The plan doc
+  (`docs/superpowers/plans/2026-09-01-pack-scanner-slice.md`) shows 32 unchecked
+  steps and zero checked, but slice 1 is **written, tested, merged and wired** —
+  the boxes were never ticked. **Do not resume from step 1.** Remaining: the
+  discovery service, the `scan_*` tables, and the admin API. No plan document
+  exists yet; the design is
+  `docs/superpowers/specs/2026-08-31-sensitive-content-discovery-design.md` §3,
+  and the next step is writing a plan against it.
+- **TRI identifying-pattern exemptions — open decision, blocked on a
+  measurement.** `docs/superpowers/plans/2026-08-31-tri-identifying-pattern-exemptions.md`.
+  `TRI_IDENTIFYING_LABELS` hard-blocks regardless of `GENERATION_TRI_POLICY`, so
+  no position means "warn on contextual, block on identifiers, tolerate this known
+  false positive". The EIN pattern `\b\d{2}[-\s]\d{7}\b` matches vendor account
+  numbers and OCR'd figures; since a prompt bundles ~12 chunks, one poisoned SOP
+  chunk permanently fails every question whose retrieval pulls it. The only escape
+  is `off`, which disables SSN detection corpus-wide. Three options are written up
+  and **none is chosen — choosing before measuring is premature.** ⚠ The doc's
+  prerequisite was to measure identifying-label hit rates during the re-ingest;
+  **that re-ingest has now happened**, so this must be measured against the
+  standing corpus instead. `ssn-unformatted` post-dates the 858-document screen
+  and its false-positive rate is still unmeasured.
+
+### Second repo — `cpa-consulting`
+
+The live artifact is `docs/todo.md` (committed `feb111a`, 2026-08-31) — the firm's
+automation agenda from the Chris call. It ends `...listen to transcript to get the
+rest`, so it is **incomplete by design**; the remaining items are in an
+untranscribed call recording. Per that repo's own `CLAUDE.md`,
+`docs/issue-synthesis/` is the canonical workstream, **maintained in place and
+never regenerated** — read its `CLAUDE.md` first, as the firm facts and epistemic
+constraints there are binding.
 
 ---
 
