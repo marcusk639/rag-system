@@ -182,7 +182,7 @@ The Teams app manifest lives at `apps/teams-bot/manifest/manifest.json` with `${
    ```bash
    MICROSOFT_APP_ID=<bot app guid> \
    BOT_ENTRA_SSO_SCOPE=api://botid-<bot app guid>/access_as_user \
-   DEVELOPER_NAME="TWK CPA Firm" \
+   DEVELOPER_NAME="Example Firm LLP" \
    DEVELOPER_WEBSITE_URL=https://... DEVELOPER_PRIVACY_URL=https://... DEVELOPER_TERMS_OF_USE_URL=https://... \
    pnpm --filter @rag/teams-bot package
    ```
