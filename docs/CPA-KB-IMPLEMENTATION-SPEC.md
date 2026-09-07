@@ -247,7 +247,9 @@ Execute **adoption-plan Phase 9**, plus the full-compliance final check below.
 - [ ] `pnpm typecheck && pnpm test && pnpm eval` green; eval meets the Phase F bar.
 - [ ] **TRI-egress-zero:** automated test proves embeddings run locally and no external call carries TRI (CR-1).
 - [ ] `grep -rn "enforcedSourceIds" apps/api apps/mcp` — ACL on every retrieval path; empty scope = deny (CR-5).
-- [ ] Encryption at rest + TLS 1.2+ verified; MFA on every human entry (CR-6/7/8).
+- [ ] Encryption at rest + TLS 1.2+ confirmed on every hop; MFA on every human entry (CR-6/7/8).
+      ("Confirmed" = the transport is TLS. The Postgres hop uses `sslmode=no-verify`, which does
+      **not** validate the server certificate — see `docs/PLAN-CPA-COMPLIANCE.md` Phase 3.)
 - [ ] Every answer carries a non-dismissible disclaimer; tax-position outputs gated by CPA review (CR-13/14).
 - [ ] `purgeByPrincipal` removes chunks + vectors; retention job runs; audit logs land off-host (CR-18/10).
 - [ ] WISP names the system + QI; breach runbook + tabletop done; vendor register + DPAs on file (CR-12/11/16/9).
