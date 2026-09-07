@@ -30,11 +30,21 @@ mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "manifest.json"), rendered);
 
 // -j flattens paths: Teams requires manifest.json and the icons at the zip root.
-execFileSync(
-  "zip",
-  ["-j", "-q", zipPath, join(outDir, "manifest.json"), join(manifestDir, "color.png"), join(manifestDir, "outline.png")],
-  { stdio: "inherit" },
-);
+try {
+  execFileSync(
+    "zip",
+    ["-j", "-q", zipPath, join(outDir, "manifest.json"), join(manifestDir, "color.png"), join(manifestDir, "outline.png")],
+    { stdio: "inherit" },
+  );
+} catch (err) {
+  if (err.code === "ENOENT") {
+    throw new Error(
+      "The 'zip' CLI is not on PATH. Install it (macOS: preinstalled; Debian/Ubuntu: " +
+        "'apt-get install zip'; Alpine: 'apk add zip') and re-run.",
+    );
+  }
+  throw err;
+}
 
 console.log(`Teams app package: ${zipPath}`);
 console.log(`  app id:    ${parsed.id}`);

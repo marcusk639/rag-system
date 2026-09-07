@@ -1,5 +1,12 @@
 const PLACEHOLDER = /\$\{([A-Z0-9_]+)\}/g;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * `api://botid-<guid>/<scope>`, with the optional domain segment Teams allows
+ * when the app also exposes a tab. The GUID is captured so it can be compared
+ * to MICROSOFT_APP_ID directly — a substring check would accept it embedded in
+ * a longer GUID or an entirely wrong host.
+ */
+const SSO_SCOPE = /^api:\/\/(?:[A-Za-z0-9.-]+\/)?botid-([^/]+)\/[^/]+$/i;
 
 /**
  * Fills the Teams app manifest template from a set of values.
@@ -34,11 +41,16 @@ export function renderManifest(
   }
 
   const scope = values.BOT_ENTRA_SSO_SCOPE?.trim();
-  if (required.has("BOT_ENTRA_SSO_SCOPE") && appId && !scope!.includes(appId)) {
-    throw new Error(
-      `BOT_ENTRA_SSO_SCOPE ("${scope}") does not contain MICROSOFT_APP_ID ("${appId}"). ` +
-        `Teams SSO silently fails when the exposed scope belongs to a different app registration.`,
-    );
+  if (required.has("BOT_ENTRA_SSO_SCOPE") && appId) {
+    // GUIDs are case-insensitive, and the two values are pasted from different
+    // Azure blades — comparing them raw rejects correct configurations.
+    const scopeGuid = SSO_SCOPE.exec(scope!)?.[1];
+    if (scopeGuid?.toLowerCase() !== appId.toLowerCase()) {
+      throw new Error(
+        `BOT_ENTRA_SSO_SCOPE ("${scope}") must be "api://botid-${appId}/access_as_user". ` +
+          `Teams SSO silently fails when the exposed scope belongs to a different app registration.`,
+      );
+    }
   }
 
   return template.replace(PLACEHOLDER, (_match, name: string) =>

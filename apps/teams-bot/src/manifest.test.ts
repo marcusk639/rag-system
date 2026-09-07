@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { renderManifest } from "./manifest.js";
 
@@ -50,5 +51,58 @@ describe("renderManifest", () => {
 
   it("produces output with no placeholder left behind", () => {
     expect(renderManifest(TEMPLATE, ENV)).not.toMatch(/\$\{/);
+  });
+
+  it("accepts a scope whose GUID differs only in case — both refer to one app", () => {
+    const upper = ENV.MICROSOFT_APP_ID.toUpperCase();
+    expect(() =>
+      renderManifest(TEMPLATE, { ...ENV, MICROSOFT_APP_ID: upper }),
+    ).not.toThrow();
+  });
+
+  it("accepts the api://<domain>/botid-<guid>/ form Teams allows for tab+bot apps", () => {
+    expect(() =>
+      renderManifest(TEMPLATE, {
+        ...ENV,
+        BOT_ENTRA_SSO_SCOPE: `api://kb.example.com/botid-${ENV.MICROSOFT_APP_ID}/access_as_user`,
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["missing the botid- prefix", `api://${ENV.MICROSOFT_APP_ID}/access_as_user`],
+    ["a wrong host", `https://evil.example.com/${ENV.MICROSOFT_APP_ID}`],
+    ["the id inside a longer GUID", `api://botid-a${ENV.MICROSOFT_APP_ID}b/access_as_user`],
+    ["unstructured text", `garbage ${ENV.MICROSOFT_APP_ID} garbage`],
+  ])("rejects a structurally wrong scope: %s", (_label, BOT_ENTRA_SSO_SCOPE) => {
+    expect(() => renderManifest(TEMPLATE, { ...ENV, BOT_ENTRA_SSO_SCOPE })).toThrow(
+      /BOT_ENTRA_SSO_SCOPE/,
+    );
+  });
+});
+
+describe("the real manifest template", () => {
+  const template = readFileSync(
+    new URL("../manifest/manifest.json", import.meta.url),
+    "utf8",
+  );
+
+  it("renders to valid JSON with a full set of values", () => {
+    const out = JSON.parse(
+      renderManifest(template, {
+        ...ENV,
+        DEVELOPER_WEBSITE_URL: "https://example.com",
+        DEVELOPER_PRIVACY_URL: "https://example.com/privacy",
+        DEVELOPER_TERMS_OF_USE_URL: "https://example.com/terms",
+      }),
+    );
+    expect(out.id).toBe(ENV.MICROSOFT_APP_ID);
+    expect(out.webApplicationInfo.resource).toBe(ENV.BOT_ENTRA_SSO_SCOPE);
+  });
+
+  it("names every variable the packager needs when the environment is empty", () => {
+    expect(() => renderManifest(template, {})).toThrow(
+      /DEVELOPER_WEBSITE_URL|DEVELOPER_PRIVACY_URL|DEVELOPER_TERMS_OF_USE_URL/,
+    );
   });
 });
