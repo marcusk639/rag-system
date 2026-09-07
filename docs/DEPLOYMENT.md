@@ -58,6 +58,16 @@ Any Postgres 14+ with `pgvector` enabled works. Confirmed on:
 - **Supabase** — enable pgvector in the dashboard (Database → Extensions).
 - **AWS RDS** — pgvector is bundled in Postgres 15.5+ on RDS; enable via parameter group.
 - **Self-hosted** — the `pgvector/pgvector:pg16` image used in `docker/docker-compose.yml`.
+- **Railway (production, tenant #1)** — `ghcr.io/railwayapp-templates/postgres-ssl:16.14`, Railway's
+  official Postgres image. Bundles pgvector (`postgresql-16-pgvector`), generates a self-signed cert on
+  first boot (`ssl = on`), and ships pgBackRest for WAL archiving / point-in-time recovery. It hard-requires
+  the volume mounted at exactly `/var/lib/postgresql/data` with `PGDATA=/var/lib/postgresql/data/pgdata` —
+  the entrypoint exits non-zero otherwise. pgBackRest WAL archiving is
+  **enabled as of 2026-09-02** (six `WAL_ARCHIVE_*` variables on `rag-postgres`, targeting the
+  `rag-documents` bucket; `archive_mode=on`, `archive_timeout=60`). It is gated on `WAL_ARCHIVE_BUCKET` —
+  unset that and the watcher returns early, silently. Note pgBackRest connects as
+  `pg1-user=${PGUSER:-postgres}`, so the `postgres` superuser role must exist even though the application
+  role is `rag`. See `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
 
 After provisioning, run:
 
@@ -66,6 +76,40 @@ DATABASE_URL=postgres://... pnpm db:migrate
 ```
 
 This is idempotent — safe to re-run on every deploy.
+
+### Upgrading the Railway Postgres image
+
+Changing `rag-postgres`'s image is a live-volume migration, not a config tweak. Checklist:
+
+```bash
+railway service source connect --image <new-image> --service rag-postgres \
+  --project <project-id> --environment <env-id>
+```
+
+1. **Pin the exact minor** (e.g. `:16.14`, not `:16`) so the server binary doesn't move underneath you.
+2. **Check glibc, not just the PG version.** `select version()` reports the Debian build — `pgdg12` (bookworm,
+   glibc 2.36) vs `pgdg13` (trixie, glibc 2.41). A same-minor image bump can still cross that boundary and
+   invalidate every text btree index.
+3. **If glibc moved, reindex before the version stamp is refreshed.** The image's entrypoint forks a "blind"
+   `ALTER DATABASE ... REFRESH COLLATION VERSION` across all databases on boot, with no `REINDEX` — it treats
+   the mismatch as cosmetic noise and, in silencing it, destroys the signal. Run this per connectable database
+   (`rag`, `postgres`, `template1`, and any `rag_premigration_*`), not just `rag`:
+
+   ```sql
+   REINDEX DATABASE "<db>";
+   ALTER DATABASE "<db>" REFRESH COLLATION VERSION;
+   ```
+
+4. **Bring extension catalogs up to the new binaries:** `ALTER EXTENSION vector UPDATE;` (the volume pins the
+   SQL catalog at install-time version while the image carries the `.so`).
+5. **Verify:** `datcollversion` matches the OS on every DB, `select count(*) from pg_index where not indisvalid`
+   returns 0, and an HNSW probe (`ORDER BY embedding <=> ...`) still returns rows.
+6. The image's housekeeping (collation refresh, pgBackRest watcher) connects as the `postgres` role. This
+   deployment's superuser is `rag`, so a `postgres` superuser role must also exist or those scripts FATAL with
+   `role "postgres" does not exist` — the database itself still serves traffic normally.
+
+Rollback is `railway service source connect --image <old-image>`; the volume is untouched and generated certs
+are inert to other images. Note that rolling back re-crosses the glibc boundary, so reindex either way.
 
 ### Migrations on deploy (Railway)
 
