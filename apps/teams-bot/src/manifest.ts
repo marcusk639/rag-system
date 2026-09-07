@@ -6,7 +6,8 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * to MICROSOFT_APP_ID directly — a substring check would accept it embedded in
  * a longer GUID or an entirely wrong host.
  */
-const SSO_SCOPE = /^api:\/\/(?:[A-Za-z0-9.-]+\/)?botid-([^/]+)\/[^/]+$/i;
+const SSO_SCOPE =
+  /^api:\/\/(?:[A-Za-z0-9.-]+\/)?botid-([0-9a-f-]+)\/[A-Za-z0-9_.-]+$/i;
 
 /**
  * Fills the Teams app manifest template from a set of values.
@@ -54,6 +55,21 @@ export function renderManifest(
   }
 
   return template.replace(PLACEHOLDER, (_match, name: string) =>
-    values[name]!.trim(),
+    jsonStringBody(values[name]!.trim()),
   );
+}
+
+/**
+ * Escapes a value for substitution inside a JSON string literal.
+ *
+ * Every placeholder in the manifest template sits inside a JSON string, and a
+ * raw substitution lets a value close that string and add its own keys. That is
+ * not theoretical: a `DEVELOPER_NAME` of `ACME"},"id":"NOT-A-GUID","pad":{"z":"`
+ * renders to *valid* JSON whose top-level `id` is `NOT-A-GUID` — the GUID check
+ * above passes and the manifest ships wrong anyway, which is the exact silent
+ * failure the rest of this file exists to prevent. A stray quote in a firm's
+ * name reaches the same place by accident.
+ */
+function jsonStringBody(value: string): string {
+  return JSON.stringify(value).slice(1, -1);
 }
