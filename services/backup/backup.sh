@@ -22,6 +22,17 @@
 # Railway's volume backups). Strictly better than nothing; replace it.
 set -euo pipefail
 
+# ⚠ TLS: this script uses pg_dump, i.e. LIBPQ — and libpq does NOT accept
+# `sslmode=no-verify`. It rejects the value outright ("invalid sslmode value")
+# and the dump fails before it starts. The app services (node-postgres) use
+# exactly that value, so copying a working DATABASE_URL from rag-api or
+# rag-worker into this service BREAKS the nightly backup.
+#
+# For libpq the equivalent is `sslmode=require`: encrypt, do not verify the
+# certificate — which is what Railway's self-signed postgres-ssl cert needs.
+# libpq already defaults to `prefer` (opportunistic TLS), so an unset sslmode
+# is normally encrypted anyway; `require` is what makes it mandatory rather
+# than silently falling back to plaintext.
 : "${DATABASE_URL:?DATABASE_URL is required}"
 : "${BACKUP_DEST:?BACKUP_DEST is required (sharepoint | s3 | azure)}"
 
