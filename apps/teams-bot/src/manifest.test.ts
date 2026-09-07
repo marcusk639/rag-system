@@ -5,13 +5,17 @@ import { renderManifest } from "./manifest.js";
 const TEMPLATE = JSON.stringify({
   id: "${MICROSOFT_APP_ID}",
   developer: { name: "${DEVELOPER_NAME}" },
-  webApplicationInfo: { id: "${MICROSOFT_APP_ID}", resource: "${BOT_ENTRA_SSO_SCOPE}" },
+  webApplicationInfo: {
+    id: "${MICROSOFT_APP_ID}",
+    resource: "${BOT_ENTRA_SSO_SCOPE}",
+  },
 });
 
 const ENV = {
   MICROSOFT_APP_ID: "11111111-2222-3333-4444-555555555555",
   DEVELOPER_NAME: "Example Firm LLP",
-  BOT_ENTRA_SSO_SCOPE: "api://botid-11111111-2222-3333-4444-555555555555/access_as_user",
+  BOT_ENTRA_SSO_SCOPE:
+    "api://botid-11111111-2222-3333-4444-555555555555/access_as_user",
 };
 
 describe("renderManifest", () => {
@@ -29,22 +33,23 @@ describe("renderManifest", () => {
   });
 
   it("treats an empty value as missing", () => {
-    expect(() => renderManifest(TEMPLATE, { ...ENV, DEVELOPER_NAME: "  " })).toThrow(
-      /DEVELOPER_NAME/,
-    );
+    expect(() =>
+      renderManifest(TEMPLATE, { ...ENV, DEVELOPER_NAME: "  " }),
+    ).toThrow(/DEVELOPER_NAME/);
   });
 
   it("rejects an app id that is not a GUID — the commonest go-live typo", () => {
-    expect(() => renderManifest(TEMPLATE, { ...ENV, MICROSOFT_APP_ID: "botid-1234" })).toThrow(
-      /MICROSOFT_APP_ID.*GUID/,
-    );
+    expect(() =>
+      renderManifest(TEMPLATE, { ...ENV, MICROSOFT_APP_ID: "botid-1234" }),
+    ).toThrow(/MICROSOFT_APP_ID.*GUID/);
   });
 
   it("rejects an SSO scope that does not match the app id", () => {
     expect(() =>
       renderManifest(TEMPLATE, {
         ...ENV,
-        BOT_ENTRA_SSO_SCOPE: "api://botid-99999999-2222-3333-4444-555555555555/access_as_user",
+        BOT_ENTRA_SSO_SCOPE:
+          "api://botid-99999999-2222-3333-4444-555555555555/access_as_user",
       }),
     ).toThrow(/BOT_ENTRA_SSO_SCOPE/);
   });
@@ -70,15 +75,24 @@ describe("renderManifest", () => {
   });
 
   it.each([
-    ["missing the botid- prefix", `api://${ENV.MICROSOFT_APP_ID}/access_as_user`],
+    [
+      "missing the botid- prefix",
+      `api://${ENV.MICROSOFT_APP_ID}/access_as_user`,
+    ],
     ["a wrong host", `https://evil.example.com/${ENV.MICROSOFT_APP_ID}`],
-    ["the id inside a longer GUID", `api://botid-a${ENV.MICROSOFT_APP_ID}b/access_as_user`],
+    [
+      "the id inside a longer GUID",
+      `api://botid-a${ENV.MICROSOFT_APP_ID}b/access_as_user`,
+    ],
     ["unstructured text", `garbage ${ENV.MICROSOFT_APP_ID} garbage`],
-  ])("rejects a structurally wrong scope: %s", (_label, BOT_ENTRA_SSO_SCOPE) => {
-    expect(() => renderManifest(TEMPLATE, { ...ENV, BOT_ENTRA_SSO_SCOPE })).toThrow(
-      /BOT_ENTRA_SSO_SCOPE/,
-    );
-  });
+  ])(
+    "rejects a structurally wrong scope: %s",
+    (_label, BOT_ENTRA_SSO_SCOPE) => {
+      expect(() =>
+        renderManifest(TEMPLATE, { ...ENV, BOT_ENTRA_SSO_SCOPE }),
+      ).toThrow(/BOT_ENTRA_SSO_SCOPE/);
+    },
+  );
 });
 
 describe("the real manifest template", () => {
