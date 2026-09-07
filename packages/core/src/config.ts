@@ -18,8 +18,12 @@ export const Config = z
      * Optional TLS mode for the app's Postgres connection pool, from
      * DATABASE_SSL: "require" (verify cert), "no-verify" (TLS, skip verify),
      * "disable"/unset (no explicit TLS on the pool). For uniform coverage
-     * (pool + pg-boss + migrations) prefer `?sslmode=require` in DATABASE_URL;
+     * (pool + pg-boss + migrations) prefer an `?sslmode=` in DATABASE_URL;
      * this field only configures the main app pool.
+     *
+     * ⚠ Against a self-signed server cert use `no-verify`, not `require`:
+     * pg-connection-string >= 2.10 aliases `require` to `verify-full`, which
+     * fails the connection instead of encrypting it.
      */
     databaseSsl: z.enum(["disable", "require", "no-verify"]).optional(),
 
