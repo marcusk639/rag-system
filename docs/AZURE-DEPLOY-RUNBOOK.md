@@ -189,6 +189,7 @@ The Teams app manifest lives at `apps/teams-bot/manifest/manifest.json` with `${
 
    Output: `apps/teams-bot/manifest/dist/teams-app-<version>.zip`. The three
    developer URLs must be real and reachable — Teams validates them at upload.
+
 3. Teams admin center → **Teams apps → Manage apps → Upload new app** (or sideload via **Apps → Manage your apps → Upload a custom app** for a personal pilot). For a firm rollout, publish to the org's app catalog.
 4. Install it for yourself, DM it a real question, and confirm you get an answer with citations.
 

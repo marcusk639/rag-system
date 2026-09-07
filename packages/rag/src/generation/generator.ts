@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import {
@@ -520,10 +521,127 @@ export class OpenAIGenerator implements Generator {
 }
 
 // ----------------------------------------------------------------------------
+// Claude (Anthropic) generator
+// ----------------------------------------------------------------------------
+/**
+ * The Anthropic SDK's own default base URL, restated so it can be passed
+ * explicitly rather than left to the SDK — the constructor comment below
+ * explains why an absent key is not the same as the default.
+ */
+const ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com";
+
+/**
+ * Claude's answer ceiling when the caller does not pin one. The Anthropic API
+ * REQUIRES `max_tokens` — there is no "model default" to fall back on, unlike
+ * the OpenAI path where the field is optional and simply omitted. 16k keeps a
+ * non-streaming request inside the SDK's HTTP timeout while leaving ample room
+ * for a long procedural answer quoted near-verbatim, which this prompt asks for.
+ */
+const CLAUDE_DEFAULT_MAX_TOKENS = 16_000;
+
+export class ClaudeGenerator implements Generator {
+  private client: Anthropic;
+  private readonly _egressPolicy: EgressPolicy;
+  /** The host actually contacted — shared by the client and the pre-flight. */
+  private readonly effectiveBaseURL: string;
+
+  constructor(private readonly opts: GeneratorOptions) {
+    this.effectiveBaseURL = opts.baseURL ?? ANTHROPIC_DEFAULT_BASE_URL;
+    this.client = new Anthropic({
+      apiKey: opts.apiKey,
+      // Passed unconditionally for the same reason as the OpenAI client: the
+      // SDK falls back to the ANTHROPIC_BASE_URL environment variable when this
+      // key is absent, which would let an env var redirect the client away from
+      // the host `preFlight` just checked against the allow-list.
+      baseURL: this.effectiveBaseURL,
+      // Composed, never `opts.fetch ?? …` — an injected transport must still
+      // refuse redirects, or the test seam becomes a way to opt out of the
+      // egress guarantee.
+      fetch: egressSafeFetch(opts.fetch) as unknown as Anthropic["fetch"],
+    });
+    this._egressPolicy = opts.egressPolicy ?? EgressPolicy.fromEnv();
+  }
+
+  /** TRI + egress pre-flight. Throws ComplianceError or EgressError on violation. */
+  private preFlight(prompt: string): void {
+    runPreFlight(
+      prompt,
+      this.effectiveBaseURL,
+      this._egressPolicy,
+      this.opts.triPolicy ?? "block",
+      this.opts.onTriDetected,
+    );
+  }
+
+  /**
+   * Request shape shared by both entry points.
+   *
+   * ⚠ Deliberately NO `temperature`. The other two providers in this module
+   * both set `temperature: 0.2`, so copying either one is the obvious way to
+   * extend this file — and on Claude 5-family models the sampling parameters
+   * (`temperature`, `top_p`, `top_k`) were removed and now return a 400. The
+   * failure would be total and immediate rather than subtle, but it is worth
+   * naming here so nobody "restores consistency" with the neighbours.
+   *
+   * Thinking is left unconfigured on purpose: it is on by default for the
+   * Claude 5 family, and `budget_tokens` — the shape most training data
+   * recalls — is rejected outright by those models.
+   */
+  private request(prompt: string): Anthropic.MessageCreateParamsNonStreaming {
+    return {
+      model: this.opts.model,
+      max_tokens: this.opts.maxOutputTokens ?? CLAUDE_DEFAULT_MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: prompt }],
+    };
+  }
+
+  async answer(
+    question: string,
+    context: RetrievalResult[],
+  ): Promise<GenerationResult> {
+    const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
+    const response = await this.client.messages.create(this.request(prompt));
+
+    // `content` is a discriminated union of blocks. Concatenating only the
+    // `text` blocks skips any thinking blocks rather than leaking reasoning
+    // into an answer whose citations are an audit trail.
+    const answer = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+
+    return { answer, citations: buildCitations(context) };
+  }
+
+  async *answerStream(
+    question: string,
+    context: RetrievalResult[],
+  ): AsyncIterable<string> {
+    const prompt = buildPrompt(question, context);
+    this.preFlight(prompt);
+    const stream = this.client.messages.stream(this.request(prompt));
+    // Iterate raw events and emit ONLY `text_delta`s. The stream also carries
+    // `thinking_delta` blocks, and yielding those would put reasoning into an
+    // answer whose citations are an audit trail — the SSE surface must carry
+    // exactly what `answer()` would have returned.
+    for await (const event of stream) {
+      if (
+        event.type === "content_block_delta" &&
+        event.delta.type === "text_delta"
+      ) {
+        yield event.delta.text;
+      }
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Factory
 // ----------------------------------------------------------------------------
 export function createGenerator(
-  opts: GeneratorOptions & { provider: "gemini" | "openai" },
+  opts: GeneratorOptions & { provider: "gemini" | "openai" | "claude" },
 ): Generator {
   const { provider, ...generatorOpts } = opts;
   switch (provider) {
@@ -539,5 +657,7 @@ export function createGenerator(
       return new GeminiGenerator(generatorOpts);
     case "openai":
       return new OpenAIGenerator(generatorOpts);
+    case "claude":
+      return new ClaudeGenerator(generatorOpts);
   }
 }

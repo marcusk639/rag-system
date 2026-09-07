@@ -46,17 +46,17 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 
 ## Where this actually stands
 
-| Layer                               | Covers                                       | Status                                     |
-| ----------------------------------- | -------------------------------------------- | ------------------------------------------ |
-| Restore procedure                   | —                                            | ✅ Proven on production data               |
-| Railway **volume backups**          | Corruption, bad migration, accidental delete | ✅ **Enabled 2026-08-01** (Daily + Weekly) |
-| Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC     |
-| Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent    |
-| pgBackRest WAL archiving (PITR)     | Point-in-time rewind; ~60s RPO               | ✅ **LIVE 2026-09-02** — see below         |
+| Layer                               | Covers                                       | Status                                      |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------- |
+| Restore procedure                   | —                                            | ✅ Proven on production data                |
+| Railway **volume backups**          | Corruption, bad migration, accidental delete | ✅ **Enabled 2026-08-01** (Daily + Weekly)  |
+| Nightly `pg_dump` → Railway bucket  | The above **+ a volume wipe**                | 🟡 **LIVE — stopgap**, `0 8 * * *` UTC      |
+| Nightly `pg_dump` → **off-Railway** | Project / account / provider loss            | ⛔ **Blocked on Chris** — admin consent     |
+| pgBackRest WAL archiving (PITR)     | Point-in-time rewind; ~60s RPO               | ✅ **LIVE 2026-09-02** — see below          |
 | Restore FROM pgBackRest             | The PITR claim itself                        | ✅ **PROVEN 2026-09-02** — manual/root only |
-| Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                   |
-| Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                     |
-| Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                            |
+| Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                    |
+| Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                      |
+| Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                             |
 
 🟡 **What "stopgap" means concretely.** Backups now run nightly and land in
 Railway's own `rag-documents` bucket under `backups/`. That bucket lives in the
@@ -78,14 +78,14 @@ encryption as part of the SharePoint cutover**, when a real key home exists.
 Railway's `ghcr.io/railwayapp-templates/postgres-ssl:16.14`, which bundles
 pgBackRest. Archiving is enabled and verified:
 
-| | |
-| --- | --- |
-| Destination | Railway bucket `rag-documents` (real S3 name `rag-documents-yivrrpkniny`), prefix `/pgbackrest/cluster-7652162958315024418` |
-| Endpoint | `https://t3.storageapi.dev` (Tigris), region `auto`, virtual-host URI style |
-| First full backup | `20260902-191553F` — 114.9 MB logical, **52.8 MB** in-repo (zstd-3), 1,873 files, 14s |
-| Schedule | watcher polls 60s; full every 7d, differential every 24h |
-| Retention | 4 fulls, 14 diffs (`WAL_BACKUP_RETENTION_FULL` / `_DIFF` defaults) |
-| RPO | `archive_mode=on`, `archive_timeout=60` → **~60 seconds** |
+|                   |                                                                                                                             |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Destination       | Railway bucket `rag-documents` (real S3 name `rag-documents-yivrrpkniny`), prefix `/pgbackrest/cluster-7652162958315024418` |
+| Endpoint          | `https://t3.storageapi.dev` (Tigris), region `auto`, virtual-host URI style                                                 |
+| First full backup | `20260902-191553F` — 114.9 MB logical, **52.8 MB** in-repo (zstd-3), 1,873 files, 14s                                       |
+| Schedule          | watcher polls 60s; full every 7d, differential every 24h                                                                    |
+| Retention         | 4 fulls, 14 diffs (`WAL_BACKUP_RETENTION_FULL` / `_DIFF` defaults)                                                          |
+| RPO               | `archive_mode=on`, `archive_timeout=60` → **~60 seconds**                                                                   |
 
 Config lives in six variables on `rag-postgres`: `WAL_ARCHIVE_BUCKET`,
 `WAL_ARCHIVE_ENDPOINT`, `WAL_ARCHIVE_REGION`, `WAL_ARCHIVE_S3_URI_STYLE`,
@@ -103,14 +103,14 @@ Config lives in six variables on `rag-postgres`: `WAL_ARCHIVE_BUCKET`,
    The entrypoint refuses UUID-shaped names outright (`uuid-shape`, override
    `WAL_ARCHIVE_BUCKET_ALLOW_UUID=1`) precisely to catch that mix-up.
 
-**What this does and does not cover.** It closes the *rewind* gap: an
+**What this does and does not cover.** It closes the _rewind_ gap: an
 irreversible mistake — a bad migration, or a source deletion cascading through
 `documents.source_id ON DELETE CASCADE` — is now recoverable to a chosen second
 rather than only to the previous 08:00 UTC dump. It does **not** decorrelate:
 the bucket lives in the same Railway project as the database, so project
 deletion or account loss still takes both. The off-Railway row above remains
 open. (Mild mitigation: the bucket is Tigris-backed, not Railway compute, so a
-Railway *infrastructure* failure is not automatically a bucket failure.)
+Railway _infrastructure_ failure is not automatically a bucket failure.)
 
 **Keep the nightly `pg_dump`.** It is a logically independent, format-independent
 second layer — pgBackRest failures and `pg_dump` failures do not correlate, and a
@@ -144,7 +144,7 @@ ERROR: [088]: unable to set ownership for '.../postgresql.auto.conf': [1] Operat
 ```
 
 Root cause: the Railway volume root `/var/lib/postgresql/data` is `root:root`, so a
-PGDATA created beneath it inherits group `root`. pgBackRest *creates*
+PGDATA created beneath it inherits group `root`. pgBackRest _creates_
 `postgresql.auto.conf` during restore (it writes the recovery options there), the file
 inherits group `root`, and pgBackRest then chowns it to match the manifest — which
 requires privilege. `wrapper.sh` runs `gosu postgres pgbackrest ... restore`, i.e.
@@ -155,7 +155,7 @@ unprivileged, so it gets EPERM. Run as root, the identical restore completes:
 holds partial files but no `PG_VERSION`/`pg_control`. The restore gate tests only those
 two, so it retries and fails forever; `initdb` sees a non-empty directory and refuses
 (`directory ... exists but is not empty`). Neither path can proceed — infinite crash
-loop. Recover by pointing `PGDATA` at a *fresh* subdirectory rather than deleting.
+loop. Recover by pointing `PGDATA` at a _fresh_ subdirectory rather than deleting.
 
 ### Manual PITR recovery procedure (the one that works)
 

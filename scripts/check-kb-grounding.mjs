@@ -36,16 +36,22 @@ if (!API || !TOKEN) {
 }
 const questionsPath = process.argv[2];
 if (!questionsPath) {
-  console.error("usage: check-kb-grounding.mjs <questions.json> [--out report.json]");
+  console.error(
+    "usage: check-kb-grounding.mjs <questions.json> [--out report.json]",
+  );
   process.exit(2);
 }
 const outIdx = process.argv.indexOf("--out");
 const outPath = outIdx > -1 ? process.argv[outIdx + 1] : null;
 
 const questions = JSON.parse(readFileSync(questionsPath, "utf8"));
-const headers = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
+const headers = {
+  authorization: `Bearer ${TOKEN}`,
+  "content-type": "application/json",
+};
 
-const REFUSAL = /\b(cannot|can't|could not|couldn't|unable|no (relevant )?(information|documents?|record)|not (found|available|covered|contain)|does not (appear|contain)|don't have|do not have)\b/i;
+const REFUSAL =
+  /\b(cannot|can't|could not|couldn't|unable|no (relevant )?(information|documents?|record)|not (found|available|covered|contain)|does not (appear|contain)|don't have|do not have)\b/i;
 
 const docCache = new Map();
 async function documentExists(id) {
@@ -127,7 +133,9 @@ for (const [i, q] of questions.entries()) {
       row.refused = REFUSAL.test(answer);
       row.pass = row.refused && invalid.length === 0;
     } else {
-      row.retrievedExpected = citations.some((c) => c.documentId === q.expectDocumentId);
+      row.retrievedExpected = citations.some(
+        (c) => c.documentId === q.expectDocumentId,
+      );
       row.pass = row.retrievedExpected && invalid.length === 0;
     }
     row.answerPreview = answer.slice(0, 120);
@@ -135,7 +143,9 @@ for (const [i, q] of questions.entries()) {
     row.error = String(err.message ?? err);
   }
   results.push(row);
-  console.log(row.pass ? "pass" : `FAIL${row.error ? " (" + row.error + ")" : ""}`);
+  console.log(
+    row.pass ? "pass" : `FAIL${row.error ? " (" + row.error + ")" : ""}`,
+  );
   await sleep(REQUEST_SPACING_MS);
 }
 
@@ -144,22 +154,42 @@ const oob = results.filter((r) => r.kind === "out-of-corpus");
 const blocked = results.filter((r) => r.blockedByGuard);
 const errored = results.filter((r) => r.error);
 const measured = results.filter((r) => !r.error && !r.blockedByGuard);
-const invalidTotal = results.reduce((n, r) => n + (r.invalidCitations?.length ?? 0), 0);
+const invalidTotal = results.reduce(
+  (n, r) => n + (r.invalidCitations?.length ?? 0),
+  0,
+);
 const pct = (n, d) => (d === 0 ? "n/a" : `${((n / d) * 100).toFixed(1)}%`);
 
 const selfMeasured = self.filter((r) => !r.error && !r.blockedByGuard);
 const oobMeasured = oob.filter((r) => !r.error && !r.blockedByGuard);
 
 console.log("\n─── grounding scorecard ───");
-console.log(`answered          : ${measured.length}/${results.length} (blocked by TRI guard: ${blocked.length}, errors: ${errored.length})`);
-console.log(`citation validity : ${invalidTotal} invalid citation(s) across ${measured.length} answers`);
-console.log(`self-retrieval    : ${selfMeasured.filter((r) => r.retrievedExpected).length}/${selfMeasured.length} (${pct(selfMeasured.filter((r) => r.retrievedExpected).length, selfMeasured.length)}) — of questions that ANSWERED`);
-console.log(`refusal           : ${oobMeasured.filter((r) => r.refused).length}/${oobMeasured.length}`);
+console.log(
+  `answered          : ${measured.length}/${results.length} (blocked by TRI guard: ${blocked.length}, errors: ${errored.length})`,
+);
+console.log(
+  `citation validity : ${invalidTotal} invalid citation(s) across ${measured.length} answers`,
+);
+console.log(
+  `self-retrieval    : ${selfMeasured.filter((r) => r.retrievedExpected).length}/${selfMeasured.length} (${pct(selfMeasured.filter((r) => r.retrievedExpected).length, selfMeasured.length)}) — of questions that ANSWERED`,
+);
+console.log(
+  `refusal           : ${oobMeasured.filter((r) => r.refused).length}/${oobMeasured.length}`,
+);
 if (errored.length > 0)
-  console.log(`\n⚠ ${errored.length} question(s) errored — every rate above is computed only over questions that ran, so treat them as provisional until this is zero.`);
+  console.log(
+    `\n⚠ ${errored.length} question(s) errored — every rate above is computed only over questions that ran, so treat them as provisional until this is zero.`,
+  );
 
 if (outPath) {
-  writeFileSync(outPath, JSON.stringify({ generatedAt: new Date().toISOString(), api: API, results }, null, 2));
+  writeFileSync(
+    outPath,
+    JSON.stringify(
+      { generatedAt: new Date().toISOString(), api: API, results },
+      null,
+      2,
+    ),
+  );
   console.log(`\nreport: ${outPath}`);
 }
 // Only citation validity and errors are hard failures. Self-retrieval is a
