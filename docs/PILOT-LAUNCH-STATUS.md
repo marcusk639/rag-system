@@ -170,7 +170,9 @@ human/infra/legal; **gate #1 is not** — see its entry.
       destination is ⛔ **blocked on Chris's admin consent** — volume backups
       restore only into the same project + environment, so they do not cover
       project/account/provider loss.
-      Still open: a dead-man's-switch (`HEARTBEAT_URL` unset), a restore _from a
+      Still open: a dead-man's-switch (`HEARTBEAT_URL` unset — nothing alerts if
+      the nightly dump stops, the failure `backup.sh`'s own header calls worse
+      than having no backup), a restore _from a
       scheduled artifact_ (the drill restored a hand-taken dump), and the
       `audit_log` retention window — a **counsel** question (ties to P2 #8), not a
       default; volume-backup retention tops out at 3 months.
@@ -356,15 +358,28 @@ that point and none is owned.
 
 ### Security / correctness
 
-- **Postgres TLS.** Worker and MCP log `DATABASE_SSL is unset/disable and
-  DATABASE_URL has no sslmode` on every boot; this corpus is tax return
-  information. Add `?sslmode=no-verify` to `DATABASE_URL` — that covers the pool,
-  pg-boss and migrations, whereas the `DATABASE_SSL` flag only configures the app
-  pool. **Do not use `sslmode=require`:** `pg-connection-string` >= 2.10 aliases
-  it to `verify-full`, which fails outright against the self-signed cert
-  Railway's `postgres-ssl` image serves. Verify with `pg_stat_ssl` joined to
-  `pg_stat_activity` — setting a Railway variable does not reliably restart the
-  service.
+- ~~**Postgres TLS.**~~ ✅ **CLOSED 2026-09-07.** All five services carry an
+  `sslmode` in `DATABASE_URL` (the URL, not the `DATABASE_SSL` flag, which
+  configures only the app pool — pg-boss and the migration runner parse the URL
+  themselves, and pg-boss held every plaintext connection). Verified against
+  `pg_stat_ssl`: **7/7 client backends `ssl = t`, TLSv1.3, zero plaintext**, and
+  the worker's boot warning is gone. Setting the variable was not enough — the
+  worker ran on for another 20 minutes on its old container, so verify the
+  connections, never the variable.
+
+  ⚠ **The two stacks need opposite spellings of the same intent.** The URL is
+  copy-pasteable between them, which makes this a trap rather than a footnote:
+
+  | Consumer | Value | What the other value does |
+  | --- | --- | --- |
+  | node-postgres (api, worker, mcp, web, teams-bot) | `sslmode=no-verify` | `require` is aliased to `verify-full` by `pg-connection-string` >= 2.10 → **fails** against the self-signed cert |
+  | libpq (`pg_dump` in `services/backup`, `psql`, the restore procedure) | `sslmode=require` | `no-verify` is **not a valid libpq sslmode** → refuses to connect before trying |
+
+  Both verified by execution. Note libpq defaults to `prefer`, so its connections
+  were already opportunistically encrypted; `require` makes it mandatory rather
+  than silently falling back. These modes encrypt without authenticating the
+  server — full verification needs the image's CA distributed to every client,
+  which is later hardening, not a launch gate.
 - **Spreadsheet content is chunked from an unredacted field — dormant but real.**
   Redaction rewrites only markdown (`pipeline.ts:379`, written back at `:422`),
   but `chunker.chunk(parsed)` gets the whole object, and for spreadsheets
