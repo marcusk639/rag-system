@@ -95,6 +95,45 @@ describe("renderManifest", () => {
   );
 });
 
+describe("renderManifest — JSON-string escaping", () => {
+  // The template nests `developer.name`, so escaping out of it and adding a
+  // top-level key needs the braces to balance — this payload does exactly that.
+  const NESTED = JSON.stringify({
+    id: "${MICROSOFT_APP_ID}",
+    developer: { name: "${DEVELOPER_NAME}" },
+    webApplicationInfo: {
+      id: "${MICROSOFT_APP_ID}",
+      resource: "${BOT_ENTRA_SSO_SCOPE}",
+    },
+  });
+
+  it("does not let a value overwrite the app id the GUID check just validated", () => {
+    const out = JSON.parse(
+      renderManifest(NESTED, {
+        ...ENV,
+        DEVELOPER_NAME: `ACME"},"id":"NOT-A-GUID","pad":{"z":"`,
+      }),
+    );
+    expect(out.id).toBe(ENV.MICROSOFT_APP_ID);
+    expect(out.webApplicationInfo.resource).toBe(ENV.BOT_ENTRA_SSO_SCOPE);
+  });
+
+  it("keeps a quote in a firm's name as data, not structure", () => {
+    const name = `Dave's "Accounting" LLP \\ Co`;
+    const out = JSON.parse(
+      renderManifest(NESTED, { ...ENV, DEVELOPER_NAME: name }),
+    );
+    expect(out.developer.name).toBe(name);
+    expect(Object.keys(out)).toEqual(["id", "developer", "webApplicationInfo"]);
+  });
+
+  it("leaves ordinary values byte-identical", () => {
+    const out = JSON.parse(renderManifest(NESTED, ENV));
+    expect(out.developer.name).toBe(ENV.DEVELOPER_NAME);
+    expect(out.id).toBe(ENV.MICROSOFT_APP_ID);
+  });
+});
+
 describe("the real manifest template", () => {
   const template = readFileSync(
     new URL("../manifest/manifest.json", import.meta.url),

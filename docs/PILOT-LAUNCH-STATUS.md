@@ -32,7 +32,7 @@
 > documents, every one of them already screened by the TRI scanner and classed
 > A**, with the 8 that carried identifier patterns flagged or blocked at ingest.
 > The audit is a short review of a short list, and it is still the real gate:
-> the scanner catches identifier *patterns*, not client-confidential *content*,
+> the scanner catches identifier _patterns_, not client-confidential _content_,
 > which remains a firm-domain judgment for Chris/Doug.
 
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
@@ -148,6 +148,43 @@ task."_ That held until the content audit ran. Gates #2 and #3 are still purely
 human/infra/legal; **gate #1 is not** — see its entry.
 
 ### P0 — hard gates (internal/unapproved pilot only until done)
+
+- [ ] **0. ⛔ NEW 2026-09-07 — ~36% of the corpus is retrievable but unanswerable.**
+      The generation-time §7216 guard refuses **17 of 47 documents** with
+      `422 COMPLIANCE_VIOLATION — TRI detected in generation input`, and they
+      cluster in exactly the domains staff would ask about most: payroll and tax
+      (`1099 Process Master Workbook`, `Register Schedule C to File W-2s for
+    Children`, `Payroll Tax Compliance and Deadlines`, `Quarterly and Annual
+    Payroll Tax Process`, the Louisiana entity formation/dissolution SOPs).
+
+      **These are false positives.** The rule fires on `1099+amount` /
+          `W2+amount` co-occurrence, which matches procedural text about *how to
+          file* a form — "issue 1099s over $600" in a checklist. There is no
+          taxpayer in these documents and therefore no taxpayer return information;
+          every one of them passed the ingest-time scanner and is classed A. The
+          user-facing symptom is a raw 422, not a graceful message.
+
+          Measured by `scripts/check-kb-grounding.mjs` (51 questions, 0 errors).
+          Everything else in that run was healthy: **0 invalid citations** across 33
+          answers, **29/30 (96.7%)** self-retrieval, **3/3** correct refusals. The
+          retrieval and generation stack works; a third of the corpus is simply
+          walled off from it.
+
+          Four ways out, in the order I would try them — the choice is a compliance
+          judgment, not an engineering one:
+          1. **Redact the matched spans before generation** rather than refusing the
+             whole answer. The document stays useful and the pattern never reaches
+             the model.
+          2. **Tighten the pattern** to require corroborating context (a name, SSN,
+             or EIN near the form reference) instead of any nearby number.
+          3. **Drop the 17 from the index** — honest, and stops an unanswerable
+             document from crowding out an answerable one in top-k.
+          4. **Leave it, fix only the UX** — turn the 422 into "I can't answer from
+             that document for compliance reasons." Cheapest; keeps the gap.
+
+          ⚠ Do not treat this as purely cosmetic. Refusing to send "1099" + "$600"
+          from an SOP to Gemini protects nothing real, and pilot users will judge
+          the product on the third of it that answers nothing.
 
 - [ ] **1. Content audit** — ⚠ **IN PROGRESS WITH A FINDING (2026-08-03), not unstarted.** The deterministic client-identifier screen has now run against all 858 documents and found client-identifying material in the index (full correction **below**, under _Fastest defensible path_). ⛔ **Remediation has not started:** Phase 1 Task 1.1 — removing the flagged roster from the index — is an unchecked box, so assume it is still retrievable through the live deployment. Beyond that, closing this gate is **not** purely human work despite this file's "none of it is code" framing: it needs connector exclude-paths, a metadata/citation fix, and an ingest-time gate. The human half is a firm reviewer ruling on the residual. `superpowers/plans/2026-08-03-kb-content-boundary.md` sizes this at ~97 documents needing genuine review once structural folder exclusion removes the rest, and supplies the review instrument. Still firm domain judgment, still Chris/Doug, still not an attorney.
 - [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
@@ -370,22 +407,23 @@ that point and none is owned.
   ⚠ **The two stacks need opposite spellings of the same intent.** The URL is
   copy-pasteable between them, which makes this a trap rather than a footnote:
 
-  | Consumer | Value | What the other value does |
-  | --- | --- | --- |
-  | node-postgres (api, worker, mcp, web, teams-bot) | `sslmode=no-verify` | `require` is aliased to `verify-full` by `pg-connection-string` >= 2.10 → **fails** against the self-signed cert |
-  | libpq (`pg_dump` in `services/backup`, `psql`, the restore procedure) | `sslmode=require` | `no-verify` is **not a valid libpq sslmode** → refuses to connect before trying |
+  | Consumer                                                              | Value               | What the other value does                                                                                        |
+  | --------------------------------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+  | node-postgres (api, worker, mcp, web, teams-bot)                      | `sslmode=no-verify` | `require` is aliased to `verify-full` by `pg-connection-string` >= 2.10 → **fails** against the self-signed cert |
+  | libpq (`pg_dump` in `services/backup`, `psql`, the restore procedure) | `sslmode=require`   | `no-verify` is **not a valid libpq sslmode** → refuses to connect before trying                                  |
 
   Both verified by execution. Note libpq defaults to `prefer`, so its connections
   were already opportunistically encrypted; `require` makes it mandatory rather
   than silently falling back. These modes encrypt without authenticating the
   server — full verification needs the image's CA distributed to every client,
   which is later hardening, not a launch gate.
+
 - **Spreadsheet content is chunked from an unredacted field — dormant but real.**
   Redaction rewrites only markdown (`pipeline.ts:379`, written back at `:422`),
   but `chunker.chunk(parsed)` gets the whole object, and for spreadsheets
   `composite-chunker.ts:42` routes on `document.tables` and `:55` chunks from
   those rows, bypassing the redacted markdown. `parsed.tables` is never redacted.
-  It is currently contained only *indirectly*: the parser also renders tables
+  It is currently contained only _indirectly_: the parser also renders tables
   into `markdown`, so redaction finds the identifiers there, escalating the doc
   to Class D and quarantining it before chunking. That protection is a side
   effect of markdown rendering, not a guard on `tables`. Any change that stops
@@ -430,7 +468,7 @@ leverage order:
    the stale-image class. `RAILWAY_GIT_COMMIT_SHA` is already populated.
 3. Make `preDeployCommand` a real preflight: it runs the new image with full
    production env before anything takes traffic. Assert DB + migration version,
-   parser reachable *and* authenticating, embedder reachable *and* billable,
+   parser reachable _and_ authenticating, embedder reachable _and_ billable,
    object store writable. **Hard-fail on auth/config errors (401/403), warn-only
    on transient 5xx** — otherwise a momentary Gemini blip crash-loops the deploy.
 
