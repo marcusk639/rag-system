@@ -44,7 +44,36 @@ if (!questionsPath) {
 const outIdx = process.argv.indexOf("--out");
 const outPath = outIdx > -1 ? process.argv[outIdx + 1] : null;
 
-const questions = JSON.parse(readFileSync(questionsPath, "utf8"));
+let questions;
+try {
+  questions = JSON.parse(readFileSync(questionsPath, "utf8"));
+} catch (err) {
+  console.error(`${questionsPath}: ${err.message}`);
+  process.exit(2);
+}
+if (!Array.isArray(questions) || questions.length === 0) {
+  console.error(`${questionsPath}: expected a non-empty JSON array`);
+  process.exit(2);
+}
+// `kind` drives the scorecard bucket and `expectRefusal` drives the scoring
+// branch. They are separate fields, so a typo in either silently drops a
+// question out of the reported population while still counting as answered.
+const KINDS = new Set(["self-retrieval", "out-of-corpus"]);
+for (const [i, q] of questions.entries()) {
+  const bad = !q?.question
+    ? "missing `question`"
+    : !KINDS.has(q.kind)
+      ? `kind must be one of ${[...KINDS].join(" | ")}, got ${JSON.stringify(q.kind)}`
+      : (q.kind === "out-of-corpus") !== Boolean(q.expectRefusal)
+        ? "`kind` and `expectRefusal` disagree"
+        : q.kind === "self-retrieval" && typeof q.expectDocumentId !== "string"
+          ? "self-retrieval needs a string `expectDocumentId`"
+          : null;
+  if (bad) {
+    console.error(`${questionsPath} question[${i}]: ${bad}`);
+    process.exit(2);
+  }
+}
 const headers = {
   authorization: `Bearer ${TOKEN}`,
   "content-type": "application/json",
@@ -54,12 +83,39 @@ const REFUSAL =
   /\b(cannot|can't|could not|couldn't|unable|no (relevant )?(information|documents?|record)|not (found|available|covered|contain)|does not (appear|contain)|don't have|do not have)\b/i;
 
 const docCache = new Map();
+/**
+ * → "exists" | "missing", or THROWS on anything else.
+ *
+ * Treating every non-200 as "missing" turns a expired token or a transient 502
+ * into "the KB fabricated a citation" — the most alarming thing this script can
+ * report, manufactured from an infrastructure blip. Only the two definitive
+ * answers are cached; unknowns are raised so they surface as errors instead.
+ */
 async function documentExists(id) {
   if (docCache.has(id)) return docCache.get(id);
-  const res = await fetch(`${API}/documents/${id}`, { headers });
-  const ok = res.status === 200;
-  docCache.set(id, ok);
-  return ok;
+  const res = await fetch(`${API}/documents/${encodeURIComponent(id)}`, {
+    headers,
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (res.status === 200) {
+    const body = await res.json().catch(() => null);
+    if (body?.id !== id) {
+      throw new Error(
+        `documents/${id} returned 200 for a different id (${body?.id}) — ` +
+          `something upstream is not serving real documents`,
+      );
+    }
+    docCache.set(id, "exists");
+    return "exists";
+  }
+  if (res.status === 404) {
+    docCache.set(id, "missing");
+    return "missing";
+  }
+  throw new Error(
+    `cannot verify document ${id}: HTTP ${res.status} — ` +
+      `a checker failure, NOT evidence the document is missing`,
+  );
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -77,21 +133,25 @@ async function ask(question, attempt = 0) {
     body: JSON.stringify({ question }),
   });
   if (res.status === 429 && attempt < 5) {
-    const body = await res.text();
-    const secs = Number(/retry in (\d+)/.exec(body)?.[1] ?? 30);
+    // The `retry-after` HEADER is an integer number of seconds. The response
+    // BODY humanises it — @fastify/rate-limit renders a full window as
+    // "retry in 1 minute", which a `(\d+)` scrape reads as 1 second, burning
+    // every retry inside one window. Read the header; fall back to the window.
+    const secs = Number(res.headers.get("retry-after")) || 60;
     await sleep((secs + 2) * 1000);
     return ask(question, attempt + 1);
   }
-  if (res.status === 422) {
-    const body = await res.text();
-    if (body.includes("COMPLIANCE_VIOLATION")) {
-      // Not a harness error: the generation-time TRI guard refused to answer.
-      // A distinct, reportable outcome — the user gets no answer at all.
-      return { blockedByGuard: true, guardMessage: body.slice(0, 200) };
-    }
+  // Read the body EXACTLY once: a second `res.text()` throws "Body is unusable"
+  // and replaces the API's real error with a stream artefact.
+  const raw = await res.text();
+  if (res.status === 422 && raw.includes("COMPLIANCE_VIOLATION")) {
+    // Not a harness error: the generation-time TRI guard refused to answer.
+    // A distinct, reportable outcome — the user gets no answer at all.
+    return { blockedByGuard: true, guardMessage: raw.slice(0, 200) };
   }
-  if (!res.ok) throw new Error(`ask failed: ${res.status} ${await res.text()}`);
-  return res.json();
+  if (!res.ok)
+    throw new Error(`ask failed: ${res.status} ${raw.slice(0, 300)}`);
+  return JSON.parse(raw);
 }
 
 // Spacing between questions, on top of 429 backoff. Generation is the slow,
@@ -120,7 +180,9 @@ for (const [i, q] of questions.entries()) {
     // a fabricated citation on a refusal is still a fabricated citation.
     const invalid = [];
     for (const c of citations) {
-      if (!(await documentExists(c.documentId))) invalid.push(c.documentId);
+      if ((await documentExists(c.documentId)) === "missing") {
+        invalid.push(c.documentId);
+      }
     }
     row.citationCount = citations.length;
     row.invalidCitations = invalid;
@@ -130,7 +192,16 @@ for (const [i, q] of questions.entries()) {
       // retriever always returns its top-k, so "cited something" is normal
       // even when the corpus has no answer. What matters is that the model
       // does not assert an answer it cannot support.
-      row.refused = REFUSAL.test(answer);
+      // A substring match anywhere in the text scores "…do not contain a 2025
+      // deadline, but the standard deadline is April 15" as a refusal — a
+      // confabulation counted as the very thing this check exists to catch.
+      // A real refusal is short and is nothing but a refusal.
+      const trimmed = answer.trim();
+      row.answerLength = trimmed.length;
+      row.refused =
+        REFUSAL.test(trimmed) &&
+        trimmed.length <= 400 &&
+        !/\b(however|but|that said|based on|according to)\b/i.test(trimmed);
       row.pass = row.refused && invalid.length === 0;
     } else {
       row.retrievedExpected = citations.some(
@@ -192,6 +263,42 @@ if (outPath) {
   );
   console.log(`\nreport: ${outPath}`);
 }
-// Only citation validity and errors are hard failures. Self-retrieval is a
-// measurement, not a gate: title-derived questions cannot support a threshold.
-process.exit(invalidTotal > 0 || results.some((r) => r.error) ? 1 : 0);
+// What gates, and what deliberately does not.
+//
+// Self-retrieval is excluded on purpose: title-derived questions share
+// vocabulary with their targets, so the rate is a ceiling and cannot support a
+// threshold. EVERYTHING ELSE gates. The first version of this script gated on
+// citation validity and errors alone, which meant the run that discovered a
+// third of the corpus was unanswerable exited 0 — and a KB that confabulated
+// every out-of-corpus answer would also have exited 0.
+const refusalFailures = oobMeasured.filter((r) => !r.refused).length;
+if (refusalFailures > 0) {
+  console.log(
+    `\n✗ ${refusalFailures} out-of-corpus question(s) were NOT refused — confabulation.`,
+  );
+}
+if (blocked.length > 0) {
+  console.log(
+    `\n✗ ${blocked.length} question(s) were blocked by the TRI guard — the user gets no answer.`,
+  );
+}
+if (measured.length === 0) {
+  console.log(
+    "\n✗ zero questions produced a measurable answer — this run measured nothing.",
+  );
+}
+if (selfMeasured.filter((r) => !r.retrievedExpected).length > 0) {
+  console.log(
+    `\nNOTE: ${selfMeasured.filter((r) => !r.retrievedExpected).length} self-retrieval miss(es) do NOT affect the exit code — ` +
+      `title-derived questions cannot support a threshold (docs/EVAL-BASELINE.md).`,
+  );
+}
+process.exit(
+  invalidTotal > 0 ||
+    errored.length > 0 ||
+    refusalFailures > 0 ||
+    blocked.length > 0 ||
+    measured.length === 0
+    ? 1
+    : 0,
+);
