@@ -91,3 +91,48 @@ describe("resolveGenerationCredentials", () => {
     ).toEqual({ kind: "ok", apiKey: "gen-key" });
   });
 });
+
+describe("resolveGenerationCredentials — cross-vendor inheritance", () => {
+  it("does NOT mail the Gemini embedding key to Anthropic", () => {
+    // Rule 3 inherits "the embedding provider's key, for the single-vendor
+    // hosted case". Anthropic is never an embedding vendor here, so for
+    // generation=claude that case cannot arise — inheriting would send a
+    // live Gemini secret to api.anthropic.com and get a 401 for its trouble.
+    const result = resolveGenerationCredentials({
+      embeddingApiKey: "gemini-production-key",
+      generationProvider: "claude",
+      embeddingProvider: "gemini",
+    });
+    expect(result.kind).toBe("disabled");
+    if (result.kind === "disabled") {
+      expect(result.reason).toMatch(/claude/i);
+    }
+  });
+
+  it("still inherits when generation and embedding are the same vendor", () => {
+    expect(
+      resolveGenerationCredentials({
+        embeddingApiKey: "gemini-key",
+        generationProvider: "gemini",
+        embeddingProvider: "gemini",
+      }),
+    ).toEqual({ kind: "ok", apiKey: "gemini-key" });
+  });
+
+  it("an explicit generation key works for Claude regardless of the embedding vendor", () => {
+    expect(
+      resolveGenerationCredentials({
+        generationApiKey: "sk-ant-explicit",
+        embeddingApiKey: "gemini-key",
+        generationProvider: "claude",
+        embeddingProvider: "gemini",
+      }),
+    ).toEqual({ kind: "ok", apiKey: "sk-ant-explicit" });
+  });
+
+  it("keeps legacy behaviour when the providers are not supplied", () => {
+    expect(
+      resolveGenerationCredentials({ embeddingApiKey: "some-key" }),
+    ).toEqual({ kind: "ok", apiKey: "some-key" });
+  });
+});

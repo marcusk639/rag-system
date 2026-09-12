@@ -5,6 +5,7 @@ import {
   createGenerator,
   filterCitationsToAnswer,
   GeminiGenerator,
+  ClaudeGenerator,
   OpenAIGenerator,
 } from "./generator.js";
 import { ComplianceError, EgressError, EgressPolicy } from "@rag/core";
@@ -175,6 +176,7 @@ describe("TRI pre-flight policy", () => {
     egressPolicy: new EgressPolicy([
       "generativelanguage.googleapis.com",
       "api.openai.com",
+      "api.anthropic.com",
     ]),
     triPolicy,
     // The OpenAI SDK captures its own `fetch`, so globalThis stubbing does not
@@ -246,6 +248,7 @@ describe("TRI pre-flight policy", () => {
   for (const [name, make] of [
     ["gemini", (o: never) => new GeminiGenerator(o)],
     ["openai", (o: never) => new OpenAIGenerator(o)],
+    ["claude", (o: never) => new ClaudeGenerator(o)],
   ] as const) {
     describe(name, () => {
       it("blocks a TRI-matching prompt under triPolicy=block", async () => {

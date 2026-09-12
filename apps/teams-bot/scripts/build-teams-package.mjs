@@ -33,7 +33,14 @@ writeFileSync(join(outDir, "manifest.json"), rendered);
 try {
   execFileSync(
     "zip",
-    ["-j", "-q", zipPath, join(outDir, "manifest.json"), join(manifestDir, "color.png"), join(manifestDir, "outline.png")],
+    [
+      "-j",
+      "-q",
+      zipPath,
+      join(outDir, "manifest.json"),
+      join(manifestDir, "color.png"),
+      join(manifestDir, "outline.png"),
+    ],
     { stdio: "inherit" },
   );
 } catch (err) {
