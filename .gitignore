@@ -65,3 +65,9 @@ scripts/API_PRINCIPALS.json
 
 # Read-only corpus extraction output — real SOP titles and paths (firm-confidential)
 corpus-analysis/
+
+# Agent session state (snapshots, token logs, run markers) — tooling
+# artifacts, never source. The leading **/ is required: a gitignore pattern
+# containing an internal slash is anchored to the repo root, so a bare
+# `.claude/sessions/` misses nested copies like apps/teams-bot/.claude/sessions/.
+**/.claude/sessions/
