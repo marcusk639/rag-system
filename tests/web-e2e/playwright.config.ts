@@ -5,5 +5,6 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
+  globalSetup: "./src/setup/global-setup.ts",
   use: { baseURL: "http://localhost:3200", trace: "retain-on-failure" },
 });
