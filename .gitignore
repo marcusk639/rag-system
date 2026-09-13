@@ -69,3 +69,12 @@ corpus-analysis/
 # Scratch space for the weekly-digest pipeline (timeline fetch, split script)
 .scratch/
 
+# Agent session state (snapshots, token logs, run markers) — tooling
+# artifacts, never source. The leading **/ is required: a gitignore pattern
+# containing an internal slash is anchored to the repo root, so a bare
+# `.claude/sessions/` misses nested copies like apps/teams-bot/.claude/sessions/.
+#
+# Re-added 2026-09-12: PR #65 introduced this rule and the merge resolution of
+# PR #66 dropped it while resolving a conflict on the line below. If it goes
+# missing again, check the most recent .gitignore conflict resolution.
+**/.claude/sessions/
