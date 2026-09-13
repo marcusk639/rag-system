@@ -34,15 +34,15 @@ A fifth, worse, was missing entirely: **a fixture user retrieves nothing.** See
 
 ## Decisions
 
-| Decision   | Choice                                                            | Rejected, and why                                                                                                                                                                                                                                                              |
-| ---------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Layer      | Browser e2e                                                       | Deepening the API-level check cannot see the UI layer, which is the gap                                                                                                                                                                                                        |
-| Test auth  | Mint an Auth.js session cookie                                    | `WEB_AUTH_MODE=static-fallback` is a production break-glass override; a suite inside it never exercises per-user session → scope-token → scope-threaded retrieval, so a scope-leak regression passes green. Real Entra sign-in needs a tenant account, CI secrets, MFA screens |
-| Target     | Local stack, seeded fixture corpus                                | The deployed Railway KB shifts under us, cannot gate CI, and spends production quota                                                                                                                                                                                           |
-| Generator  | `gemini`, matching production                                     | Stubbing removes refusal and grounding, which are properties of the model's response — exactly what we set out to verify. Ollama via `GENERATION_BASE_URL` is the offline fallback if CI cannot hold a key; it needs an `EGRESS_ALLOWED_HOSTS` entry and a model pull          |
-| Embedder   | `local` (ONNX) **with `EMBEDDING_MODEL=Xenova/bge-base-en-v1.5`** | Gemini costs quota per run. `FakeEmbedder` is semantically meaningless, so self-retrieval would only prove the sparse channel works                                                                                                                                            |
-| Location   | New package `tests/web-e2e`                                       | `apps/web/e2e/` drags `pg`, `undici`, `@rag/db`, `@rag/ingestion` — transitively `@huggingface/transformers` and the AWS/OpenAI/Anthropic SDKs — into the Next.js dependency graph                                                                                             |
-| TRI policy | `GENERATION_TRI_POLICY=warn`                                      | `block` is not what production runs, and under it a TRI block is indistinguishable from a genuine refusal                                                                                                                                                                      |
+| Decision   | Choice                                                            | Rejected, and why                                                                                                                                                                                                                                                                                                                     |
+| ---------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Layer      | Browser e2e                                                       | Deepening the API-level check cannot see the UI layer, which is the gap                                                                                                                                                                                                                                                               |
+| Test auth  | Mint an Auth.js session cookie                                    | `WEB_AUTH_MODE=static-fallback` is a production break-glass override; a suite inside it never exercises per-user session → scope-token → scope-threaded retrieval, so a scope-leak regression passes green. Real Entra sign-in needs a tenant account, CI secrets, MFA screens                                                        |
+| Target     | Local stack, seeded fixture corpus                                | The deployed Railway KB shifts under us, cannot gate CI, and spends production quota                                                                                                                                                                                                                                                  |
+| Generator  | Ollama (OpenAI-compatible), local                                 | `gemini` was the first choice, to match production — but it contradicts the reason the local stack was chosen at all, dragging a CI secret, quota spend and network flakiness back into a suite justified on being hermetic. Stubbing is the other extreme: it removes refusal behaviour entirely. See "Why not the production model" |
+| Embedder   | `local` (ONNX) **with `EMBEDDING_MODEL=Xenova/bge-base-en-v1.5`** | Gemini costs quota per run. `FakeEmbedder` is semantically meaningless, so self-retrieval would only prove the sparse channel works                                                                                                                                                                                                   |
+| Location   | New package `tests/web-e2e`                                       | `apps/web/e2e/` drags `pg`, `undici`, `@rag/db`, `@rag/ingestion` — transitively `@huggingface/transformers` and the AWS/OpenAI/Anthropic SDKs — into the Next.js dependency graph                                                                                                                                                    |
+| TRI policy | `GENERATION_TRI_POLICY=warn`                                      | `block` is not what production runs, and under it a TRI block is indistinguishable from a genuine refusal                                                                                                                                                                                                                             |
 
 ## Architecture
 
@@ -69,7 +69,10 @@ All required; the suite asserts each is set before booting anything.
 | `RAG_API_URL`                            | `http://localhost:<api port>`       | The BFF has no other way to reach the API                                                                                                |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `local` / `Xenova/bge-base-en-v1.5` | Provider alone leaves a Gemini model id in place                                                                                         |
 | `CHUNK_SIZE`                             | `512`                               | `config.ts` caps this for the local provider; `runOneIngestion` does not, so seeded chunks would exceed the model limit and be truncated |
-| `GENERATION_PROVIDER` + `GEMINI_API_KEY` | `gemini`                            | A missing key **disables generation with a warn**, not a throw — every spec then fails as a 503 rather than a config error               |
+| `GENERATION_PROVIDER`                    | `openai`                            | Required for a self-hosted endpoint. `gemini` with a `GENERATION_BASE_URL` set **throws at startup**                                     |
+| `GENERATION_MODEL`                       | `llama3.1:8b`                       | The name the Ollama server exposes, not a HuggingFace id                                                                                 |
+| `GENERATION_BASE_URL`                    | `http://127.0.0.1:11434/v1`         | Ollama's OpenAI-compatible endpoint. Note the `/v1`                                                                                      |
+| `EGRESS_ALLOWED_HOSTS`                   | `127.0.0.1`                         | Deny-by-default allow-list validating the host actually called; omit it and every answer is `EGRESS_BLOCKED` (503)                       |
 | `GENERATION_TRI_POLICY`                  | `warn`                              | Matches production; stops TRI blocks masquerading as refusals                                                                            |
 | `AUTH_SECRET`                            | ≥32 chars                           | Derives the session-cookie encryption key                                                                                                |
 | `AUTH_URL` or `AUTH_TRUST_HOST`          | set                                 | Under `next start`, `NODE_ENV=production` makes `trustHost` false and `auth()` errors on every navigation                                |
@@ -120,6 +123,72 @@ sparse channel, so self-retrieval would pass for the wrong reason.
 The catch is concrete — `chunks.embedding_provider` and `chunks.embedding_model`
 (`packages/db/src/schema.ts:213-214`) record what seeded each chunk. globalSetup
 asserts those columns match the configured provider.
+
+## Generation: standing up Ollama
+
+### Why not the production model
+
+`gemini` was the first choice, on the reasoning that matching production makes
+refusal behaviour authentic. That reasoning does not survive scrutiny: it
+reintroduces a CI secret, quota spend, and network flakiness into a suite whose
+entire justification was hermeticity. The two decisions contradicted each other.
+
+Sorting the assertions by how much they actually depend on model quality:
+
+| Assertion                                             | Dependence on the model                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| 0, 1, 4 — smoke, citation resolution, UI faithfulness | None. Citations come from retrieval; the model only picks which to cite |
+| 2 — self-retrieval                                    | Minimal. Any model cites the one document that answers the question     |
+| 3 — out-of-corpus refusal                             | Real. A small local model may confabulate where Gemini refuses          |
+
+Only assertion 3 carries fidelity risk, and **that risk is already owned
+elsewhere**: `scripts/check-kb-grounding.mjs` runs against the deployed KB with
+the production model and measured 3/3 correct refusals. Whether _Gemini_ refuses
+well is that script's job. Whether _the UI renders a refusal correctly_ is this
+suite's job, and a local model exercises it fine.
+
+### Setup
+
+`docs/LOCAL-GENERATION.md` documents this path; it exists for deployments that
+cannot use a hosted API at all. Note that doc's own caveat: the server shapes it
+lists are documented defaults, "not exercised in this environment" — so treat the
+first run as the thing that proves it.
+
+```bash
+# 1. Install (macOS; see ollama.com for Linux/CI packages)
+brew install ollama
+
+# 2. Start the server — listens on 127.0.0.1:11434
+ollama serve &
+
+# 3. Pull the model. ~4.7GB for llama3.1:8b; this is the slow step,
+#    and the one CI must cache.
+ollama pull llama3.1:8b
+
+# 4. Verify the OpenAI-compatible surface answers, not just that the port is open
+curl -s http://127.0.0.1:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"llama3.1:8b","messages":[{"role":"user","content":"reply with OK"}]}' \
+  | head -c 200
+```
+
+Then the four variables in the matrix above. Two traps worth stating:
+
+- **`GENERATION_PROVIDER` must be `openai`, not `ollama`.** There is no ollama
+  provider; the endpoint is consumed through the OpenAI-compatible client.
+  `gemini` plus a base URL throws at startup by design.
+- **`GENERATION_API_KEY` stays unset.** A placeholder is sent automatically
+  because the OpenAI SDK requires a non-empty value. Precedence is deliberate: a
+  configured `GENERATION_BASE_URL` gets the placeholder and **never** inherits the
+  embedding provider's key, on the grounds that a self-hosted endpoint is not
+  verifiably yours. Do not "fix" a perceived missing key by setting
+  `GEMINI_API_KEY`.
+
+### Verifying it is actually local
+
+Remove `127.0.0.1` from `EGRESS_ALLOWED_HOSTS`, restart, and ask a question: it
+must fail `EGRESS_BLOCKED` (503). If it still answers, generation is not going
+where you think it is.
 
 ## What we assert
 
@@ -179,8 +248,11 @@ excluding `@rag/e2e` only. A `test` script in a new package would boot docker,
 download a 430 MB ONNX model and spend LLM quota **on every push**.
 
 The package therefore exposes `test:browser`, not `test`, and the pre-push filter
-widens to `'!@rag/*e2e'`. CI runs it as its own job with a `GEMINI_API_KEY` secret,
-a Playwright browser-install step, and a HuggingFace model cache.
+widens to `'!@rag/*e2e'`. CI runs it as its own job needing **no secrets at all** —
+generation and embedding are both local. What the job does need is caching: a
+HuggingFace cache for the 430 MB ONNX embedding model, an Ollama model cache for
+the ~4.7 GB `llama3.1:8b` pull, and a Playwright browser-install step. Uncached,
+those three dominate the run; cached, they are close to free.
 
 ## Acceptance criteria
 
@@ -190,9 +262,18 @@ a Playwright browser-install step, and a HuggingFace model cache.
   coherence assertion fails. An assertion surviving its mutation is not pinning
   what it claims.
 - `pnpm -r run test` and the pre-push hook do **not** invoke it.
-- Under 10 minutes warm. The first run is dominated by the model download and
-  docker cold start, not the three LLM calls — the first draft's "three chat
-  requests is the whole cost" understated runtime by an order of magnitude.
+- **Wall clock, measured on the first real run rather than assumed.** Moving
+  generation local traded a secret for latency, and the honest budget changed
+  twice: the first draft's "three chat requests is the whole cost" ignored setup
+  entirely, and the Gemini-era "under 10 minutes warm" assumed hosted inference.
+  With Ollama the three answers run on local CPU and are now a **leading** cost,
+  not a rounding error — plausibly minutes each on a CI runner without a GPU.
+
+  Cold, the run also pays two model downloads (430 MB ONNX + ~4.7 GB
+  `llama3.1:8b`) plus docker start. So: measure the first green run, record the
+  warm and cold numbers here, and treat that as the budget. If warm exceeds ~10
+  minutes, the lever is a smaller generation model — not dropping assertions,
+  and not going back to a hosted key.
 
 ## Out of scope
 
