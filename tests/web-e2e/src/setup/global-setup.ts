@@ -5,6 +5,7 @@ import pg from "pg";
 import { ensureStackReady } from "./stack.js";
 import { E2E_ENV } from "../env.js";
 import { FIXTURE_SOURCE_NAME } from "../fixtures/corpus.js";
+import { grantFixtureAccess } from "./seed.js";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TSX_BIN = join(PACKAGE_ROOT, "node_modules", ".bin", "tsx");
@@ -14,6 +15,11 @@ export default async function globalSetup(): Promise<void> {
   await ensureStackReady();
   runSeedChildProcess();
   const sourceId = await verifySeededCorpus();
+  // Runs in the PARENT, after verification: seeding happens in a child process
+  // so no source id crosses that boundary, and the id below is the one
+  // verifySeededCorpus looked up. Must follow truncateAll (CASCADE) or the
+  // assignment is silently removed.
+  await grantFixtureAccess(sourceId);
   process.env.E2E_SOURCE_ID = sourceId;
 }
 
