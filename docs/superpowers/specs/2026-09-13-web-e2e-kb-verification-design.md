@@ -55,29 +55,51 @@ A fifth, worse, was missing entirely: **a fixture user retrieves nothing.** See
 4. Playwright       drives the browser
 ```
 
-`global-setup.ts` is still reused for docker boot and migrations, and
-`runOneIngestion` for seeding. Process 2 is new: the Playwright globalSetup must
-start it, health-check it, and tear it down.
+Process 2 is new: the Playwright globalSetup must start it, health-check it, and
+tear it down. Use `apps/api`'s **`start`** script (compiled `dist/`), never `dev`
+— `dev` runs `tsx watch --env-file-if-exists=../../.env`, which would silently
+load the developer's real `.env` (real keys, real `DATABASE_URL`) into a suite
+whose whole premise is hermeticity.
+
+**On reusing `@rag/e2e`: copy, don't import.** An earlier draft treated this as
+free. It is not: that package has no `main`, no `exports` and no build script, so
+it is not consumable; pnpm symlinks it into `node_modules`, where Playwright's
+TypeScript transform does not reach; and its `globalSetup` is a _vitest_
+signature, not Playwright's. Making it importable means an exports map, a build
+step, and knock-on changes to build ordering and the pre-push hook.
+
+The cheaper, more honest trade is to duplicate the ~40 lines of docker-wait plus
+`applyMigrations` into the Playwright globalSetup. Duplication here beats
+reshaping the build graph to avoid it.
 
 ### Environment matrix
 
 All required; the suite asserts each is set before booting anything.
 
-| Variable                                 | Value                               | Why it matters                                                                                                                           |
-| ---------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                           | e2e Postgres                        | Web, API and seeding must share one database                                                                                             |
-| `RAG_API_URL`                            | `http://localhost:<api port>`       | The BFF has no other way to reach the API                                                                                                |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `local` / `Xenova/bge-base-en-v1.5` | Provider alone leaves a Gemini model id in place                                                                                         |
-| `CHUNK_SIZE`                             | `512`                               | `config.ts` caps this for the local provider; `runOneIngestion` does not, so seeded chunks would exceed the model limit and be truncated |
-| `GENERATION_PROVIDER`                    | `openai`                            | Required for a self-hosted endpoint. `gemini` with a `GENERATION_BASE_URL` set **throws at startup**                                     |
-| `GENERATION_MODEL`                       | `llama3.1:8b`                       | The name the Ollama server exposes, not a HuggingFace id                                                                                 |
-| `GENERATION_BASE_URL`                    | `http://127.0.0.1:11434/v1`         | Ollama's OpenAI-compatible endpoint. Note the `/v1`                                                                                      |
-| `EGRESS_ALLOWED_HOSTS`                   | `127.0.0.1`                         | Deny-by-default allow-list validating the host actually called; omit it and every answer is `EGRESS_BLOCKED` (503)                       |
-| `GENERATION_TRI_POLICY`                  | `warn`                              | Matches production; stops TRI blocks masquerading as refusals                                                                            |
-| `AUTH_SECRET`                            | ≥32 chars                           | Derives the session-cookie encryption key                                                                                                |
-| `AUTH_URL` or `AUTH_TRUST_HOST`          | set                                 | Under `next start`, `NODE_ENV=production` makes `trustHost` false and `auth()` errors on every navigation                                |
-| `AUTH_ENTRA_*`                           | dummy values                        | `@auth/core` asserts on OAuth provider config at init even when unused                                                                   |
-| `INTERNAL_SCOPE_JWT_SECRET`              | ≥64 chars                           | Shorter throws; must also appear in the API's `auth.internalScopeSecrets`                                                                |
+> ⚠ **Harness-only, and production-hostile.** These are written for a machine
+> where `127.0.0.1` really is the Ollama host. On Railway `127.0.0.1` is the
+> container itself, and `EGRESS_ALLOWED_HOSTS` _replaces_ rather than merges — so
+> copying this block into a deployed service drops
+> `generativelanguage.googleapis.com` and fails every embedding call, stopping
+> ingestion and answering alike. Never set these on a deployed service.
+
+| Variable                                                                     | Value                               | Why it matters                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                               | e2e Postgres                        | Web, API and seeding must share one database                                                                                                                                                                                                                                                                                            |
+| `RAG_API_URL`                                                                | `http://localhost:<api port>`       | The BFF has no other way to reach the API                                                                                                                                                                                                                                                                                               |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL`                                     | `local` / `Xenova/bge-base-en-v1.5` | Provider alone leaves a Gemini model id in place                                                                                                                                                                                                                                                                                        |
+| `CHUNK_SIZE`                                                                 | `512`                               | Configures the API/worker, where the local provider caps at 512. **It does not reach the seeder** — `runOneIngestion` never reads env, taking `overrides?.chunkSize ?? 800`. Pass `{ chunkSize: 512 }` at the call site too, or seeded chunks exceed the model's limit and are silently truncated                                       |
+| `GENERATION_PROVIDER`                                                        | `openai`                            | Required for a self-hosted endpoint. `gemini` with a `GENERATION_BASE_URL` set **throws at startup**                                                                                                                                                                                                                                    |
+| `GENERATION_MODEL`                                                           | `llama3.1:8b`                       | The name the Ollama server exposes, not a HuggingFace id                                                                                                                                                                                                                                                                                |
+| `GENERATION_BASE_URL`                                                        | `http://127.0.0.1:11434/v1`         | Ollama's OpenAI-compatible endpoint. Note the `/v1`                                                                                                                                                                                                                                                                                     |
+| `EGRESS_ALLOWED_HOSTS`                                                       | `127.0.0.1`                         | Deny-by-default allow-list validating the host actually called; omit it and every answer is `EGRESS_BLOCKED` (503)                                                                                                                                                                                                                      |
+| `GENERATION_TRI_POLICY`                                                      | `warn`                              | Matches production; stops TRI blocks masquerading as refusals                                                                                                                                                                                                                                                                           |
+| `AUTH_SECRET`                                                                | ≥32 chars                           | Derives the session-cookie encryption key                                                                                                                                                                                                                                                                                               |
+| `AUTH_URL` or `AUTH_TRUST_HOST`                                              | set                                 | Under `next start`, `NODE_ENV=production` makes `trustHost` false and `auth()` errors on every navigation                                                                                                                                                                                                                               |
+| `AUTH_ENTRA_*`                                                               | dummy values                        | Harmless belt-and-braces. The justification an earlier draft gave — "`@auth/core` asserts on provider config at init" — is **false**: the only init-time provider assertion fires when a provider has neither issuer nor endpoints, and `auth.ts` always supplies an issuer template. Keep the dummies; do not reason from that premise |
+| `INTERNAL_SCOPE_JWT_SECRET` (web) **and** `INTERNAL_SCOPE_JWT_SECRETS` (API) | same ≥64-char value                 | Two variables, not one: the web BFF reads the **singular** (`apps/web/src/lib/scope-token.ts:16`), the API reads the **plural** comma-separated list (`config.ts:663`). Each entry validates `.min(64)`. Set only one and the other side cannot mint or verify                                                                          |
+| `API_TOKENS`                                                                 | any non-empty value                 | `z.array(z.string()).min(1)` (`config.ts:74`). Unset → empty array → zod throws → `apps/api` exits 1 before it ever listens, and every later failure is noise                                                                                                                                                                           |
+| `API_PORT` and the web `PORT`                                                | two distinct ports                  | Both default to 3000 (`config.ts:649`, and `next start`). Left unset they collide: `EADDRINUSE`, or worse, the BFF proxying to itself                                                                                                                                                                                                   |
 
 ### Auth fixture
 
@@ -133,19 +155,49 @@ refusal behaviour authentic. That reasoning does not survive scrutiny: it
 reintroduces a CI secret, quota spend, and network flakiness into a suite whose
 entire justification was hermeticity. The two decisions contradicted each other.
 
-Sorting the assertions by how much they actually depend on model quality:
+An earlier version of this section claimed assertions 0, 1 and 4 have **no**
+dependence on the model. That was wrong, and it contradicted this document's own
+reason for dropping the A/B precision assertion: `filterCitationsToAnswer` sits
+between retrieval and the rendered chips, keeping only citations whose `[N]`
+markers the model actually emitted. The model gates whether any chip exists.
 
-| Assertion                                             | Dependence on the model                                                 |
-| ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| 0, 1, 4 — smoke, citation resolution, UI faithfulness | None. Citations come from retrieval; the model only picks which to cite |
-| 2 — self-retrieval                                    | Minimal. Any model cites the one document that answers the question     |
-| 3 — out-of-corpus refusal                             | Real. A small local model may confabulate where Gemini refuses          |
+Worse, that dependence fails **open**. With zero markers there are no chips, so
+"every chip resolves" is `[].every(...)` — true — and "done-frame citations equal
+rendered chips" is zero equals zero. Two assertions would have gone green while
+checking nothing: the same fail-open trap this document identifies for the access
+grant, reintroduced one section later.
 
-Only assertion 3 carries fidelity risk, and **that risk is already owned
-elsewhere**: `scripts/check-kb-grounding.mjs` runs against the deployed KB with
-the production model and measured 3/3 correct refusals. Whether _Gemini_ refuses
-well is that script's job. Whether _the UI renders a refusal correctly_ is this
-suite's job, and a local model exercises it fine.
+### Measured, not argued
+
+Rather than reason about whether an 8B model emits `[N]`, it was measured: the
+real `SYSTEM_PROMPT`, through the real `OpenAIGenerator`, against local Ollama,
+with the real `filterCitationsToAnswer` applied to the output.
+
+| Case                   | Runs | ≥1 citation | Exact refusal sentence | Refusal carrying a citation |
+| ---------------------- | ---- | ----------- | ---------------------- | --------------------------- |
+| Answerable question    | 8    | **8/8**     | 0/8                    | —                           |
+| Out-of-corpus question | 6    | **6/6**     | **6/6**                | **6/6**                     |
+
+Three conclusions, two of which overturn earlier claims here:
+
+1. **Marker compliance is not the risk it looked like.** 8/8 on the answerable
+   path. The globalSetup compliance gate stays — as a cheap guard, not as
+   mitigation for a likely failure.
+2. **A correct refusal carries a citation.** 6/6, deterministically, because
+   branch C instructs it: _"If any retrieved document is plausibly adjacent, add
+   one line: `Closest related material: <title> [N]`"_ (`generator.ts:57`). The
+   earlier "refusal renders with zero citations" assertion would have failed
+   **100% of the time on correct behaviour**.
+3. **Generation is not a wall-clock problem.** ~5s per call, so three chat
+   requests is ~15s. An earlier revision corrected "three requests is the whole
+   cost" to "plausibly minutes each"; the measurement lands nearer the original.
+
+Scope caveat: one question per category, 14 calls, one model, a fabricated
+two-document context. Enough to retire a risk and pin a 6/6 deterministic
+behaviour; not enough to claim a precise long-run compliance rate.
+
+Fidelity — whether the _production_ model refuses well — remains owned by
+`scripts/check-kb-grounding.mjs`, which measured 3/3 against the deployed KB.
 
 ### Setup
 
@@ -196,25 +248,42 @@ Invariants only; none matches answer prose, because the generator is
 nondeterministic. **The fixtures are their own oracle** — that is what removes the
 need for a golden corpus.
 
-0. **Precondition smoke.** Minted cookie → `GET /api/sources` returns 200 and
-   lists the fixture source. Runs first: if it fails, every later failure is noise.
+Every citation assertion must **first assert the chip set is non-empty**. With
+zero markers the per-chip checks are vacuously true, so without that guard they
+fail open — see "Measured, not argued".
 
-1. **Citation resolution.** Every rendered chip's document id resolves via
-   `/api/documents/[id]` to 200 with a matching title. Catches fabricated
-   citations at the layer the user actually sees. _The highest-value assertion._
+0. **Preconditions, asserted in globalSetup before any spec runs.** Three, each
+   closing a fail-open surface found the hard way:
+   - the minted cookie yields 200 from a gated route;
+   - `resolveSourceIdsForUser(FIXTURE_OID)` is non-empty;
+   - one canned ask through the API returns `citations.length > 0`, failing with
+     _"the configured generation model did not emit [N] markers — citation
+     assertions cannot be trusted"_.
+
+   Then, as a spec: minted cookie → `GET /api/sources` returns 200 and lists the
+   fixture source. If this fails, every later failure is noise.
+
+1. **Citation resolution.** Assert at least one chip rendered, then that every
+   chip's document id resolves via `/api/documents/[id]` to 200 with a matching
+   title. Catches fabricated citations at the layer the user actually sees.
 
 2. **Self-retrieval.** A fixture carries a nonce phrase unique in the corpus. Ask
    what only it can answer; assert it is cited.
 
-3. **Out-of-corpus refusal.** Ask something absent; assert a refusal renders with
-   **zero citations**. Requires distinct refusal and stream-error testids: under a
-   TRI block the error path also yields zero citations, so one shared testid would
-   let a compliance block masquerade as a refusal.
+3. **Out-of-corpus refusal.** Ask something absent; assert the answer contains the
+   exact branch-C sentence, _"The available documents do not contain enough
+   information to answer that."_, and that the `stream-error` element is absent.
 
-4. **UI faithfulness.** Compare the citations in the SSE `done` frame to the
-   rendered chips. Honest framing: the component maps citations to chips without
-   filtering, so this catches the `length > 0` guard and key collisions — real,
-   but narrower than the first draft claimed.
+   **Citations are explicitly permitted here** — measured 6/6, because the prompt
+   instructs the model to append `Closest related material: <title> [N]`. Asserting
+   zero citations would fail on correct behaviour every time. The absent-error
+   check is what stops a TRI block masquerading as a refusal: both yield no chips,
+   so citation count cannot tell them apart.
+
+4. **UI faithfulness.** Assert the chip set is non-empty, then that it equals the
+   citations in the SSE `done` frame. Honest framing: the component maps citations
+   to chips without filtering, so this catches the `length > 0` guard and key
+   collisions — real, but narrower than the first draft claimed.
 
 ### Dropped: query-appropriate context
 
@@ -234,9 +303,24 @@ sees identical bytes.
 
 ## Changes to production code
 
-Four `data-testid` attributes in `apps/web/src/components/chat-interface/`:
-`assistant-message`, `citation-chip`, `refusal`, `stream-error`. Refusal and error
-must be distinct, per assertion 3.
+Two of these are attributes; two are real changes. Calling all four "attributes"
+understated the largest unscoped item in this design.
+
+- `assistant-message`, `citation-chip` — genuinely just attributes on existing
+  elements.
+- `stream-error` — **needs new structure.** There is no error element today; the
+  error path appends into the same content string
+  (``updateMessage(assistantId, { appendContent: `\n\n_Error: ${message}_` })``),
+  so a stream error and a refusal are literally the same DOM node with different
+  prose. Assertion 3 requires telling them apart, which means lifting error
+  rendering out of `message.content` into its own element — and deciding what
+  becomes of the existing markdown-italic convention.
+- `refusal` — **needs a classification decision.** Something must decide an answer
+  _is_ a refusal. Matching the `EMPTY_ANSWER` constant is the only non-circular
+  option; classifying by "zero citations" would make assertion 3 circular and is
+  wrong anyway, since measured refusals carry a citation. Note this duplicates a
+  judgement the service layer already makes — worth deciding deliberately whether
+  refusal classification belongs in the web layer at all.
 
 `apps/web` has none today, so this introduces a convention. The alternative is
 selecting on rendered prose — the nondeterministic surface avoided everywhere else.
@@ -248,11 +332,20 @@ excluding `@rag/e2e` only. A `test` script in a new package would boot docker,
 download a 430 MB ONNX model and spend LLM quota **on every push**.
 
 The package therefore exposes `test:browser`, not `test`, and the pre-push filter
-widens to `'!@rag/*e2e'`. CI runs it as its own job needing **no secrets at all** —
-generation and embedding are both local. What the job does need is caching: a
-HuggingFace cache for the 430 MB ONNX embedding model, an Ollama model cache for
-the ~4.7 GB `llama3.1:8b` pull, and a Playwright browser-install step. Uncached,
-those three dominate the run; cached, they are close to free.
+widens to `'!@rag/*e2e'`. One nuance: `pnpm` silently skips packages without the
+named script, so exposing `test:browser` is the actual protection — the widened
+filter is belt-and-braces against a future accidental `test` script.
+
+CI runs it as its own job needing **no secrets at all**. But secret-free is not
+network-free, and the two should not be blurred: on a cold cache the job still
+pulls ~430 MB from `huggingface.co` and ~4.7 GB from Ollama's registry, and those
+downloads do **not** go through `EgressPolicy` (transformers.js uses its own
+fetch). So the "drop 127.0.0.1 and confirm EGRESS_BLOCKED" check proves the
+_generation call_ is local, not that the suite is hermetic end to end.
+
+What the job needs is therefore caches rather than secrets: a HuggingFace cache,
+an Ollama model cache, and a Playwright browser-install step. Uncached those
+dominate; cached they are close to free.
 
 ## Acceptance criteria
 
@@ -262,18 +355,17 @@ those three dominate the run; cached, they are close to free.
   coherence assertion fails. An assertion surviving its mutation is not pinning
   what it claims.
 - `pnpm -r run test` and the pre-push hook do **not** invoke it.
-- **Wall clock, measured on the first real run rather than assumed.** Moving
-  generation local traded a secret for latency, and the honest budget changed
-  twice: the first draft's "three chat requests is the whole cost" ignored setup
-  entirely, and the Gemini-era "under 10 minutes warm" assumed hosted inference.
-  With Ollama the three answers run on local CPU and are now a **leading** cost,
-  not a rounding error — plausibly minutes each on a CI runner without a GPU.
+- **Wall clock.** Generation is measured, not guessed: ~5s per call on local CPU,
+  so the three chat requests cost ~15s. This budget has now been wrong twice in
+  both directions — the first draft ignored setup entirely, and the correction
+  overshot to "plausibly minutes each" for local inference. The measurement lands
+  nearer the first.
 
-  Cold, the run also pays two model downloads (430 MB ONNX + ~4.7 GB
-  `llama3.1:8b`) plus docker start. So: measure the first green run, record the
-  warm and cold numbers here, and treat that as the budget. If warm exceeds ~10
-  minutes, the lever is a smaller generation model — not dropping assertions,
-  and not going back to a hosted key.
+  Setup dominates instead: cold, the run pays two model downloads (430 MB ONNX +
+  ~4.7 GB `llama3.1:8b`) plus docker start. Record warm and cold numbers here
+  after the first green run and treat those as the budget. If warm exceeds ~10
+  minutes the lever is a smaller generation model — not dropping assertions, and
+  not returning to a hosted key.
 
 ## Out of scope
 
