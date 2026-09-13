@@ -78,3 +78,15 @@ corpus-analysis/
 # PR #66 dropped it while resolving a conflict on the line below. If it goes
 # missing again, check the most recent .gitignore conflict resolution.
 **/.claude/sessions/
+
+# Token-optimizer state. `.token-optimizer/wiki/` ships its own `*` ignore —
+# the tool's default is that its findings are unreviewed agent output and stay
+# out of git. That directory is also ~7MB and holds full session transcripts,
+# which must not enter the history of a repo handling tax return information.
+# What the wiki rule leaves exposed is `authored/` — machine-local cache of no
+# value to anyone else. Ignore the lot.
+#
+# `.serena/` is deliberately NOT here: it is committed. Serena's own
+# `.serena/.gitignore` already excludes its cache and local-only config, so
+# only the shared project config is tracked.
+.token-optimizer/
