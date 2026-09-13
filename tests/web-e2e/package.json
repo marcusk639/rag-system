@@ -8,7 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "^1.49.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2"
   },
   "dependencies": {
     "@rag/db": "workspace:*",

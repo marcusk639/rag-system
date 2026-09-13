@@ -10,7 +10,7 @@ const SECRET64 = "e".repeat(64);
  * than merges, so copying this to a deployed service drops
  * generativelanguage.googleapis.com and stops ingestion and answering alike.
  */
-export const E2E_ENV: Record<string, string> = {
+export const E2E_ENV = {
   DATABASE_URL:
     process.env.E2E_DATABASE_URL ?? "postgres://rag:rag@localhost:5432/rag",
   PARSER_URL: process.env.E2E_PARSER_URL ?? "http://localhost:8000",
@@ -39,4 +39,4 @@ export const E2E_ENV: Record<string, string> = {
   AUTH_ENTRA_CLIENT_SECRET: "dummy",
   AUTH_ENTRA_TENANT_ID: "00000000-0000-0000-0000-000000000000",
   WEB_AUTH_MODE: "entra",
-};
+} satisfies Record<string, string>;
