@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
 import { ADMIN_SCOPE } from "@rag/core";
-import { askQuestion, askQuestionStream, capChunksPerDocument } from "./ask.js";
+import {
+  askQuestion,
+  askQuestionStream,
+  capChunksPerDocument,
+  EMPTY_ANSWER,
+} from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
@@ -560,5 +565,66 @@ describe("follow-up condensation (history)", () => {
     const streamCall = (deps.generator as unknown as { answerStream: ReturnType<typeof vi.fn> })
       .answerStream.mock.calls[0];
     expect(streamCall?.[0]).toBe("and payroll?");
+  });
+});
+
+describe("relevance floor (minDenseSimilarity)", () => {
+  function scored(id: string, dense: number, sparse: number): RetrievalResult {
+    return {
+      ...retrievalResult(id),
+      denseScore: dense,
+      sparseScore: sparse,
+    } as RetrievalResult;
+  }
+
+  it("drops chunks with no keyword match and dense similarity below the floor", async () => {
+    const answer = vi.fn().mockResolvedValue({ answer: "a [1]", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search: vi
+        .fn()
+        .mockResolvedValue([
+          scored("strong", 0.8, 0),
+          scored("keyword", 0.2, 0.4),
+          scored("weak", 0.3, 0),
+        ]),
+    });
+
+    await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE, 0, {
+      minDenseSimilarity: 0.5,
+    });
+
+    const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
+    expect(context.map((r) => r.chunk.id)).toEqual(["chunk-strong", "chunk-keyword"]);
+  });
+
+  it("answers with the fixed refusal and no model call when nothing clears the floor", async () => {
+    const answer = vi.fn();
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue([scored("weak", 0.1, 0)]),
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "what's the weather?" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      0,
+      { minDenseSimilarity: 0.5 },
+    );
+
+    expect(result.answer).toBe(EMPTY_ANSWER);
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("is off when no floor is configured", async () => {
+    const answer = vi.fn().mockResolvedValue({ answer: "a", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue([scored("weak", 0.01, 0)]),
+    });
+    await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
+    expect(answer).toHaveBeenCalled();
   });
 });

@@ -133,7 +133,10 @@ export function registerAsk(
           deps.config.retrieval.defaultTopK,
           scope,
           deps.config.retrieval.maxChunksPerDocument,
-          deps.config.retrieval.neighborExpansion,
+          {
+            neighborExpansion: deps.config.retrieval.neighborExpansion,
+            minDenseSimilarity: deps.config.retrieval.minDenseSimilarity,
+          },
         );
       } catch (err) {
         if (err instanceof GenerationNotConfiguredError) {

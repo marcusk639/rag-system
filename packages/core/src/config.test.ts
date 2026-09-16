@@ -466,3 +466,18 @@ describe("loadConfig — GENERATION_THINKING_BUDGET", () => {
     ).toBe(1024);
   });
 });
+
+describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
+  it("is off by default", () => {
+    expect(loadConfig({ ...BASE_ENV }).retrieval.minDenseSimilarity).toBeUndefined();
+  });
+  it("reads a floor and rejects one outside [-1, 1]", () => {
+    expect(
+      loadConfig({ ...BASE_ENV, RETRIEVAL_MIN_DENSE_SIMILARITY: "0.55" }).retrieval
+        .minDenseSimilarity,
+    ).toBe(0.55);
+    expect(() =>
+      loadConfig({ ...BASE_ENV, RETRIEVAL_MIN_DENSE_SIMILARITY: "2" }),
+    ).toThrow();
+  });
+});

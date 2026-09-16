@@ -6,6 +6,7 @@ export {
   askQuestionStream,
   EMPTY_ANSWER,
   NO_NEIGHBOR_EXPANSION,
+  type AskOptions,
   type NeighborExpansion,
   type AskInput,
   type AskResult,

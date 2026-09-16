@@ -176,6 +176,8 @@ export const Config = z
           chunksPerDocument: z.number().int().nonnegative().default(4),
         })
         .default({}),
+      /** /ask relevance floor (RETRIEVAL_MIN_DENSE_SIMILARITY). Unset = off. */
+      minDenseSimilarity: z.number().min(-1).max(1).optional(),
     }),
 
     /**
@@ -706,6 +708,9 @@ export function loadConfig(
             ? Number(env.NEIGHBOR_EXPANSION_CHUNKS)
             : undefined,
       },
+      minDenseSimilarity: env.RETRIEVAL_MIN_DENSE_SIMILARITY
+        ? Number(env.RETRIEVAL_MIN_DENSE_SIMILARITY)
+        : undefined,
     },
     rerank: {
       provider: (env.RERANK_PROVIDER ?? "none") as

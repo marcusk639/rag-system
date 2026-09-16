@@ -106,7 +106,7 @@ export async function askQuestion(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
-  neighborExpansion: NeighborExpansion = NO_NEIGHBOR_EXPANSION,
+  options: AskOptions = {},
 ): Promise<AskResult> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -119,7 +119,7 @@ export async function askQuestion(
     defaultTopK,
     scope,
     maxChunksPerDocument,
-    neighborExpansion,
+    options,
   );
 }
 
@@ -142,6 +142,34 @@ export interface NeighborExpansion {
   documents: number;
   /** Maximum extra chunks fetched per expanded document. */
   chunksPerDocument: number;
+}
+
+/** Tuning for /ask beyond the per-document cap. Every field is optional. */
+export interface AskOptions {
+  neighborExpansion?: NeighborExpansion;
+  /**
+   * Relevance floor. Chunks with no keyword match AND dense (cosine)
+   * similarity below this are dropped before generation; if none remain the
+   * fixed refusal is returned without a model call. Unset disables it — tune
+   * it from the audit log's `top_score` distribution for the live embedder.
+   */
+  minDenseSimilarity?: number;
+}
+
+/**
+ * Hybrid search always returns its nearest neighbours, so without a floor an
+ * off-topic question still reaches the model with whatever was least unlike
+ * it. A chunk with a keyword match is kept regardless: identifiers and form
+ * numbers score low on cosine similarity by nature.
+ */
+export function applyRelevanceFloor(
+  results: RetrievalResult[],
+  minDenseSimilarity: number | undefined,
+): RetrievalResult[] {
+  if (minDenseSimilarity === undefined) return results;
+  return results.filter(
+    (r) => r.sparseScore > 0 || r.denseScore >= minDenseSimilarity,
+  );
 }
 
 export const NO_NEIGHBOR_EXPANSION: NeighborExpansion = {
@@ -288,7 +316,7 @@ async function ask(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
-  neighborExpansion: NeighborExpansion,
+  options: AskOptions,
 ): Promise<AskResult> {
   const answerId = randomUUID();
   const retrieved = screenForGeneration(
@@ -296,14 +324,17 @@ async function ask(
     input.question,
     await expandWithNeighbors(
       deps,
-      await retrieveForAnswer(
-        deps,
-        input,
-        defaultTopK,
-        scope,
-        maxChunksPerDocument,
+      applyRelevanceFloor(
+        await retrieveForAnswer(
+          deps,
+          input,
+          defaultTopK,
+          scope,
+          maxChunksPerDocument,
+        ),
+        options.minDenseSimilarity,
       ),
-      neighborExpansion,
+      options.neighborExpansion ?? NO_NEIGHBOR_EXPANSION,
     ),
   );
 
@@ -366,7 +397,7 @@ export async function* askQuestionStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
-  neighborExpansion: NeighborExpansion = NO_NEIGHBOR_EXPANSION,
+  options: AskOptions = {},
 ): AsyncGenerator<AskStreamEvent> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -377,7 +408,7 @@ export async function* askQuestionStream(
     defaultTopK,
     scope,
     maxChunksPerDocument,
-    neighborExpansion,
+    options,
   );
 }
 
@@ -387,7 +418,7 @@ async function* askStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
-  neighborExpansion: NeighborExpansion,
+  options: AskOptions,
 ): AsyncGenerator<AskStreamEvent> {
   const answerId = randomUUID();
   const retrieved = screenForGeneration(
@@ -395,14 +426,17 @@ async function* askStream(
     input.question,
     await expandWithNeighbors(
       deps,
-      await retrieveForAnswer(
-        deps,
-        input,
-        defaultTopK,
-        scope,
-        maxChunksPerDocument,
+      applyRelevanceFloor(
+        await retrieveForAnswer(
+          deps,
+          input,
+          defaultTopK,
+          scope,
+          maxChunksPerDocument,
+        ),
+        options.minDenseSimilarity,
       ),
-      neighborExpansion,
+      options.neighborExpansion ?? NO_NEIGHBOR_EXPANSION,
     ),
   );
 

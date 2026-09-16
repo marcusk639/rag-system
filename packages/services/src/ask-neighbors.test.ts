@@ -140,8 +140,7 @@ describe("askQuestion with neighbour expansion", () => {
     };
 
     const result = await askQuestion(d, { question: "q" }, 8, ADMIN_SCOPE, 0, {
-      documents: 1,
-      chunksPerDocument: 1,
+      neighborExpansion: { documents: 1, chunksPerDocument: 1 },
     });
 
     const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
