@@ -3,9 +3,6 @@ import { test, expect } from "../fixtures/auth.js";
 import { captureSse, readSse } from "../fixtures/sse.js";
 import { NONCE_A } from "../fixtures/corpus.js";
 
-const REFUSAL =
-  "The available documents do not contain enough information to answer that.";
-
 /**
  * Submits a question and waits for the full request/stream/response cycle to
  * finish.
@@ -21,7 +18,9 @@ const REFUSAL =
  */
 async function ask(page: Page, question: string): Promise<void> {
   await page.goto("/");
-  const input = page.getByRole("textbox");
+  const input = page.getByRole("textbox", {
+    name: "Ask about your documents",
+  });
   await input.fill(question);
   await page.keyboard.press("Enter");
   await expect(input).toBeDisabled({ timeout: 5_000 });
@@ -72,7 +71,7 @@ test("an out-of-corpus question is refused, not confabulated", async ({
     "What is our policy on controlled foreign corporation transfer pricing?",
   );
 
-  await expect(page.getByTestId("assistant-message")).toContainText(REFUSAL);
+  await expect(page.getByTestId("refusal")).toBeVisible();
   // Citations ARE expected here — do not assert zero. The generation prompt
   // appends "Closest related material: <title> [N]" when a document is
   // plausibly adjacent, so a *correct* refusal on this fixture corpus
@@ -96,14 +95,46 @@ test("rendered chips equal the citations the BFF returned", async ({
   // which happens after the "done" SSE frame has been processed and
   // rendered — readSse() below reflects the complete stream, not a partial
   // one.
-  const frame = (await readSse(page))
-    .split("\n")
-    .find((line) => line.startsWith("data:") && line.includes("citations"));
-  if (frame === undefined) {
+  const payload = findDoneEventPayload(await readSse(page));
+  if (payload === undefined) {
     throw new Error(
-      "no captured SSE frame carried a `citations` field — was the 'done' event ever sent?",
+      "no captured SSE frame carried a 'done' event with a citations array — was the 'done' event ever sent?",
     );
   }
-  const payload = JSON.parse(frame.slice(5));
   expect(chipCount).toBe(payload.citations.length);
 });
+
+/**
+ * Parses raw SSE bytes into frames (blank-line delimited, per the
+ * `event:`/`data:` contract in stream-chat.ts) and returns the parsed JSON
+ * payload of the `done` event, if one arrived.
+ *
+ * Selection is structural (event type, then a parsed `citations` array) —
+ * NOT a substring match on the raw text. A `token` frame can legitimately
+ * stream the literal word "citations" as part of the model's answer; a
+ * textual match on that word would pick the wrong frame and blow up with a
+ * confusing TypeError instead of a clear assertion failure.
+ */
+function findDoneEventPayload(
+  raw: string,
+): { citations: unknown[] } | undefined {
+  for (const frame of raw.split("\n\n")) {
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (event !== "done" || dataLines.length === 0) continue;
+
+    const parsed: unknown = JSON.parse(dataLines.join("\n"));
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Array.isArray((parsed as { citations?: unknown }).citations)
+    ) {
+      return parsed as { citations: unknown[] };
+    }
+  }
+  return undefined;
+}

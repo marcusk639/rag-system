@@ -9,13 +9,26 @@ import {
   type LoadedPack,
 } from "@rag/core";
 import { createSource, type Db } from "@rag/db";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { E2E_ENV } from "../env.js";
 import { FIXTURE_SOURCE_NAME } from "../fixtures/corpus.js";
 
 // The pipeline refuses to run without a scanner pack; wire the real one.
+// Resolved from import.meta.url (matching stack.ts / global-setup.ts)
+// rather than process.cwd() — a cwd-relative path only works when the
+// invocation happens to run from the package directory, and breaks with a
+// confusing pack-not-found error when run from the repo root.
 const CPA_PACK: LoadedPack = loadPack(
-  join(process.cwd(), "..", "..", "packs", "cpa"),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "packs",
+    "cpa",
+  ),
 );
 
 /**

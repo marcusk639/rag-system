@@ -43,6 +43,11 @@ export async function captureSse(page: Page): Promise<void> {
       const [appBranch, testBranch] = res.body.tee();
 
       // Drain loop: read to completion so the tee'd branch never backs up.
+      // Deliberately swallow a rejection here (e.g. the reader erroring
+      // because a test navigated away mid-stream): left unhandled, it
+      // becomes an unhandled promise rejection in page context, which
+      // Playwright can surface as an unrelated page error rather than the
+      // real assertion failure.
       void (async () => {
         const reader = testBranch.getReader();
         const decoder = new TextDecoder();
@@ -51,7 +56,7 @@ export async function captureSse(page: Page): Promise<void> {
           if (done) break;
           window.__sse.push(decoder.decode(value, { stream: true }));
         }
-      })();
+      })().catch(() => {});
 
       return new Response(appBranch, {
         status: res.status,

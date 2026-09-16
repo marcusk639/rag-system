@@ -104,7 +104,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       <ReactMarkdown>{message.content || "…"}</ReactMarkdown>
                     </div>
                     {message.content.includes(EMPTY_ANSWER) && (
-                      <span data-testid="refusal" />
+                      <span
+                        data-testid="refusal"
+                        role="status"
+                        className="mt-1 inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700"
+                      >
+                        No matching information found
+                      </span>
                     )}
                     {message.error && (
                       <div
@@ -162,6 +168,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <div className="flex space-x-2">
             <input
               type="text"
+              aria-label="Ask about your documents"
               placeholder="Ask about your documents..."
               className="flex-1 p-3 rounded-lg border border-gray-200"
               value={chatMessage}
