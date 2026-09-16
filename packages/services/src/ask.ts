@@ -11,7 +11,11 @@ import type {
   RetrievalResult,
   SanitizedRetrievalResult,
 } from "@rag/core";
-import { sanitizeRetrievalResults } from "@rag/core";
+import {
+  ComplianceError,
+  EgressError,
+  sanitizeRetrievalResults,
+} from "@rag/core";
 import { getChunksByOrdinals } from "@rag/db";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
@@ -295,14 +299,62 @@ function screenForGeneration(
 }
 
 /**
- * The text retrieval searches with: the question itself, or — when there is
- * conversation history and the generator offers a bare completion — the
- * follow-up rewritten as a standalone question. Condensation fails open.
+ * The text retrieval searches with, screened for TRI BEFORE it is embedded.
+ *
+ * Retrieval embeds the query with the configured provider, which may be an
+ * external API. The generation pre-flight only protects the generation call,
+ * so a question carrying a client identifier used to reach the embedding API
+ * first. The question is screened here, under the generator's TRI policy,
+ * and a blocking match fails the request before any provider call.
+ *
+ * With conversation history, the follow-up is rewritten into a standalone
+ * question. The rewrite can carry an identifier forward from an EARLIER turn,
+ * so it is screened too; a blocked rewrite falls back to the (already
+ * screened) original question. Every fallback is logged, never swallowed.
  */
 async function retrievalQuery(deps: AskDeps, input: AskInput): Promise<string> {
+  screenQuestion(deps, input.question);
   const complete = deps.generator.complete?.bind(deps.generator);
   if (!complete || !input.history?.length) return input.question;
-  return contextualizeQuestion(complete, input.question, input.history);
+
+  const rewritten = await contextualizeQuestion(
+    complete,
+    input.question,
+    input.history,
+    {
+      onError: (err) =>
+        deps.logger.warn(
+          {
+            err,
+            marker:
+              err instanceof ComplianceError || err instanceof EgressError
+                ? "ask.condensation_blocked"
+                : "ask.condensation_failed",
+          },
+          "follow-up condensation failed; retrieving with the original question",
+        ),
+    },
+  );
+  if (rewritten === input.question) return rewritten;
+  try {
+    screenQuestion(deps, rewritten);
+    return rewritten;
+  } catch (err) {
+    deps.logger.warn(
+      { err, marker: "ask.rewrite_blocked" },
+      "rewritten follow-up failed TRI screening; retrieving with the original question",
+    );
+    return input.question;
+  }
+}
+
+/** Throws (ComplianceError) when `text` must not be sent to a provider. */
+function screenQuestion(deps: AskDeps, text: string): void {
+  // `screen` is required by the Generator contract; the guard only tolerates
+  // unit-test doubles cast past the type.
+  if (typeof deps.generator.screen === "function") {
+    deps.generator.screen(text, []);
+  }
 }
 
 async function retrieveForAnswer(

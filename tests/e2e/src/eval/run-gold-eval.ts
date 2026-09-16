@@ -9,6 +9,9 @@
  *   GOLD_API_URL=https://rag-api.example GOLD_API_TOKEN=... pnpm eval:gold
  *   GOLD_OUT=gold-2026-09-16.json   # optional: also write the JSON report
  *
+ * ⚠ GOLD_OUT contains real answers from the firm's knowledge base. It is
+ * gitignored (gold-*.json) but is still firm-confidential material.
+ *
  * Refuses to run while the gold set is empty or invalid (see gold-set.ts and
  * docs/EVAL-GOLD-SET-GUIDE.md) — an empty run would print healthy-looking
  * zeros that mean nothing.
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
   }
 
   const apiUrl = requireEnv("GOLD_API_URL").replace(/\/$/, "");
+  assertSafeApiUrl(apiUrl);
   const token = requireEnv("GOLD_API_TOKEN");
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -99,6 +103,10 @@ async function main(): Promise<void> {
   const report = scoreGoldRun(GOLD_QUESTIONS, observations);
   process.stdout.write(formatGoldReport(report) + "\n");
   if (process.env.GOLD_OUT) {
+    process.stderr.write(
+      `eval:gold: writing REAL knowledge-base answers to ${process.env.GOLD_OUT} — ` +
+        "treat it as firm-confidential; do not commit or share it.\n",
+    );
     await writeFile(
       process.env.GOLD_OUT,
       JSON.stringify({ ranAt: new Date().toISOString(), report, observations }, null, 2),
@@ -107,6 +115,27 @@ async function main(): Promise<void> {
   const hardFail =
     report.fabricatedCitations.length > 0 || report.missing.length > 0;
   process.exit(hardFail ? 1 : 0);
+}
+
+/**
+ * The bearer token goes to this URL on every request: require https, except
+ * for a local API during development.
+ */
+function assertSafeApiUrl(apiUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(apiUrl);
+  } catch {
+    process.stderr.write("eval:gold: GOLD_API_URL is not a valid URL\n");
+    process.exit(2);
+  }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
+    process.stderr.write(
+      "eval:gold: GOLD_API_URL must be https (http is allowed only for localhost) — the API token is sent with every request\n",
+    );
+    process.exit(2);
+  }
 }
 
 function formatGoldReport(r: GoldReport): string {

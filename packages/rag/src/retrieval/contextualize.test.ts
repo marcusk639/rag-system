@@ -82,3 +82,18 @@ describe("buildContextualizePrompt", () => {
     expect(prompt).toMatch(/only the rewritten question/i);
   });
 });
+
+describe("contextualizeQuestion onError", () => {
+  it("reports the error it fails open on", async () => {
+    const err = new Error("blocked");
+    const onError = vi.fn();
+    const complete = vi.fn().mockRejectedValue(err);
+    await contextualizeQuestion(
+      complete,
+      "q",
+      [{ role: "user", content: "h" }],
+      { onError },
+    );
+    expect(onError).toHaveBeenCalledWith(err);
+  });
+});

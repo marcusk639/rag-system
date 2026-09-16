@@ -30,6 +30,11 @@ export interface ContextualizeOptions {
   maxTurns?: number;
   /** Per-turn character cap. Default 1000. */
   maxCharsPerTurn?: number;
+  /**
+   * Called with the error when condensation fails open. A TRI block on the
+   * history must stay as observable as one on the question itself.
+   */
+  onError?: (err: unknown) => void;
 }
 
 /** A rewrite longer than this is not "one question"; fall back. */
@@ -76,8 +81,9 @@ export async function contextualizeQuestion(
     ).trim();
     if (!rewritten || rewritten.length > MAX_REWRITE_CHARS) return question;
     return rewritten;
-  } catch {
+  } catch (err) {
     // Fail open: a condensation failure must never fail the query.
+    opts.onError?.(err);
     return question;
   }
 }

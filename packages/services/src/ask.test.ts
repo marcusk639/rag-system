@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
-import { ADMIN_SCOPE } from "@rag/core";
+import { ADMIN_SCOPE, ComplianceError } from "@rag/core";
 import {
   askQuestion,
   askQuestionStream,
@@ -650,5 +650,83 @@ describe("dropDuplicateChunks", () => {
       withText("2", "b", "# B\n\nStep two."),
     ]);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("TRI screening before retrieval (embedding egress)", () => {
+  const HISTORY = [
+    { role: "user" as const, content: "earlier turn" },
+    { role: "assistant" as const, content: "earlier answer" },
+  ];
+
+  it("screens the question BEFORE retrieval, so a blocked question never reaches the embedder", async () => {
+    const search = vi.fn();
+    const screen = vi.fn(() => {
+      throw new ComplianceError("TRI detected in the question");
+    });
+    const deps = makeDeps({
+      generator: { answer: vi.fn(), screen } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await expect(
+      askQuestion(deps, { question: "SSN 123-45-6789?" }, DEFAULT_TOP_K, ADMIN_SCOPE),
+    ).rejects.toBeInstanceOf(ComplianceError);
+    expect(screen).toHaveBeenCalledWith("SSN 123-45-6789?", []);
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the original question, and logs, when the REWRITE would be blocked", async () => {
+    const search = vi.fn().mockResolvedValue([retrievalResult("1")]);
+    const screen = vi.fn((q: string, ctx: RetrievalResult[]) => {
+      if (q.includes("123-45-6789")) throw new ComplianceError("TRI in rewrite");
+      return ctx;
+    });
+    const deps = makeDeps({
+      generator: {
+        answer: vi.fn().mockResolvedValue({ answer: "a", citations: [] }),
+        complete: vi.fn().mockResolvedValue("setup for client SSN 123-45-6789"),
+        screen,
+      } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await askQuestion(
+      deps,
+      { question: "and for them?", history: HISTORY },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(search.mock.calls[0]?.[0].query).toBe("and for them?");
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ marker: "ask.rewrite_blocked" }),
+      expect.any(String),
+    );
+  });
+
+  it("logs a compliance block inside condensation instead of swallowing it", async () => {
+    const search = vi.fn().mockResolvedValue([retrievalResult("1")]);
+    const deps = makeDeps({
+      generator: {
+        answer: vi.fn().mockResolvedValue({ answer: "a", citations: [] }),
+        complete: vi.fn().mockRejectedValue(new ComplianceError("TRI in history")),
+        screen: (_q: string, ctx: RetrievalResult[]) => ctx,
+      } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await askQuestion(
+      deps,
+      { question: "and for them?", history: HISTORY },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(search.mock.calls[0]?.[0].query).toBe("and for them?");
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ marker: "ask.condensation_blocked" }),
+      expect.any(String),
+    );
   });
 });
