@@ -31,11 +31,15 @@ import type { Deps } from "../deps.js";
 const SRC_A = "11111111-1111-1111-1111-111111111111";
 const ADMIN_TOKEN = "admin-token-aaaaaaaa";
 
-function result(id: string, score: number): RetrievalResult {
+function result(
+  id: string,
+  score: number,
+  denseScore = score,
+): RetrievalResult {
   return {
     text: `text ${id}`,
     score,
-    denseScore: score,
+    denseScore,
     sparseScore: score,
     document: {
       id: `doc-${id}`,
@@ -182,6 +186,42 @@ describe("audit_log parity — POST /search", () => {
       await app.close();
     }
   });
+});
+
+describe("audit_log topScore — absolute relevance, not normalized RRF", () => {
+  // hybridSearch max-normalizes RRF, so the top row's `score` is 1.0 for every
+  // non-empty result set. Persisting that made the docs-gap digest's
+  // `topScore < minScore` weak-result check unreachable.
+  const WEAK_CORPUS = [result("a", 1, 0.18), result("b", 0.6, 0.22)];
+  const weakRetriever = () =>
+    ({ search: vi.fn(async () => WEAK_CORPUS) }) as unknown as ReturnType<
+      typeof makeRetriever
+    >;
+
+  for (const [url, payload] of [
+    ["/search", { query: "unrelated question" }],
+    ["/ask", { question: "unrelated question" }],
+  ] as const) {
+    it(`${url} records the best dense similarity (0.22), not the normalized top score (1.0)`, async () => {
+      const { db, rows } = makeAuditDb();
+      const app = await buildApp(
+        makeDeps(db, weakRetriever(), makeGenerator()),
+      );
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url,
+          headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+          payload,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.topScore).toBeCloseTo(0.22);
+      } finally {
+        await app.close();
+      }
+    });
+  }
 });
 
 describe("audit_log parity — POST /ask", () => {

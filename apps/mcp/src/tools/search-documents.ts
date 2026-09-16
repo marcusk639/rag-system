@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
-import { filterSchema } from "@rag/core";
+import { filterSchema, topRelevanceScore } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
@@ -88,7 +88,7 @@ function auditSearch(
     docIds: [...new Set(results.map((r) => r.document.id))],
     retrievedCount: results.length,
     endpoint: "search",
-    topScore: results[0]?.score ?? null,
+    topScore: topRelevanceScore(results),
     // /search has no generated answer — no answerId to record.
     answerId: null,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));

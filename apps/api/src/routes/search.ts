@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
 import type { SanitizedRetrievalResult } from "@rag/core";
-import { filterSchema } from "@rag/core";
+import { filterSchema, topRelevanceScore } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -47,7 +47,7 @@ function auditSearch(
     docIds: [...new Set(results.map((r) => r.document.id))],
     retrievedCount: results.length,
     endpoint: "search",
-    topScore: results[0]?.score ?? null,
+    topScore: topRelevanceScore(results),
     // /search has no generated answer — no answerId to record.
     answerId: null,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));

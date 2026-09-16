@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
-import { filterSchema, RagError } from "@rag/core";
+import { filterSchema, RagError, topRelevanceScore } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
@@ -65,7 +65,7 @@ function auditAsk(
     docIds: [...new Set(retrieved.map((r) => r.document.id))],
     retrievedCount: retrieved.length,
     endpoint: "ask",
-    topScore: retrieved[0]?.score ?? null,
+    topScore: topRelevanceScore(retrieved),
     answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
