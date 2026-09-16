@@ -1,11 +1,21 @@
 import React, { useRef, useState } from "react";
 import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { EMPTY_ANSWER } from "@rag/services";
 import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
 import { AnswerFeedback } from "@/components/answer-feedback";
 import type { ChatSession, Citation, Message, Source } from "@/types";
+
+/**
+ * Mirrors `EMPTY_ANSWER` from `@rag/services` (packages/services/src/ask.ts).
+ * Duplicated as a literal instead of imported: `@rag/services` re-exports the
+ * whole service module graph, which pulls the local ONNX embedder
+ * (onnxruntime-node's native binding) into this client bundle and breaks
+ * `next build` ("Module parse failed" on the .node binary). Keep this string
+ * in sync with the source of truth if it ever changes.
+ */
+const EMPTY_ANSWER =
+  "The available documents do not contain enough information to answer that.";
 
 interface ChatInterfaceProps {
   session: ChatSession;
