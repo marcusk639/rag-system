@@ -79,3 +79,31 @@ describe("MarkdownChunker — degenerate chunks", () => {
     expect(chunks.map((c) => c.ordinal)).toEqual([0, 1]);
   });
 });
+
+describe("MarkdownChunker — overlap size", () => {
+  it("carries exactly chunkOverlap tokens of the previous chunk, not a character estimate", async () => {
+    // Digit-heavy text tokenizes far from 4 chars/token, where a character
+    // estimate over- or under-shoots badly.
+    const paragraphs = Array.from(
+      { length: 12 },
+      (_, i) => `Row ${i}: 4417 9921 0038 7765 1203 5540 8812 3309 6674 2291 end-${i}.`,
+    ).join("\n\n");
+    const chunker = new MarkdownChunker({ chunkSize: 80, chunkOverlap: 20 });
+    const chunks = await chunker.chunk(doc(paragraphs));
+    expect(chunks.length).toBeGreaterThan(2);
+
+    const prevBody = chunks[0]!.text;
+    const second = chunks[1]!.text;
+    // The overlap is the longest suffix of the previous chunk that the next
+    // chunk starts with (it may itself span a paragraph break).
+    let overlap = "";
+    for (let k = Math.min(prevBody.length, second.length); k > 0; k--) {
+      if (second.startsWith(prevBody.slice(-k))) {
+        overlap = prevBody.slice(-k);
+        break;
+      }
+    }
+    expect(encode(overlap).length).toBeGreaterThanOrEqual(18);
+    expect(encode(overlap).length).toBeLessThanOrEqual(22);
+  });
+});

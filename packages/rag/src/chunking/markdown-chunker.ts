@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { encode } from "gpt-tokenizer";
+import { decode, encode } from "gpt-tokenizer";
 import type { Chunk, Chunker, ParsedDocument } from "@rag/core";
 import { clampToTokenLimit } from "./token-clamp.js";
 
@@ -276,14 +276,10 @@ function applyOverlap(chunks: string[], overlapTokens: number): string[] {
       out.push(chunks[i]!);
       continue;
     }
-    const prevTokens = encode(prev);
-    // Take the tail tokens of the previous chunk as the prefix of this one.
-    const tail = prevTokens.slice(-overlapTokens);
-    // Decoding back to string isn't exact for arbitrary tokens, so we
-    // approximate by slicing the previous chunk's string. For most languages
-    // the ratio is ~4 chars/token; this overshoots slightly, which is fine.
-    const approxChars = tail.length * 4;
-    const overlapText = prev.slice(-approxChars);
+    // Carry exactly the previous chunk's last `overlapTokens` tokens. A
+    // 4-chars-per-token estimate carried twice the intended overlap on
+    // digit-heavy text (account numbers, amounts, codes).
+    const overlapText = decode(encode(prev).slice(-overlapTokens));
     out.push(`${overlapText}\n\n${chunks[i]}`);
   }
   return out;
