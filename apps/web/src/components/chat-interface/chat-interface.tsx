@@ -3,6 +3,7 @@ import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
+import { toHistory } from "@/lib/chat-request";
 import { AnswerFeedback } from "@/components/answer-feedback";
 import type { ChatSession, Citation, Message, Source } from "@/types";
 
@@ -51,6 +52,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const question = chatMessage.trim();
     if (!question || streaming) return;
 
+    // Captured before this turn is added: `session` is the render-time value.
+    const history = toHistory(session.messages);
     addMessage({ id: newMessageId(), role: "user", content: question });
     const assistantId = newMessageId();
     addMessage({ id: assistantId, role: "assistant", content: "" });
@@ -62,6 +65,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           question,
           sourceIds: selectedSource ? [selectedSource.id] : undefined,
+          history,
         },
         {
           onToken: (text) =>

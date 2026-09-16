@@ -1,4 +1,5 @@
 import type { Citation } from "@/types";
+import type { HistoryTurn } from "@/lib/chat-request";
 
 export interface AskStreamHandlers {
   onToken: (text: string) => void;
@@ -8,8 +9,9 @@ export interface AskStreamHandlers {
 
 interface AskRequest {
   question: string;
-  topK?: number;
   sourceIds?: string[];
+  /** Completed prior turns; see `toHistory`. */
+  history?: HistoryTurn[];
 }
 
 /**

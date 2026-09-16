@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { buildUpstreamAskBody } from "@/lib/chat-request";
 import { getScopeAssertionToken } from "@/lib/scope-token";
 import {
   getRagApiConfig,
@@ -47,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
         Authorization: `Bearer ${resolved.token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildUpstreamAskBody(body)),
     });
   } catch {
     return jsonError(502, "UPSTREAM_UNREACHABLE", "RAG API is unreachable.");
