@@ -564,7 +564,10 @@ export async function hybridSearch(
   const topK = opts.topK;
   // Pool size — see comments on `candidatePoolMultiplier`. Default 8× because
   // filters now run as a post-filter; selective filters demand more candidates.
-  const pool = resolveCandidatePool(topK, opts.candidatePoolMultiplier ?? 8);
+  const defaultPool = resolveCandidatePool(
+    topK,
+    opts.candidatePoolMultiplier ?? 8,
+  );
   const wDense = opts.weights?.dense ?? 0.7;
   const wSparse = opts.weights?.sparse ?? 0.3;
   const k = 60; // RRF constant from the original RRF paper.
@@ -653,28 +656,28 @@ export async function hybridSearch(
   // Tune HNSW recall per-query via session GUC. SET LOCAL scopes it to the
   // current transaction; we wrap the query in a tx so the setting takes effect.
   // Must cover `pool`, or the index scan truncates the dense arm (see hnsw.ts).
-  const efSearch = resolveEfSearch(pool, opts.efSearch);
-
-  const rows = await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SET LOCAL hnsw.ef_search = ${sql.raw(String(efSearch))}`,
-    );
-    return tx.execute<{
-      chunk_id: string;
-      document_id: string;
-      text: string;
-      ordinal: number;
-      heading_path: string[];
-      page: number | null;
-      dense_score: number;
-      sparse_score: number;
-      rrf_score: number;
-      title: string;
-      source_id: string;
-      source_kind: SourceKind;
-      metadata: Record<string, unknown>;
-      has_original: boolean;
-    }>(sql`
+  const runAt = (pool: number) =>
+    db.transaction(async (tx) => {
+      const efSearch = resolveEfSearch(pool, opts.efSearch);
+      await tx.execute(
+        sql`SET LOCAL hnsw.ef_search = ${sql.raw(String(efSearch))}`,
+      );
+      return tx.execute<{
+        chunk_id: string;
+        document_id: string;
+        text: string;
+        ordinal: number;
+        heading_path: string[];
+        page: number | null;
+        dense_score: number;
+        sparse_score: number;
+        rrf_score: number;
+        title: string;
+        source_id: string;
+        source_kind: SourceKind;
+        metadata: Record<string, unknown>;
+        has_original: boolean;
+      }>(sql`
       WITH params AS (
         SELECT ${embedLiteral}::vector AS q_embedding,
                -- OR-semantics tsquery. "plainto_tsquery"/"websearch_to_tsquery"
@@ -803,7 +806,22 @@ export async function hybridSearch(
       ORDER BY f.rrf_score DESC
       LIMIT ${topK}
     `);
-  });
+    });
+
+  let rows = await runAt(defaultPool);
+  // Filters apply AFTER each arm is truncated to its pool, so a principal
+  // scoped to a small source (or a selective metadata filter) can have every
+  // matching chunk crowded out of the pool by chunks it cannot read, and get
+  // fewer than topK rows back — or none — with no error. Retry once at the
+  // largest pool the HNSW index can serve. Unfiltered queries never retry.
+  const filtered =
+    opts.enforcedSourceIds !== null ||
+    (opts.sourceIds?.length ?? 0) > 0 ||
+    metadataConditions.length > 0;
+  const maxPool = resolveCandidatePool(topK, Number.POSITIVE_INFINITY);
+  if (filtered && rows.rows.length < topK && defaultPool < maxPool) {
+    rows = await runAt(maxPool);
+  }
 
   // Normalize RRF scores to [0,1] for easier consumption. Use reduce instead
   // of `Math.max(...arr)` so the call survives very large result sets.
