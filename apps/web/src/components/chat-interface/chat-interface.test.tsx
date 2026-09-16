@@ -116,4 +116,16 @@ describe("ChatInterface data-testid hooks", () => {
     );
     expect(screen.getByTestId("citation-chip")).toHaveTextContent("2025-11-04");
   });
+
+  it("gives the icon-only send button an accessible name", () => {
+    render(
+      <ChatInterface
+        session={{ id: "s", name: "S", messages: [] }}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Send question" })).toBeInTheDocument();
+  });
 });
