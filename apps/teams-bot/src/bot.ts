@@ -19,7 +19,11 @@ import {
   resolveUserOid,
 } from "./auth.js";
 import { KbUnavailableError, askKb, submitFeedback } from "./rag-client.js";
-import type { AskAnswer, FeedbackRating } from "./rag-client.js";
+import type {
+  AskAnswer,
+  FeedbackRating,
+  HistoryTurn,
+} from "./rag-client.js";
 import {
   FEEDBACK_SUBMIT_KIND,
   answerCard,
@@ -90,7 +94,11 @@ export interface BotDeps {
   resolveScope(input: ResolveScopeInput): Promise<ResolvedScope>;
   /** Asks the RAG API the user's question under the minted scope. Throws
    * `KbUnavailableError` (from `rag-client.ts`) on any failure. */
-  askKb(input: { question: string; scopeToken: string }): Promise<AskAnswer>;
+  askKb(input: {
+    question: string;
+    scopeToken: string;
+    history?: HistoryTurn[];
+  }): Promise<AskAnswer>;
   /** Records a feedback vote under the clicking user's own scope token.
    * Throws `KbUnavailableError` on failure. */
   submitFeedback(input: {
@@ -156,6 +164,30 @@ function pendingQuestionKey(context: TurnContext): string | null {
     return null;
   }
   return `teams-bot/pending-question/${channelId}/${conversationId}/${userId}`;
+}
+
+/**
+ * Conversation history for follow-up questions (decision B0: ephemeral,
+ * in-process). Kept in the same `Storage` as the pending question, so it
+ * inherits `MemoryStorage`'s single-instance constraint: a restart loses it
+ * and the bot degrades to single-turn answers, never to wrong ones.
+ *
+ * Keyed per (channel, conversation, user) — one user's conversation is never
+ * fed into another user's retrieval, even in a shared channel.
+ *
+ * `HISTORY_STORED_TURNS` bounds storage growth; `HISTORY_FORWARDED_TURNS` is
+ * the API's request bound (@rag/core MAX_HISTORY_TURNS). How many turns the
+ * rewrite actually uses is decided server-side by the condenser.
+ */
+const HISTORY_STORED_TURNS = 20;
+const HISTORY_FORWARDED_TURNS = 12;
+
+function historyKey(context: TurnContext): string | null {
+  const channelId = context.activity.channelId;
+  const conversationId = context.activity.conversation?.id;
+  const userId = context.activity.from?.id;
+  if (!channelId || !conversationId || !userId) return null;
+  return `teams-bot/history/${channelId}/${conversationId}/${userId}`;
 }
 
 /**
@@ -278,14 +310,52 @@ export class KbBot extends TeamsActivityHandler {
         return;
       }
 
+      const history = await this.readHistory(context);
       const answer = await this.deps.askKb({
         question,
         scopeToken: token,
+        history: history.slice(-HISTORY_FORWARDED_TURNS),
       });
 
       await context.sendActivity({ attachments: [answerCard(answer)] });
+      await this.appendHistory(context, history, question, answer.answer);
     } catch (error) {
       await this.sendErrorCard(context, error);
+    }
+  }
+
+  private async readHistory(context: TurnContext): Promise<HistoryTurn[]> {
+    const key = historyKey(context);
+    if (!key) return [];
+    try {
+      const stored = (await this.deps.storage.read([key]))[key] as
+        | { turns?: HistoryTurn[] }
+        | undefined;
+      return Array.isArray(stored?.turns) ? stored.turns : [];
+    } catch (error) {
+      console.error("KbBot: failed to read conversation history", error);
+      return [];
+    }
+  }
+
+  private async appendHistory(
+    context: TurnContext,
+    history: HistoryTurn[],
+    question: string,
+    answer: string,
+  ): Promise<void> {
+    const key = historyKey(context);
+    if (!key) return;
+    const exchange: HistoryTurn[] = [
+      { role: "user", content: question },
+      { role: "assistant", content: answer },
+    ];
+    const turns = [...history, ...exchange].slice(-HISTORY_STORED_TURNS);
+    try {
+      await this.deps.storage.write({ [key]: { turns } });
+    } catch (error) {
+      // Losing history only costs the next follow-up its context.
+      console.error("KbBot: failed to store conversation history", error);
     }
   }
 

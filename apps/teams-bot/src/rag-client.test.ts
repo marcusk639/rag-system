@@ -107,6 +107,25 @@ describe("askKb", () => {
   });
 });
 
+describe("askKb history", () => {
+  it("forwards non-empty history and omits an empty one", async () => {
+    const fetchMock = fakeFetch(200, { answer: "a", citations: [], disclaimer: "d" });
+    await askKb(
+      { question: "q", scopeToken: "t", history: [{ role: "user", content: "h" }] },
+      { ragApiUrl: "http://api", fetch: fetchMock as any },
+    );
+    await askKb(
+      { question: "q", scopeToken: "t", history: [] },
+      { ragApiUrl: "http://api", fetch: fetchMock as any },
+    );
+    const bodies = fetchMock.mock.calls.map((c) =>
+      JSON.parse(String((c as unknown as [string, RequestInit])[1].body)),
+    );
+    expect(bodies[0]).toEqual({ question: "q", history: [{ role: "user", content: "h" }] });
+    expect(bodies[1]).toEqual({ question: "q" });
+  });
+});
+
 describe("submitFeedback", () => {
   it("posts the vote to /feedback with the scope token and X-RAG-Channel: teams", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));

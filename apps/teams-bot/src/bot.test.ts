@@ -41,6 +41,63 @@ function makeDeps(over: Partial<any> = {}) {
 }
 
 describe("KbBot", () => {
+  const dm = (text: string, from = "user-1") =>
+    ({
+      type: "message",
+      text,
+      from: { id: from },
+      conversation: { conversationType: "personal", id: "dm-hist" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override
+    }) as any;
+
+  it("history: a follow-up in the same conversation sends the previous exchange", async () => {
+    const askKb = vi
+      .fn()
+      .mockResolvedValueOnce({ answer: "Apply BK-CATCHUP [1].", citations: [], disclaimer: "d" })
+      .mockResolvedValueOnce({ answer: "Payroll uses PR-SETUP [1].", citations: [], disclaimer: "d" });
+    const deps = makeDeps({ askKb });
+    const bot = new KbBot(deps);
+    const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
+
+    await adapter.send(dm("How do I set up a bookkeeping client?"));
+    await adapter.send(dm("and for payroll?"));
+
+    expect(askKb.mock.calls[0]?.[0].history ?? []).toEqual([]);
+    expect(askKb.mock.calls[1]?.[0]).toMatchObject({
+      question: "and for payroll?",
+      history: [
+        { role: "user", content: "How do I set up a bookkeeping client?" },
+        { role: "assistant", content: "Apply BK-CATCHUP [1]." },
+      ],
+    });
+  });
+
+  it("history: never shared between users in the same conversation", async () => {
+    const askKb = vi.fn(async () => ({ answer: "A", citations: [], disclaimer: "d" }));
+    const deps = makeDeps({ askKb });
+    const bot = new KbBot(deps);
+    const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
+
+    await adapter.send(dm("first", "user-1"));
+    await adapter.send(dm("second", "user-2"));
+
+    expect((askKb.mock.calls[1] as unknown as [{ history?: unknown[] }])[0].history ?? []).toEqual([]);
+  });
+
+  it("history: forwards at most the 12 most recent turns", async () => {
+    const askKb = vi.fn(async () => ({ answer: "A", citations: [], disclaimer: "d" }));
+    const deps = makeDeps({ askKb });
+    const bot = new KbBot(deps);
+    const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
+
+    for (let i = 0; i < 10; i++) await adapter.send(dm(`q${i}`));
+
+    const last = (askKb.mock.calls[9] as unknown as [{ history: Array<{ content: string }> }])[0];
+    expect(last.history).toHaveLength(12);
+    expect(last.history[11]?.content).toBe("A");
+    expect(last.history[10]?.content).toBe("q8");
+  });
+
   const ANSWER_ID = "11111111-1111-4111-8111-111111111111";
   const feedbackActivity = (value: unknown) =>
     ({

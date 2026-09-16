@@ -29,9 +29,16 @@ export class KbUnavailableError extends Error {
   }
 }
 
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 interface AskKbInput {
   question: string;
   scopeToken: string;
+  /** Prior turns, oldest first; the API rewrites a follow-up for retrieval. */
+  history?: HistoryTurn[];
 }
 
 /** Upper bound on how long a single /ask call may take before the bot gives
@@ -51,7 +58,7 @@ export async function askKb(
   input: AskKbInput,
   deps: AskKbDeps,
 ): Promise<AskAnswer> {
-  const { question, scopeToken } = input;
+  const { question, scopeToken, history } = input;
   const { ragApiUrl, fetch: fetchFn } = deps;
 
   try {
@@ -62,7 +69,9 @@ export async function askKb(
         Authorization: `Bearer ${scopeToken}`,
         "X-RAG-Channel": "teams",
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(
+        history && history.length > 0 ? { question, history } : { question },
+      ),
       // A timeout abort surfaces as a rejection and is mapped to
       // KbUnavailableError by the catch below — never leaked verbatim.
       signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_ASK_TIMEOUT_MS),
