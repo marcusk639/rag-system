@@ -287,7 +287,10 @@ function screenForGeneration(
   question: string,
   retrieved: RetrievalResult[],
 ): RetrievalResult[] {
-  if (retrieved.length === 0 || !deps.generator.screen) return retrieved;
+  if (retrieved.length === 0) return retrieved;
+  // `screen` is required by the Generator contract; this guard only tolerates
+  // unit-test doubles cast past the type. Every real generator screens.
+  if (typeof deps.generator.screen !== "function") return retrieved;
   return deps.generator.screen(question, retrieved);
 }
 

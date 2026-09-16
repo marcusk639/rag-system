@@ -53,28 +53,28 @@ export class MarkdownChunker implements Chunker {
   }
 
   private chunkSection(section: Section): string[] {
-    const tokens = countTokens(section.body);
-    if (tokens <= this.opts.chunkSize) {
+    // The heading line goes on AFTER overlap is applied, so every chunk opens
+    // with its heading. Applying overlap to header-prefixed strings put the
+    // previous chunk's tail text above the heading of every continuation
+    // chunk, burying the structural context the header exists to provide.
+    const header = section.headingPath.length
+      ? `# ${section.headingPath.join(" › ")}\n\n`
+      : "";
+
+    if (countTokens(section.body) <= this.opts.chunkSize) {
       // Whole section fits; prepend the heading line so the chunk is self-contained.
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
       return [header + section.body];
     }
 
     // Split by blank lines (paragraphs / code blocks treated as one unit).
     const units = splitParagraphs(section.body);
-    const chunks: string[] = [];
+    const bodies: string[] = [];
     let buffer: string[] = [];
     let bufferTokens = 0;
 
     const flush = () => {
       if (buffer.length === 0) return;
-      const text = buffer.join("\n\n");
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
-      chunks.push(header + text);
+      bodies.push(buffer.join("\n\n"));
       buffer = [];
       bufferTokens = 0;
     };
@@ -84,12 +84,7 @@ export class MarkdownChunker implements Chunker {
       if (unitTokens > this.opts.chunkSize) {
         // Single paragraph too big — flush what we have, then hard-split.
         flush();
-        for (const piece of hardSplit(unit, this.opts.chunkSize)) {
-          const header = section.headingPath.length
-            ? `# ${section.headingPath.join(" › ")}\n\n`
-            : "";
-          chunks.push(header + piece);
-        }
+        bodies.push(...hardSplit(unit, this.opts.chunkSize));
         continue;
       }
 
@@ -101,7 +96,9 @@ export class MarkdownChunker implements Chunker {
     }
     flush();
 
-    return applyOverlap(chunks, this.opts.chunkOverlap);
+    return applyOverlap(bodies, this.opts.chunkOverlap).map(
+      (body) => header + body,
+    );
   }
 }
 

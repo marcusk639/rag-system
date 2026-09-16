@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { encode } from "gpt-tokenizer";
 import type { ParsedDocument, ParsedTable } from "@rag/core";
-import { CompositeChunker } from "./composite-chunker.js";
+import { CompositeChunker, withDocumentTitle } from "./composite-chunker.js";
 import { MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 function makeTable(
@@ -260,6 +260,51 @@ describe("CompositeChunker", () => {
       const [a] = await chunker.chunk({ ...base, title: "Doc A" });
       const [b] = await chunker.chunk({ ...base, title: "Doc B" });
       expect(a?.hash).not.toBe(b?.hash);
+    });
+  });
+
+  describe("heading and title survive chunk overlap (production chunkOverlap)", () => {
+    const overlapping = {
+      markdown: { chunkSize: 60, chunkOverlap: 20 },
+      table: { chunkSize: 200, rowOverlap: 0 },
+    };
+    const paragraphs = Array.from(
+      { length: 8 },
+      (_, i) =>
+        `Step ${i + 1}: open the client record, confirm the engagement letter, and apply the work template before assigning.`,
+    ).join("\n\n");
+
+    it("starts EVERY chunk of a multi-chunk section with the title and heading, before any overlap text", async () => {
+      const chunker = new CompositeChunker(overlapping);
+      const chunks = await chunker.chunk({
+        title: "Onboarding SOP",
+        markdown: `# Setup\n\n${paragraphs}`,
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks.length).toBeGreaterThan(2);
+      for (const c of chunks) {
+        expect(c.text.startsWith("# Onboarding SOP › Setup\n\n")).toBe(true);
+        // The heading appears once, at the top — not again after overlap text.
+        expect(c.text.indexOf("# Setup")).toBe(-1);
+      }
+      // Overlap is still carried: chunk 2 repeats the tail of chunk 1's body.
+      const firstBodyTail = chunks[0]!.text.slice(-30);
+      expect(chunks[1]!.text).toContain(firstBodyTail.trim().slice(-15));
+    });
+  });
+
+  describe("withDocumentTitle", () => {
+    it("only merges into a header line the chunker itself wrote", () => {
+      const chunk = {
+        hash: "h",
+        text: "# comment line from a split code block\nmore",
+        tokenCount: 5,
+        ordinal: 0,
+        headingPath: [],
+      };
+      const out = withDocumentTitle(chunk, "Runbook");
+      expect(out.text.startsWith("# Runbook\n\n# comment line")).toBe(true);
     });
   });
 });

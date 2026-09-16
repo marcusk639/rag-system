@@ -5,8 +5,8 @@ import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
  *
  *   - Returns an answer string that includes the first chunk's text verbatim
  *     so specs can assert on what landed in the model's context.
- *   - Emits one citation per retrieved chunk so the citation rendering path
- *     gets exercised.
+ *   - Cites like the real generators: one `[N]` and one citation per source
+ *     DOCUMENT (in order of first appearance), not per chunk.
  *   - Records every call for later inspection.
  */
 export class FakeGenerator implements Generator {
@@ -15,6 +15,11 @@ export class FakeGenerator implements Generator {
     contextSize: number;
     contextTexts: string[];
   }> = [];
+
+  /** No screening: fixture context is synthetic and never TRI-bearing. */
+  screen(_question: string, context: RetrievalResult[]): RetrievalResult[] {
+    return context;
+  }
 
   async answer(
     question: string,
@@ -28,20 +33,29 @@ export class FakeGenerator implements Generator {
 
     const head = context[0];
     const headPreview = head ? head.text.slice(0, 80) : "<no context>";
-    // `[N]` markers for every chunk so `filterCitationsToAnswer` (applied by
-    // callers after generation) doesn't strip them all — real generators are
-    // instructed to cite this way; this fixture must too or "one citation per
-    // retrieved chunk" above would be a lie.
-    const markers = context.map((_, i) => `[${i + 1}]`).join(" ");
+    const documents: RetrievalResult[] = [];
+    const chunkIds = new Map<string, string[]>();
+    for (const r of context) {
+      const ids = chunkIds.get(r.document.id);
+      if (ids) {
+        ids.push(r.chunk.id);
+      } else {
+        chunkIds.set(r.document.id, [r.chunk.id]);
+        documents.push(r);
+      }
+    }
+    // `[N]` markers for every document so `filterCitationsToAnswer` (applied by
+    // callers after generation) keeps them all.
+    const markers = documents.map((_, i) => `[${i + 1}]`).join(" ");
     return {
       answer: `Q: ${question} | ctx#0: ${headPreview} ${markers}`,
-      citations: context.map((r, i) => ({
+      citations: documents.map((r, i) => ({
         index: i + 1,
         documentId: r.document.id,
         title: r.document.title,
         downloadable: r.document.hasOriginal ?? false,
         chunkId: r.chunk.id,
-        chunkIds: [r.chunk.id],
+        chunkIds: chunkIds.get(r.document.id) ?? [r.chunk.id],
         score: r.score,
         ...(r.document.url !== undefined ? { url: r.document.url } : {}),
       })),

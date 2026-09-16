@@ -114,16 +114,20 @@ export class CompositeChunker implements Chunker {
  * `headingPath` is left untouched — it describes the document's own structure
  * and is what citations display as the section.
  */
-function withDocumentTitle(chunk: Chunk, rawTitle: string): Chunk {
+/** @internal Exported for unit tests. */
+export function withDocumentTitle(chunk: Chunk, rawTitle: string): Chunk {
   const title = rawTitle.replace(/\s+/g, " ").trim();
   if (!title) return chunk;
 
   const newline = chunk.text.indexOf("\n");
   const firstLine = newline === -1 ? chunk.text : chunk.text.slice(0, newline);
   let text: string;
-  if (firstLine.startsWith("# ")) {
-    const heading = firstLine.slice(2);
-    const firstSegment = heading.split(" › ")[0]?.trim().toLowerCase();
+  // Only a header line the chunkers themselves wrote — exactly the heading
+  // path — is merged into. Any other line starting with "# " is document
+  // content (e.g. a comment in a split code block) and is left intact.
+  const heading = chunk.headingPath.join(" › ");
+  if (heading && firstLine === `# ${heading}`) {
+    const firstSegment = chunk.headingPath[0]?.trim().toLowerCase();
     if (firstSegment === title.toLowerCase()) return chunk;
     text = `# ${title} › ${heading}${chunk.text.slice(firstLine.length)}`;
   } else {
