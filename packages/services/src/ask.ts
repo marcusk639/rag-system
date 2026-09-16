@@ -7,6 +7,7 @@ import type {
   SanitizedRetrievalResult,
 } from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
+import { getChunksByOrdinals } from "@rag/db";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
@@ -93,6 +94,7 @@ export async function askQuestion(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
+  neighborExpansion: NeighborExpansion = NO_NEIGHBOR_EXPANSION,
 ): Promise<AskResult> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -105,6 +107,7 @@ export async function askQuestion(
     defaultTopK,
     scope,
     maxChunksPerDocument,
+    neighborExpansion,
   );
 }
 
@@ -115,6 +118,96 @@ export async function askQuestion(
  * meant to make room for other sources.
  */
 const CAP_OVERFETCH_MULTIPLIER = 3;
+
+/**
+ * "Small-to-big" context expansion. For the top `documents` documents in the
+ * ranking, fetch up to `chunksPerDocument` chunks adjacent to the ones that
+ * were retrieved, so a procedure whose steps span several chunks reaches the
+ * generator whole rather than as isolated fragments.
+ */
+export interface NeighborExpansion {
+  /** How many top-ranked documents to expand. `0` disables expansion. */
+  documents: number;
+  /** Maximum extra chunks fetched per expanded document. */
+  chunksPerDocument: number;
+}
+
+export const NO_NEIGHBOR_EXPANSION: NeighborExpansion = {
+  documents: 0,
+  chunksPerDocument: 0,
+};
+
+/**
+ * Add neighbouring chunks of the top documents to `results`. Originals keep
+ * their positions; added chunks are appended with zero scores (they were not
+ * retrieved on relevance) and share their document's object. Neighbour order
+ * follows the rank of the retrieved chunk they sit beside, so a small budget
+ * spends itself around the best evidence first.
+ *
+ * Only documents already present in `results` are touched, and those were
+ * returned by the scope-enforced retriever, so expansion cannot widen access.
+ * A failure degrades to the unexpanded results rather than failing the answer.
+ */
+export async function expandWithNeighbors(
+  deps: Pick<ServiceDeps, "db" | "logger">,
+  results: RetrievalResult[],
+  expansion: NeighborExpansion,
+): Promise<RetrievalResult[]> {
+  if (expansion.documents <= 0 || expansion.chunksPerDocument <= 0) {
+    return results;
+  }
+
+  const byDocument = new Map<string, RetrievalResult[]>();
+  for (const r of results) {
+    const list = byDocument.get(r.document.id);
+    if (list) list.push(r);
+    else byDocument.set(r.document.id, [r]);
+  }
+  const topDocuments = [...byDocument.entries()].slice(
+    0,
+    expansion.documents,
+  );
+
+  try {
+    const added = await Promise.all(
+      topDocuments.map(async ([documentId, hits]) => {
+        const have = new Set(hits.map((h) => h.chunk.ordinal));
+        const wanted: number[] = [];
+        for (const h of hits) {
+          for (const o of [h.chunk.ordinal - 1, h.chunk.ordinal + 1]) {
+            if (o >= 0 && !have.has(o) && !wanted.includes(o)) wanted.push(o);
+          }
+        }
+        const ordinals = wanted.slice(0, expansion.chunksPerDocument);
+        if (ordinals.length === 0) return [];
+        const rows = await getChunksByOrdinals(deps.db, documentId, ordinals);
+        const document = hits[0]!.document;
+        return rows.map(
+          (row): RetrievalResult => ({
+            text: row.text,
+            score: 0,
+            denseScore: 0,
+            sparseScore: 0,
+            document,
+            chunk: {
+              id: row.id,
+              ordinal: row.ordinal,
+              headingPath: row.headingPath,
+              ...(row.page != null ? { page: row.page } : {}),
+            },
+          }),
+        );
+      }),
+    );
+    return [...results, ...added.flat()];
+  } catch (err) {
+    deps.logger.warn(
+      { err, marker: "ask.neighbor_expansion_failed" },
+      "neighbour chunk expansion failed; answering from retrieved chunks only",
+    );
+    return results;
+  }
+}
 
 async function retrieveForAnswer(
   deps: AskDeps,
@@ -152,14 +245,19 @@ async function ask(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
+  neighborExpansion: NeighborExpansion,
 ): Promise<AskResult> {
   const answerId = randomUUID();
-  const retrieved = await retrieveForAnswer(
+  const retrieved = await expandWithNeighbors(
     deps,
-    input,
-    defaultTopK,
-    scope,
-    maxChunksPerDocument,
+    await retrieveForAnswer(
+      deps,
+      input,
+      defaultTopK,
+      scope,
+      maxChunksPerDocument,
+    ),
+    neighborExpansion,
   );
 
   if (retrieved.length === 0) {
@@ -221,6 +319,7 @@ export async function* askQuestionStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
+  neighborExpansion: NeighborExpansion = NO_NEIGHBOR_EXPANSION,
 ): AsyncGenerator<AskStreamEvent> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -231,6 +330,7 @@ export async function* askQuestionStream(
     defaultTopK,
     scope,
     maxChunksPerDocument,
+    neighborExpansion,
   );
 }
 
@@ -240,14 +340,19 @@ async function* askStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
+  neighborExpansion: NeighborExpansion,
 ): AsyncGenerator<AskStreamEvent> {
   const answerId = randomUUID();
-  const retrieved = await retrieveForAnswer(
+  const retrieved = await expandWithNeighbors(
     deps,
-    input,
-    defaultTopK,
-    scope,
-    maxChunksPerDocument,
+    await retrieveForAnswer(
+      deps,
+      input,
+      defaultTopK,
+      scope,
+      maxChunksPerDocument,
+    ),
+    neighborExpansion,
   );
 
   if (retrieved.length === 0) {

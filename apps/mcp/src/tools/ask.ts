@@ -124,6 +124,7 @@ export function registerAsk(
           deps.config.retrieval.defaultTopK,
           scope,
           deps.config.retrieval.maxChunksPerDocument,
+          deps.config.retrieval.neighborExpansion,
         );
       } catch (err) {
         if (err instanceof GenerationNotConfiguredError) {

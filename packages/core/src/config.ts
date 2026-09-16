@@ -164,6 +164,18 @@ export const Config = z
        * one long file from crowding out other sources. `0` disables the cap.
        */
       maxChunksPerDocument: z.number().int().nonnegative().default(3),
+      /**
+       * "Small-to-big" expansion for /ask: for the top `documents` documents,
+       * also hand the generator up to `chunksPerDocument` chunks adjacent to
+       * the retrieved ones, so a multi-chunk procedure arrives whole. `0` in
+       * either field disables it. Does not affect /search.
+       */
+      neighborExpansion: z
+        .object({
+          documents: z.number().int().nonnegative().default(2),
+          chunksPerDocument: z.number().int().nonnegative().default(4),
+        })
+        .default({}),
     }),
 
     /**
@@ -678,6 +690,16 @@ export function loadConfig(
         env.MAX_CHUNKS_PER_DOCUMENT !== undefined
           ? Number(env.MAX_CHUNKS_PER_DOCUMENT)
           : undefined,
+      neighborExpansion: {
+        documents:
+          env.NEIGHBOR_EXPANSION_DOCUMENTS !== undefined
+            ? Number(env.NEIGHBOR_EXPANSION_DOCUMENTS)
+            : undefined,
+        chunksPerDocument:
+          env.NEIGHBOR_EXPANSION_CHUNKS !== undefined
+            ? Number(env.NEIGHBOR_EXPANSION_CHUNKS)
+            : undefined,
+      },
     },
     rerank: {
       provider: (env.RERANK_PROVIDER ?? "none") as

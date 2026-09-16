@@ -414,3 +414,31 @@ describe("loadConfig — platform PORT fallback", () => {
     expect(cfg.mcp.httpPort).toBe(3001);
   });
 });
+
+describe("loadConfig — neighbour chunk expansion", () => {
+  it("defaults to expanding the top 2 documents by up to 4 chunks each", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.retrieval.neighborExpansion).toEqual({
+      documents: 2,
+      chunksPerDocument: 4,
+    });
+  });
+
+  it("reads NEIGHBOR_EXPANSION_DOCUMENTS / NEIGHBOR_EXPANSION_CHUNKS, where 0 disables", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      NEIGHBOR_EXPANSION_DOCUMENTS: "0",
+      NEIGHBOR_EXPANSION_CHUNKS: "6",
+    });
+    expect(cfg.retrieval.neighborExpansion).toEqual({
+      documents: 0,
+      chunksPerDocument: 6,
+    });
+  });
+
+  it("rejects a negative value", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, NEIGHBOR_EXPANSION_CHUNKS: "-1" }),
+    ).toThrow();
+  });
+});

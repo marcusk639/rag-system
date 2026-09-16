@@ -112,6 +112,7 @@ export function makeTestConfig(): Config {
       hybridDenseWeight: 0.7,
       hybridSparseWeight: 0.3,
       maxChunksPerDocument: 3,
+      neighborExpansion: { documents: 2, chunksPerDocument: 4 },
     },
     // Reranking disabled in the e2e harness (no hosted reranker available).
     rerank: { provider: "none", poolMultiplier: 5 },

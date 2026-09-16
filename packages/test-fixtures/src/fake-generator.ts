@@ -41,6 +41,7 @@ export class FakeGenerator implements Generator {
         title: r.document.title,
         downloadable: r.document.hasOriginal ?? false,
         chunkId: r.chunk.id,
+        chunkIds: [r.chunk.id],
         score: r.score,
         ...(r.document.url !== undefined ? { url: r.document.url } : {}),
       })),

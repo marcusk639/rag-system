@@ -130,6 +130,7 @@ export async function registerAskRoute(
         config.retrieval.defaultTopK,
         scopeFromRequest(request),
         config.retrieval.maxChunksPerDocument,
+        config.retrieval.neighborExpansion,
       );
       auditAsk(
         deps,
@@ -180,6 +181,7 @@ export async function registerAskRoute(
           config.retrieval.defaultTopK,
           scope,
           config.retrieval.maxChunksPerDocument,
+          config.retrieval.neighborExpansion,
         )) {
           if (event.type === "token") {
             raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
