@@ -16,7 +16,11 @@ import {
   type SourceDocument,
 } from "@rag/core";
 import { classifyDocument } from "./classify-document.js";
-import { isExcludedPath, redactOrThrow, ContentSafetyError } from "@rag/core";
+import {
+  isExcludedPath,
+  redactParsedDocument,
+  ContentSafetyError,
+} from "@rag/core";
 import {
   type Db,
   deleteDocumentByExternalId,
@@ -82,7 +86,7 @@ export interface PipelineDeps {
    */
   objectStore?: ObjectStore | null;
   /**
-   * The loaded identifier-scanner pack `redactOrThrow` runs before anything
+   * The loaded identifier-scanner pack `redactParsedDocument` runs before anything
    * downstream (see 1b below). Every caller supplies one: the worker loads it
    * at startup from `config.worker.scannerPackDir` (default `packs/cpa`) and
    * hands it down through `WorkerDeps.pack`.
@@ -376,7 +380,17 @@ export async function ingestOne(
           "quarantined until then.",
       );
     }
-    redacted = redactOrThrow(parsed.markdown, deps.pack);
+    // Every text-bearing field, not only markdown: spreadsheet chunks are
+    // built from `tables`, and the title is stored, cited, and sent to the
+    // model. Redacting markdown alone left those fields raw.
+    redacted = redactParsedDocument(
+      {
+        title: parsed.title,
+        markdown: parsed.markdown,
+        tables: parsed.tables,
+      },
+      deps.pack,
+    );
   } catch (err) {
     // Fail CLOSED: quarantine by skipping, never index raw.
     log.error(
@@ -419,7 +433,9 @@ export async function ingestOne(
       "redacted identifiers before indexing",
     );
   }
-  parsed.markdown = redacted.text;
+  parsed.markdown = redacted.markdown;
+  parsed.tables = redacted.tables;
+  parsed.title = redacted.title;
 
   // 1c. Layer 3 — per-document classification gate. The source's declared class
   //     is a CEILING, not a verdict: evidence from this document can only make
@@ -468,7 +484,7 @@ export async function ingestOne(
   const { id: documentId, contentChanged } = await upsertDocument(db, {
     sourceId,
     externalId: source.externalId,
-    title: parsed.title || source.title,
+    title: parsed.title,
     mimeType: source.mimeType,
     sourceModifiedAt: new Date(source.modifiedAt),
     contentHash,

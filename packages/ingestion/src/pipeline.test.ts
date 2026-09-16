@@ -616,6 +616,58 @@ describe("document classification enforcement", () => {
   });
 });
 
+describe("redaction covers tables and title, not only markdown", () => {
+  // `account` is masked but is NOT a Class-D identifier, so the document is
+  // indexed — the case where unredacted table cells would reach the chunks.
+  const ACCOUNT_PACK: LoadedPack = {
+    id: "acct",
+    version: "1.0.0",
+    scanners: [
+      {
+        id: "account",
+        kind: "identifying",
+        disposition: "redact",
+        re: /\bACCT-\d{6}\b/g,
+        contextWindow: 60,
+      },
+    ],
+  };
+
+  it("hands the chunker redacted table cells and stores a redacted title", async () => {
+    const deps = { ...makeDeps(), pack: ACCOUNT_PACK };
+    const md = "| Client | Account |\n| --- | --- |\n| A | ACCT-123456 |";
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
+      title: "Ledger ACCT-999999",
+      markdown: md,
+      tables: [
+        {
+          markdown: md,
+          sheetName: "Sheet1",
+          sheetType: "tabular",
+          headers: ["Client", "Account"],
+          rows: [["A", "ACCT-123456"]],
+          rowCount: 1,
+          columnCount: 2,
+        },
+      ],
+      metadata: {},
+    });
+    const { connector } = makeConnector([
+      { documents: ["ledger"], nextCursor: null, done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    const chunkerInput = (deps.chunker.chunk as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0];
+    expect(JSON.stringify(chunkerInput)).not.toMatch(/ACCT-\d{6}/);
+    expect(upsertDocumentMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ title: "Ledger [REDACTED-ACCT]" }),
+    );
+  });
+});
+
 describe("TRI compliance scanning at ingest", () => {
   it("BLOCKS a document containing an SSN rather than ingesting and flagging it", async () => {
     // ⚠ Behaviour changed 2026-08-03 (Layer 3). This test previously asserted

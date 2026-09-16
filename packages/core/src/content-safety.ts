@@ -25,6 +25,7 @@
 
 import { scanText, type ScanMatch } from "./pack/scan.js";
 import type { LoadedPack } from "./pack/load.js";
+import type { ParsedTable } from "./types.js";
 
 /** A single redaction, recorded so a run can be audited without the value. */
 export interface RedactionFinding {
@@ -323,4 +324,151 @@ export function redactOrThrow(
       err,
     );
   }
+}
+
+// ── Whole-document redaction ───────────────────────────────────────────────
+
+/**
+ * Separators used to redact a table grid as ONE string. Neither is a word
+ * character or whitespace, so no pack pattern (`\b`, `\s`, `[-\s]`) can match
+ * across a cell or row boundary, while the grid still gives the whole-table
+ * context the label-gated and density-swept rules need (an `SSN` header rows
+ * above its values).
+ */
+const CELL_SEP = "␟";
+const ROW_SEP = "␞";
+
+export interface RedactableParsedDocument {
+  title: string;
+  markdown: string;
+  tables?: ParsedTable[];
+}
+
+export interface RedactedParsedDocument extends RedactionResult {
+  title: string;
+  /** Alias of `text`: the redacted markdown. */
+  markdown: string;
+  tables: ParsedTable[];
+}
+
+function redactGrid(
+  table: ParsedTable,
+  pack: LoadedPack,
+): { headers: string[]; rows: string[][]; findings: RedactionFinding[] } {
+  const grid = [table.headers ?? [], ...(table.rows ?? [])];
+  for (const row of grid) {
+    for (const cell of row) {
+      if (cell.includes(CELL_SEP) || cell.includes(ROW_SEP)) {
+        throw new ContentSafetyError(
+          "table cell contains an internal redaction separator; cannot " +
+            "redact the grid safely, so the document must be quarantined",
+        );
+      }
+    }
+  }
+  const joined = grid.map((row) => row.join(CELL_SEP)).join(ROW_SEP);
+  const r = redactText(joined, pack);
+  const out = r.text.split(ROW_SEP).map((row) => row.split(CELL_SEP));
+  const shapeMatches =
+    out.length === grid.length &&
+    out.every((row, i) => row.length === Math.max(grid[i]?.length ?? 0, 1));
+  // A zero-cell row joins to "" and splits back to [""] — accept that as the
+  // only permitted shape difference; anything else means a mask consumed a
+  // separator, and the cells can no longer be trusted to line up.
+  if (!shapeMatches) {
+    throw new ContentSafetyError(
+      "table redaction changed the grid shape; refusing to index the table",
+    );
+  }
+  const restored = out.map((row, i) =>
+    (grid[i]?.length ?? 0) === 0 ? [] : row,
+  );
+  return {
+    headers: restored[0] ?? [],
+    rows: restored.slice(1),
+    findings: r.findings,
+  };
+}
+
+function addFindings(
+  into: Map<RedactionKind, number>,
+  findings: readonly RedactionFinding[],
+): void {
+  for (const f of findings) into.set(f.kind, (into.get(f.kind) ?? 0) + f.count);
+}
+
+/**
+ * Redact EVERY text-bearing field of a parsed document, failing CLOSED.
+ *
+ * Redacting only `markdown` is not enough: spreadsheet chunks are built from
+ * `tables[].headers/rows`, and the title is stored, displayed in citations, and
+ * sent to the model. Those were never redacted, so a pack match that masked the
+ * markdown left the same value intact in the table chunks.
+ *
+ * Findings are reported per kind as `title + max(markdown, tables)`: for a
+ * spreadsheet the tables mirror the markdown, so summing them would double
+ * every count in the audit trail.
+ */
+export function redactParsedDocument(
+  doc: RedactableParsedDocument,
+  pack: LoadedPack,
+): RedactedParsedDocument {
+  const markdown = redactOrThrow(doc.markdown, pack);
+  const title = redactOrThrow(doc.title, pack);
+  const tableCounts = new Map<RedactionKind, number>();
+  let tables: ParsedTable[];
+  try {
+    tables = (doc.tables ?? []).map((t) => {
+      const grid = redactGrid(t, pack);
+      addFindings(tableCounts, grid.findings);
+      // `markdown` mirrors the grid, so it is masked but not counted; caption
+      // and sheet name are independent text, so their findings count.
+      const optional = (value: string | null | undefined) => {
+        if (value == null) return value;
+        const r = redactText(value, pack);
+        addFindings(tableCounts, r.findings);
+        return r.text;
+      };
+      return {
+        ...t,
+        markdown: redactText(t.markdown, pack).text,
+        caption: optional(t.caption),
+        sheetName: optional(t.sheetName),
+        headers: grid.headers,
+        rows: grid.rows,
+      };
+    });
+  } catch (err) {
+    if (err instanceof ContentSafetyError) throw err;
+    throw new ContentSafetyError(
+      "table redaction failed; document must be quarantined, not indexed",
+      err,
+    );
+  }
+
+  const markdownCounts = new Map<RedactionKind, number>();
+  addFindings(markdownCounts, markdown.findings);
+  const totals = new Map<RedactionKind, number>();
+  for (const kind of new Set([
+    ...markdownCounts.keys(),
+    ...tableCounts.keys(),
+  ])) {
+    totals.set(
+      kind,
+      Math.max(markdownCounts.get(kind) ?? 0, tableCounts.get(kind) ?? 0),
+    );
+  }
+  addFindings(totals, title.findings);
+  const findings = [...totals.entries()].map(([kind, count]) => ({
+    kind,
+    count,
+  }));
+  return {
+    text: markdown.text,
+    markdown: markdown.text,
+    title: title.text,
+    tables,
+    findings,
+    totalRedacted: findings.reduce((a, f) => a + f.count, 0),
+  };
 }
