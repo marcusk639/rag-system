@@ -14,5 +14,8 @@ export {
   type SyncSourcePayload,
   type QueueOptions,
 } from "./queue.js";
-export { SyncAlreadyRunningError } from "./errors.js";
+export {
+  SyncAlreadyRunningError,
+  DeletionReconciliationError,
+} from "./errors.js";
 export { mapDataClassToDocumentClass } from "./classify-source.js";

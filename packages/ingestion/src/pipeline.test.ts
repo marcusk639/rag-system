@@ -10,6 +10,7 @@ import type {
 import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
 import { runIngestion, ingestOne, type PipelineDeps } from "./pipeline.js";
+import { DeletionReconciliationError } from "./errors.js";
 
 /**
  * `packs/cpa/pack.yaml` exists (Task 6 authored it), but this suite builds
@@ -383,7 +384,11 @@ describe("runIngestion deletion reconciliation + skip observability", () => {
     expect(result.documentsDeleted).toBe(1);
   });
 
-  it("a failed deletion is logged and does not abort the sync", async () => {
+  it("a failed deletion still ingests the page's documents but does NOT persist the cursor, so the tombstone is retried", async () => {
+    // Graph delta never re-sends a tombstone once the caller has advanced past
+    // it. Persisting the cursor after a failed delete would leave the document
+    // searchable forever with no further signal. Failing the page instead makes
+    // pg-boss retry from the last good cursor, which re-delivers the tombstone.
     deleteDocumentByExternalIdMock.mockRejectedValueOnce(new Error("db down"));
 
     const { connector } = makeConnector([
@@ -395,12 +400,39 @@ describe("runIngestion deletion reconciliation + skip observability", () => {
       },
     ]);
 
-    const result = await runIngestion("src", connector, null, OPTS, makeDeps());
+    await expect(
+      runIngestion("src", connector, "c0", OPTS, makeDeps()),
+    ).rejects.toThrow(DeletionReconciliationError);
 
-    // The document on the same page still ingests; the run completes.
-    expect(result.documentsProcessed).toBe(1);
-    expect(result.documentsDeleted).toBe(0);
-    expect(result.done).toBe(true);
+    // The page's documents were still processed (idempotent on retry)…
+    expect(upsertDocumentMock).toHaveBeenCalled();
+    // …but the cursor was never advanced past the failed tombstone.
+    expect(updateSourceCursorMock).not.toHaveBeenCalled();
+  });
+
+  it("a retried run with the same cursor completes the deletion and then advances", async () => {
+    deleteDocumentByExternalIdMock.mockRejectedValueOnce(new Error("db down"));
+    const page = {
+      documents: [],
+      deletions: ["drive1:gone1"],
+      nextCursor: "c1",
+      done: true,
+    };
+
+    await expect(
+      runIngestion("src", makeConnector([page]).connector, "c0", OPTS, makeDeps()),
+    ).rejects.toThrow(DeletionReconciliationError);
+
+    const { connector, received } = makeConnector([page]);
+    const result = await runIngestion("src", connector, "c0", OPTS, makeDeps());
+
+    expect(received[0]?.cursor).toBe("c0");
+    expect(result.documentsDeleted).toBe(1);
+    expect(updateSourceCursorMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "src",
+      "c1",
+    );
   });
 
   it("removes the stored original when a tombstone has a storage key", async () => {

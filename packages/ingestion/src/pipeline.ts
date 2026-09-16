@@ -16,6 +16,7 @@ import {
   type SourceDocument,
 } from "@rag/core";
 import { classifyDocument } from "./classify-document.js";
+import { DeletionReconciliationError } from "./errors.js";
 import {
   isExcludedPath,
   redactParsedDocument,
@@ -217,7 +218,9 @@ export async function runIngestion(
 
     // Reconcile deletions (delta tombstones): remove the document AND its
     // chunks (FK cascade) so files deleted in the source stop surfacing in
-    // search. A single failed delete must not abort the whole sync.
+    // search. Every tombstone is attempted; any failure fails the page AFTER
+    // the loop and BEFORE the cursor is saved (see DeletionReconciliationError).
+    const failedDeletions: string[] = [];
     for (const externalId of page.deletions ?? []) {
       try {
         const del = await deleteDocumentByExternalId(
@@ -241,8 +244,15 @@ export async function runIngestion(
           }
         }
       } catch (err) {
-        log.error({ err, externalId }, "failed to reconcile deleted document");
+        failedDeletions.push(externalId);
+        log.error(
+          { err, externalId, marker: "ingest.delete_failed" },
+          "failed to reconcile deleted document; cursor will not advance",
+        );
       }
+    }
+    if (failedDeletions.length > 0) {
+      throw new DeletionReconciliationError(sourceId, failedDeletions);
     }
     documentsSkippedOversize += page.skippedOversize ?? 0;
 
