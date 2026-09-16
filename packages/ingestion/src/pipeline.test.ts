@@ -9,7 +9,13 @@ import type {
 } from "@rag/core";
 import { ClassBlockedError } from "@rag/core";
 import { FakeEmbedder, FakeObjectStore } from "@rag/test-fixtures";
-import { runIngestion, ingestOne, type PipelineDeps } from "./pipeline.js";
+import { createHash } from "node:crypto";
+import {
+  runIngestion,
+  ingestOne,
+  CONTENT_PROCESSING_VERSION,
+  type PipelineDeps,
+} from "./pipeline.js";
 import { DeletionReconciliationError } from "./errors.js";
 
 /**
@@ -299,6 +305,26 @@ describe("runIngestion page budgeting", () => {
     expect(connector.list).toHaveBeenCalledTimes(2);
     expect(result.done).toBe(true);
     expect(result.documentsProcessed).toBe(1);
+  });
+});
+
+describe("content hash carries the processing version", () => {
+  it("hashes the markdown together with CONTENT_PROCESSING_VERSION so a chunking change re-embeds unchanged documents", async () => {
+    const deps = makeDeps();
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: null, done: true },
+    ]);
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    const markdown = "# a\n\nbody";
+    const expected = createHash("sha256")
+      .update(`v${CONTENT_PROCESSING_VERSION}\n${markdown}`)
+      .digest("hex");
+    expect(upsertDocumentMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ contentHash: expected }),
+    );
+    expect(CONTENT_PROCESSING_VERSION).toBeGreaterThanOrEqual(2);
   });
 });
 

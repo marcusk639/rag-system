@@ -195,4 +195,71 @@ describe("CompositeChunker", () => {
       }
     }
   });
+
+  describe("document title context", () => {
+    it("prefixes the title to a chunk from a document with no headings", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "New Client Onboarding SOP",
+        markdown: "Apply the template and route the letter for signature.",
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# New Client Onboarding SOP\n\n")).toBe(
+        true,
+      );
+      // headingPath stays the document's own structure — citations use it.
+      expect(chunks[0]?.headingPath).toEqual([]);
+    });
+
+    it("joins the title onto an existing heading path", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Karbon Guide",
+        markdown: "# Setup\n\nCreate the client record.",
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(true);
+      expect(chunks[0]?.headingPath).toEqual(["Setup"]);
+    });
+
+    it("does not repeat a title that is already the first heading", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Karbon Guide",
+        markdown: "# Karbon Guide\n\n## Setup\n\nCreate the client record.",
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(true);
+    });
+
+    it("prefixes the title to spreadsheet row chunks", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Time Codes",
+        markdown: "",
+        tables: [
+          makeTable({
+            markdown: "md",
+            sheetName: "Codes",
+            sheetType: "tabular",
+            headers: ["Code", "Meaning"],
+            rows: [["BK-CATCHUP", "Bookkeeping catch-up"]],
+          }),
+        ],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Time Codes › Codes\n\n")).toBe(true);
+    });
+
+    it("recomputes the chunk hash so re-titled chunks are not treated as unchanged", async () => {
+      const chunker = new CompositeChunker(opts);
+      const base = { markdown: "Same body.", tables: [], metadata: {} };
+      const [a] = await chunker.chunk({ ...base, title: "Doc A" });
+      const [b] = await chunker.chunk({ ...base, title: "Doc B" });
+      expect(a?.hash).not.toBe(b?.hash);
+    });
+  });
 });

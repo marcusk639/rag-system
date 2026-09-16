@@ -296,6 +296,19 @@ export async function runIngestion(
 }
 
 /**
+ * Version of everything between the parsed markdown and the stored chunks
+ * (redaction scope, chunking, chunk text shape). It is folded into the
+ * document content hash, so bumping it makes the next sync re-chunk and
+ * re-embed every document even though its source bytes did not change.
+ *
+ * Bump it whenever that processing changes the chunks produced from the same
+ * markdown. History:
+ *   1 — implicit: hash of the markdown alone.
+ *   2 — document title prefixed to every chunk; tables and titles redacted.
+ */
+export const CONTENT_PROCESSING_VERSION = 2;
+
+/**
  * Process a single source document: parse, chunk, embed, store.
  *
  * @internal Exported so its missing-pack defence-in-depth guard (see the
@@ -489,7 +502,9 @@ export async function ingestOne(
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched
   //    documents (source updated metadata only) skip embedding work.
-  const contentHash = sha256(parsed.markdown);
+  const contentHash = sha256(
+    `v${CONTENT_PROCESSING_VERSION}\n${parsed.markdown}`,
+  );
 
   // 3. Upsert document row; if hash unchanged, we can short-circuit.
   const { id: documentId, contentChanged } = await upsertDocument(db, {
