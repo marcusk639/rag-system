@@ -27,6 +27,14 @@ export const SharePointConfigSchema = z.object({
     .int()
     .positive()
     .default(50 * 1024 * 1024),
+  /**
+   * Folder-path fragments (case-insensitive substrings of the item's path,
+   * e.g. "/clients/") whose files are never downloaded or indexed. Applied on
+   * top of the built-in client-content denylist. A matching item that was
+   * indexed before the exclusion was added is reported as a deletion. Keep
+   * firm-specific folder names here, in source config, not in code.
+   */
+  excludePaths: z.array(z.string().min(1)).default([]),
 });
 
 export type SharePointConfig = z.infer<typeof SharePointConfigSchema>;
