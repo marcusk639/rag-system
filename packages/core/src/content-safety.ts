@@ -334,6 +334,11 @@ export function redactOrThrow(
  * across a cell or row boundary, while the grid still gives the whole-table
  * context the label-gated and density-swept rules need (an `SSN` header rows
  * above its values).
+ *
+ * ⚠ The guarantee is only as strong as the pack's patterns: a regex `.` or
+ * `[\s\S]` DOES match these separators. The label-gated `ssn-unformatted`
+ * lookbehind relies on exactly that to reach from a header into a row. Do not
+ * write a VALUE pattern that uses `.` between digit groups.
  */
 const CELL_SEP = "␟";
 const ROW_SEP = "␞";
@@ -405,9 +410,11 @@ function addFindings(
  * sent to the model. Those were never redacted, so a pack match that masked the
  * markdown left the same value intact in the table chunks.
  *
- * Findings are reported per kind as `title + max(markdown, tables)`: for a
- * spreadsheet the tables mirror the markdown, so summing them would double
- * every count in the audit trail.
+ * Findings are reported per kind as `title + max(markdown, tables)`. Every
+ * parser route renders its tables INTO the markdown as well (spreadsheet
+ * sheets, Unstructured HTML tables, MarkItDown tables extracted from its own
+ * markdown — services/parser-py/app/main.py), so the tables are a mirror, and
+ * summing would double every count in the audit trail.
  */
 export function redactParsedDocument(
   doc: RedactableParsedDocument,
