@@ -343,3 +343,79 @@ describe("capChunksPerDocument", () => {
     expect(capChunksPerDocument(input, 0)).toBe(input);
   });
 });
+
+describe("per-document cap keeps the context window full", () => {
+  // One dominant document fills the first 12 ranks, others follow. Without
+  // over-fetching, a cap of 3 turns 8 requested chunks into 3+… far fewer.
+  const ranked = [
+    ...Array.from({ length: 12 }, (_, i) => retrievalResult(`a${i}`, "doc-A")),
+    ...Array.from({ length: 12 }, (_, i) =>
+      retrievalResult(`o${i}`, `doc-O${i}`),
+    ),
+  ];
+
+  function searchReturningTopK() {
+    return vi.fn(async (q: { topK: number }) => ranked.slice(0, q.topK));
+  }
+
+  it("askQuestion over-fetches when capping, then returns exactly topK capped chunks", async () => {
+    const search = searchReturningTopK();
+    const answer = vi.fn().mockResolvedValue({ answer: "x", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE, 3);
+
+    expect(search.mock.calls[0]![0].topK).toBeGreaterThan(DEFAULT_TOP_K);
+    const context = answer.mock.calls[0]![1] as RetrievalResult[];
+    expect(context).toHaveLength(DEFAULT_TOP_K);
+    expect(
+      context.filter((r) => r.document.id === "doc-A").length,
+    ).toBeLessThanOrEqual(3);
+    // Relevance order preserved: the dominant doc's best chunks come first.
+    expect(context[0]!.document.id).toBe("doc-A");
+  });
+
+  it("askQuestionStream applies the same over-fetch", async () => {
+    const search = searchReturningTopK();
+    let seen: RetrievalResult[] = [];
+    async function* answerStream(
+      _q: string,
+      retrieved: RetrievalResult[],
+    ): AsyncIterable<string> {
+      seen = retrieved;
+      yield "x";
+    }
+    const deps = makeDeps({
+      generator: { answerStream } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    for await (const _ of askQuestionStream(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      3,
+    )) {
+      // drain
+    }
+
+    expect(seen).toHaveLength(DEFAULT_TOP_K);
+  });
+
+  it("does not over-fetch when the cap is disabled", async () => {
+    const search = searchReturningTopK();
+    const answer = vi.fn().mockResolvedValue({ answer: "x", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE, 0);
+
+    expect(search.mock.calls[0]![0].topK).toBe(DEFAULT_TOP_K);
+  });
+});

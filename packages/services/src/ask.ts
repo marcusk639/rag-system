@@ -108,6 +108,35 @@ export async function askQuestion(
   );
 }
 
+/**
+ * How many extra candidates to fetch when the per-document cap is on. Capping
+ * exactly `topK` results silently shrinks the generator's context — worst when
+ * one long document dominates the ranking, which is precisely when the cap is
+ * meant to make room for other sources.
+ */
+const CAP_OVERFETCH_MULTIPLIER = 3;
+
+async function retrieveForAnswer(
+  deps: AskDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+  maxChunksPerDocument: number,
+): Promise<RetrievalResult[]> {
+  const query = buildQuery(input, defaultTopK);
+  if (maxChunksPerDocument <= 0) {
+    return deps.retriever.search(query, scope);
+  }
+  const candidates = await deps.retriever.search(
+    { ...query, topK: query.topK * CAP_OVERFETCH_MULTIPLIER },
+    scope,
+  );
+  return capChunksPerDocument(candidates, maxChunksPerDocument).slice(
+    0,
+    query.topK,
+  );
+}
+
 function buildQuery(input: AskInput, defaultTopK: number) {
   return {
     query: input.question,
@@ -125,8 +154,11 @@ async function ask(
   maxChunksPerDocument: number,
 ): Promise<AskResult> {
   const answerId = randomUUID();
-  const retrieved = capChunksPerDocument(
-    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
+  const retrieved = await retrieveForAnswer(
+    deps,
+    input,
+    defaultTopK,
+    scope,
     maxChunksPerDocument,
   );
 
@@ -205,8 +237,11 @@ async function* askStream(
   maxChunksPerDocument: number,
 ): AsyncGenerator<AskStreamEvent> {
   const answerId = randomUUID();
-  const retrieved = capChunksPerDocument(
-    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
+  const retrieved = await retrieveForAnswer(
+    deps,
+    input,
+    defaultTopK,
+    scope,
     maxChunksPerDocument,
   );
 
