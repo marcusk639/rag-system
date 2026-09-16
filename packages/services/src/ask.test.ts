@@ -441,3 +441,48 @@ describe("per-document cap keeps the context window full", () => {
     expect(search.mock.calls[0]![0].topK).toBe(DEFAULT_TOP_K);
   });
 });
+
+describe("generator screening", () => {
+  it("generates, cites, and returns only the context the generator's screen() kept", async () => {
+    const kept = retrievalResult("2");
+    const retrieved = [retrievalResult("1"), kept];
+    const screen = vi.fn().mockReturnValue([kept]);
+    const answer = vi.fn().mockResolvedValue({ answer: "ok [1]", citations: [] });
+    const deps = makeDeps({
+      generator: { answer, screen } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue(retrieved),
+    });
+
+    const result = await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
+
+    expect(screen).toHaveBeenCalledWith("q", retrieved);
+    expect(answer).toHaveBeenCalledWith("q", [kept]);
+    // [1] now refers to the first SCREENED document, doc-2 — not doc-1.
+    expect(result.citations.map((c) => c.documentId)).toEqual(["doc-2"]);
+    expect(result.retrieved.map((r) => r.document.id)).toEqual(["doc-2"]);
+  });
+
+  it("applies the same screening on the streaming path", async () => {
+    const kept = retrievalResult("2");
+    const screen = vi.fn().mockReturnValue([kept]);
+    async function* answerStream() {
+      yield "ok [1]";
+    }
+    const deps = makeDeps({
+      generator: {
+        answerStream: vi.fn(answerStream),
+        screen,
+      } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue([retrievalResult("1"), kept]),
+    });
+
+    const events = [];
+    for await (const e of askQuestionStream(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE)) {
+      events.push(e);
+    }
+    const done = events.find((e) => e.type === "done");
+    expect(done?.type === "done" && done.citations.map((c) => c.documentId)).toEqual([
+      "doc-2",
+    ]);
+  });
+});

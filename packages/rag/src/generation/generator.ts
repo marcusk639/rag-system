@@ -10,6 +10,11 @@ import {
 } from "@rag/core";
 import type { GenerationResult, Generator, RetrievalResult } from "@rag/core";
 import { buildCitations, buildPrompt } from "./prompt-context.js";
+import {
+  screenGenerationContext,
+  type DroppedContext,
+  type TriPolicy,
+} from "./screen-context.js";
 
 export {
   buildCitations,
@@ -102,7 +107,7 @@ Not covered by the documents: what to do when the client already exists in Quick
  * identifying, and on a CPA firm's own SOP corpus its hits are false positives
  * ("Form 1040 … $25,000" inside a procedure that explains how to review one).
  */
-export type TriPolicy = "block" | "warn" | "off";
+export type { TriPolicy, DroppedContext } from "./screen-context.js";
 
 /** Options shared by every concrete `Generator` in this module. */
 export interface GeneratorOptions {
@@ -137,6 +142,11 @@ export interface GeneratorOptions {
    * production this is left unset and a redirect-refusing wrapper is used.
    */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Called when `screen()` removes TRI-bearing chunks from the context, so the
+   * operator can find and fix the source documents.
+   */
+  onContextDropped?: (dropped: DroppedContext[]) => void;
 }
 
 /**
@@ -244,6 +254,20 @@ export class GeminiGenerator implements Generator {
     );
   }
 
+  /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */
+  screen(question: string, context: RetrievalResult[]): RetrievalResult[] {
+    const screened = screenGenerationContext(
+      question,
+      context,
+      this.opts.triPolicy ?? "block",
+      this.opts.onTriDetected,
+    );
+    if (screened.dropped.length > 0) {
+      this.opts.onContextDropped?.(screened.dropped);
+    }
+    return screened.context;
+  }
+
   async answer(
     question: string,
     context: RetrievalResult[],
@@ -342,6 +366,20 @@ export class OpenAIGenerator implements Generator {
       this.opts.triPolicy ?? "block",
       this.opts.onTriDetected,
     );
+  }
+
+  /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */
+  screen(question: string, context: RetrievalResult[]): RetrievalResult[] {
+    const screened = screenGenerationContext(
+      question,
+      context,
+      this.opts.triPolicy ?? "block",
+      this.opts.onTriDetected,
+    );
+    if (screened.dropped.length > 0) {
+      this.opts.onContextDropped?.(screened.dropped);
+    }
+    return screened.context;
   }
 
   async answer(
@@ -462,6 +500,20 @@ export class ClaudeGenerator implements Generator {
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt }],
     };
+  }
+
+  /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */
+  screen(question: string, context: RetrievalResult[]): RetrievalResult[] {
+    const screened = screenGenerationContext(
+      question,
+      context,
+      this.opts.triPolicy ?? "block",
+      this.opts.onTriDetected,
+    );
+    if (screened.dropped.length > 0) {
+      this.opts.onContextDropped?.(screened.dropped);
+    }
+    return screened.context;
   }
 
   async answer(

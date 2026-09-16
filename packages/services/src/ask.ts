@@ -209,6 +209,22 @@ export async function expandWithNeighbors(
   }
 }
 
+/**
+ * Let the generator remove context it must not send (per-chunk TRI screening),
+ * BEFORE generation. Everything downstream — the prompt, the citations, and the
+ * `retrieved` returned to the caller — uses the screened list, so the `[N]` the
+ * model writes always indexes the documents it was actually shown. Empty
+ * retrieval is left alone: it short-circuits without a provider call.
+ */
+function screenForGeneration(
+  deps: AskDeps,
+  question: string,
+  retrieved: RetrievalResult[],
+): RetrievalResult[] {
+  if (retrieved.length === 0 || !deps.generator.screen) return retrieved;
+  return deps.generator.screen(question, retrieved);
+}
+
 async function retrieveForAnswer(
   deps: AskDeps,
   input: AskInput,
@@ -248,16 +264,20 @@ async function ask(
   neighborExpansion: NeighborExpansion,
 ): Promise<AskResult> {
   const answerId = randomUUID();
-  const retrieved = await expandWithNeighbors(
+  const retrieved = screenForGeneration(
     deps,
-    await retrieveForAnswer(
+    input.question,
+    await expandWithNeighbors(
       deps,
-      input,
-      defaultTopK,
-      scope,
-      maxChunksPerDocument,
+      await retrieveForAnswer(
+        deps,
+        input,
+        defaultTopK,
+        scope,
+        maxChunksPerDocument,
+      ),
+      neighborExpansion,
     ),
-    neighborExpansion,
   );
 
   if (retrieved.length === 0) {
@@ -343,16 +363,20 @@ async function* askStream(
   neighborExpansion: NeighborExpansion,
 ): AsyncGenerator<AskStreamEvent> {
   const answerId = randomUUID();
-  const retrieved = await expandWithNeighbors(
+  const retrieved = screenForGeneration(
     deps,
-    await retrieveForAnswer(
+    input.question,
+    await expandWithNeighbors(
       deps,
-      input,
-      defaultTopK,
-      scope,
-      maxChunksPerDocument,
+      await retrieveForAnswer(
+        deps,
+        input,
+        defaultTopK,
+        scope,
+        maxChunksPerDocument,
+      ),
+      neighborExpansion,
     ),
-    neighborExpansion,
   );
 
   if (retrieved.length === 0) {

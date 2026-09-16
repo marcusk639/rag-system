@@ -44,6 +44,13 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface Generator {
+  /**
+   * Optional pre-generation screening. Returns the subset of `context` that may
+   * be sent to the model (e.g. TRI-bearing chunks removed), or throws when the
+   * request must not proceed. Callers must use the returned context for BOTH
+   * generation and citations, so `[N]` indices stay aligned.
+   */
+  screen?(question: string, context: RetrievalResult[]): RetrievalResult[];
   answer(
     question: string,
     context: RetrievalResult[],

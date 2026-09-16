@@ -251,6 +251,18 @@ export async function buildCoreDeps(
             { triPatterns: patterns, marker: "generation.tri.warned" },
             "TRI patterns detected in generation prompt; proceeding under triPolicy=warn",
           ),
+        onContextDropped: (dropped) =>
+          logger.warn(
+            {
+              dropped: dropped.map((d) => ({
+                chunkId: d.chunkId,
+                documentId: d.documentId,
+                triPatterns: d.patterns,
+              })),
+              marker: "generation.tri.context_dropped",
+            },
+            "TRI-bearing chunks removed from generation context; fix or exclude the source documents",
+          ),
       });
       if (config.generation.baseURL) {
         // An operator who believes they are air-gapped needs one line in the
