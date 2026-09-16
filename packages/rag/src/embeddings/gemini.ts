@@ -129,7 +129,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
           );
         }
         for (const e of embeddings) {
-          const values = e.values ?? [];
+          const values = l2Normalize(e.values ?? []);
           results.push({
             vector: values,
             provider: this.name,
@@ -148,3 +148,20 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     }
   }
 }
+
+/**
+ * Gemini only returns unit-length vectors at its native 3072 dimensions; the
+ * truncated (Matryoshka) 768-d vectors stored here are not normalized. Ranking
+ * was correct only because the HNSW index uses cosine distance, which divides
+ * the magnitude out — a later switch to inner product "for speed" would have
+ * silently broken it. Normalizing here makes every operator class agree.
+ * Cosine distances are unchanged, so existing stored vectors need no re-embed.
+ */
+function l2Normalize(values: number[]): number[] {
+  const norm = Math.sqrt(values.reduce((sum, x) => sum + x * x, 0));
+  if (values.length > 0 && norm === 0) {
+    throw new EmbeddingError("Gemini returned an all-zero embedding");
+  }
+  return norm === 0 ? values : values.map((x) => x / norm);
+}
+
