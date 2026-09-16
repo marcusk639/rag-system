@@ -35,11 +35,13 @@ import logging
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
 import magic
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from markitdown import MarkItDown
 import xlrd
 from openpyxl import load_workbook
@@ -246,9 +248,11 @@ async def parse(
         tmp_path = Path(tmp.name)
 
     try:
-        return _parse_with_markitdown(tmp_path, fname, detected_mime) or _parse_with_unstructured(
-            tmp_path, fname, detected_mime
-        )
+        # Both parsers are blocking (MarkItDown, and Unstructured's OCR can run
+        # for minutes). Calling them directly inside this async handler froze
+        # the event loop, so one slow document stalled every other request,
+        # /health included. Run them on the threadpool instead.
+        return await run_in_threadpool(_parse_general, tmp_path, fname, detected_mime)
     finally:
         try:
             tmp_path.unlink()
@@ -295,6 +299,43 @@ def _parse_with_markitdown(path: Path, fname: str, mime: str) -> ParsedDocument 
         return None
 
 
+def _parse_general(path: Path, fname: str, mime: str) -> ParsedDocument:
+    return _parse_with_markitdown(path, fname, mime) or _parse_with_unstructured(
+        path, fname, mime
+    )
+
+
+# OCR is the one parse that can exhaust the sidecar (CPU for minutes, GBs of
+# layout-model memory). Bound how many run at once; a request that cannot get a
+# slot in time gets 503, which the worker treats as retryable.
+_OCR_MAX_CONCURRENT = max(1, int(os.environ.get("PARSER_MAX_CONCURRENT_OCR", "1")))
+_OCR_WAIT_SECONDS = float(os.environ.get("PARSER_OCR_WAIT_SECONDS", "120"))
+_OCR_SLOTS = threading.BoundedSemaphore(_OCR_MAX_CONCURRENT)
+_OCR_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".heic"}
+
+
+def _has_text(elements: Any) -> bool:
+    return any((getattr(el, "text", None) or "").strip() for el in elements)
+
+
+def _ocr_applicable(mime: str, fname: str) -> bool:
+    return (
+        mime == "application/pdf"
+        or mime.startswith("image/")
+        or Path(fname).suffix.lower() in _OCR_EXTENSIONS
+    )
+
+
+def _partition_with_ocr(partition: Any, path: Path, fname: str) -> Any:
+    if not _OCR_SLOTS.acquire(timeout=_OCR_WAIT_SECONDS):
+        logger.warning("OCR capacity exhausted; deferring %s", fname)
+        raise HTTPException(status_code=503, detail="parser busy: OCR capacity exhausted")
+    try:
+        return partition(filename=str(path), strategy="hi_res")
+    finally:
+        _OCR_SLOTS.release()
+
+
 def _parse_with_unstructured(path: Path, fname: str, mime: str) -> ParsedDocument:
     """
     Fallback parser. Heavier (slow first import, OCR is expensive) but handles
@@ -304,7 +345,12 @@ def _parse_with_unstructured(path: Path, fname: str, mime: str) -> ParsedDocumen
         # Lazy import — Unstructured has slow startup and ~500MB of models.
         from unstructured.partition.auto import partition
 
-        elements = partition(filename=str(path))
+        # Cheap text-layer extraction first. Unstructured's default may choose
+        # `hi_res` (layout model + OCR) on its own, which is slow and memory
+        # hungry; only a PDF or image that yields no text at all needs OCR.
+        elements = partition(filename=str(path), strategy="fast")
+        if not _has_text(elements) and _ocr_applicable(mime, fname):
+            elements = _partition_with_ocr(partition, path, fname)
         markdown_lines: list[str] = []
         tables: list[ParsedTable] = []
         title: str | None = None
