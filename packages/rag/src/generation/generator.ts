@@ -101,11 +101,11 @@ Not covered by the documents: what to do when the client already exists in Quick
 
 
 /**
- * What the generation-time TRI pre-flight does on a hit. See the `triPolicy`
- * doc comment in packages/core/src/config.ts for why `warn` is the default for
- * an internal-SOP corpus — in short, the scan is contextual rather than
- * identifying, and on a CPA firm's own SOP corpus its hits are false positives
- * ("Form 1040 … $25,000" inside a procedure that explains how to review one).
+ * What the generation-time TRI pre-flight does on a hit. The code default is
+ * `block`; see the `triPolicy` doc comment in packages/core/src/config.ts for
+ * why `warn` is often the right explicit choice for an internal-SOP corpus —
+ * its contextual hits there are false positives ("Form 1040 … $25,000" inside
+ * a procedure that explains how to review one).
  */
 export type { TriPolicy, DroppedContext } from "./screen-context.js";
 
