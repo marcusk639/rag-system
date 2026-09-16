@@ -174,7 +174,10 @@ export async function buildCoreDeps(
   // Same shared policy as the embedder and audit sink above — a hosted
   // reranker ships firm document text to a third-party vendor, so it belongs
   // behind the one `EGRESS_ALLOWED_HOSTS` allow-list, not outside it.
-  const reranker = createReranker(config.rerank, { egressPolicy });
+  const reranker = createReranker(config.rerank, {
+    egressPolicy,
+    complianceMode: config.complianceMode,
+  });
 
   const retriever = new Retriever(
     db,

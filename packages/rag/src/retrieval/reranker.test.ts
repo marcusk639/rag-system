@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ComplianceError,
   EgressError,
   EgressPolicy,
   ValidationError,
@@ -184,5 +185,71 @@ describe("HttpCrossEncoderReranker — egress boundary", () => {
     });
     await expect(built!.rerank("q", [rr("a")], 1)).rejects.toThrow(EgressError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("rerank wire contract, score, and compliance (plan tasks A2-A4)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubFetch(results: Array<{ index: number; relevance_score: number }>) {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ results }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const reranker = (name: "cohere" | "jina") =>
+    createReranker(cfg({ provider: name, apiKey: "k" }), {
+      egressPolicy: new EgressPolicy(["api.cohere.com", "api.jina.ai"]),
+    })!;
+
+  it("pins the exact request body per provider; Jina must not echo documents back", async () => {
+    const fetchMock = stubFetch([{ index: 0, relevance_score: 0.9 }]);
+    await reranker("cohere").rerank("q", [rr("a")], 1);
+    await reranker("jina").rerank("q", [rr("a")], 1);
+    const bodies = fetchMock.mock.calls.map((c) =>
+      JSON.parse(String((c as unknown as [string, RequestInit])[1].body)),
+    );
+    expect(bodies[0]).toEqual({
+      model: "rerank-v3.5",
+      query: "q",
+      documents: ["text-a"],
+      top_n: 1,
+    });
+    expect(bodies[1]).toEqual({
+      model: "jina-reranker-v2-base-multilingual",
+      query: "q",
+      documents: ["text-a"],
+      top_n: 1,
+      return_documents: false,
+    });
+  });
+
+  it("carries the provider's relevance score as rerankScore, leaving the RRF score untouched", async () => {
+    stubFetch([
+      { index: 1, relevance_score: 0.93 },
+      { index: 0, relevance_score: 0.41 },
+    ]);
+    const out = await reranker("cohere").rerank("q", [rr("a"), rr("b")], 2);
+    expect(out.map((r) => [r.chunk.id, r.rerankScore, r.score])).toEqual([
+      ["c-b", 0.93, 1],
+      ["c-a", 0.41, 1],
+    ]);
+  });
+
+  it("refuses a hosted reranker under COMPLIANCE_MODE=client-data", () => {
+    expect(() =>
+      createReranker(cfg({ provider: "cohere", apiKey: "k" }), {
+        complianceMode: "client-data",
+      }),
+    ).toThrow(ComplianceError);
+    expect(
+      createReranker(cfg({ provider: "none" }), { complianceMode: "client-data" }),
+    ).toBeNull();
   });
 });
