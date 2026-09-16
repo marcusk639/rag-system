@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import pino from "pino";
 import type { Config, RetrievalQuery, RetrievalResult } from "@rag/core";
-import { MAX_HISTORY_TURNS } from "@rag/core";
+import { MAX_ASK_TOP_K, MAX_HISTORY_TURNS } from "@rag/core";
 import { buildServer } from "../server.js";
 import type { Deps } from "../deps.js";
 
@@ -105,5 +105,23 @@ describe("POST /ask and /ask/stream — conversation history", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(h.queries).toEqual([]);
+  });
+});
+
+describe("POST /ask — context size bound", () => {
+  it(`rejects topK above MAX_ASK_TOP_K (${MAX_ASK_TOP_K}) — each chunk is ~800 tokens of prompt`, async () => {
+    const h = harness();
+    const res = await post(h.deps, "/ask", {
+      question: "q",
+      topK: MAX_ASK_TOP_K + 1,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(h.queries).toEqual([]);
+  });
+
+  it("accepts topK at the bound", async () => {
+    const h = harness();
+    const res = await post(h.deps, "/ask", { question: "q", topK: MAX_ASK_TOP_K });
+    expect(res.statusCode).toBe(200);
   });
 });

@@ -41,3 +41,12 @@ export const conversationHistorySchema = z
     }),
   )
   .max(MAX_HISTORY_TURNS);
+
+/**
+ * Upper bound on `topK` for /ask and the MCP `ask` tool. Every retrieved chunk
+ * (~800 tokens) lands in the generation prompt, so a caller-chosen 100 meant an
+ * ~80k-token prompt per request. /search returns chunks without generating and
+ * keeps its own, larger bound.
+ */
+export const MAX_ASK_TOP_K = 30;
+

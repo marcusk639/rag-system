@@ -3,6 +3,7 @@ import type { Config } from "@rag/core";
 import {
   conversationHistorySchema,
   filterSchema,
+  MAX_ASK_TOP_K,
   RagError,
   topRelevanceScore,
 } from "@rag/core";
@@ -22,7 +23,7 @@ import { scopeFromRequest } from "./authz.js";
 
 const AskBody = z.object({
   question: z.string().min(1).max(2000),
-  topK: z.number().int().positive().max(100).optional(),
+  topK: z.number().int().positive().max(MAX_ASK_TOP_K).optional(),
   sourceIds: z.array(z.string().uuid()).optional(),
   // Shared bounded metadata filter (@rag/core/validation).
   filter: filterSchema.optional(),

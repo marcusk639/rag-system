@@ -5,6 +5,7 @@ import type { AuthorizationScope } from "@rag/core";
 import {
   conversationHistorySchema,
   filterSchema,
+  MAX_ASK_TOP_K,
   topRelevanceScore,
 } from "@rag/core";
 import { logAskEvent } from "@rag/db";
@@ -15,7 +16,7 @@ import {
 } from "@rag/services";
 import type { Deps } from "../deps.js";
 
-const MAX_TOP_K = 50;
+const MAX_TOP_K = MAX_ASK_TOP_K;
 
 const inputSchema = {
   question: z
