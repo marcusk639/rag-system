@@ -24,6 +24,7 @@ import {
 } from "@rag/core";
 import {
   type Db,
+  clearDocumentStorage,
   deleteDocumentByExternalId,
   documentHasChunks,
   documentHasStorage,
@@ -508,6 +509,10 @@ export async function ingestOne(
       // Stamp the classification tag into the stored metadata so it is
       // available for retrieval filtering and citation display.
       docClass,
+      // Internal only (not in the exposable-metadata allowlist): lets the
+      // download path refuse a redacted document even if a stale original
+      // somehow survived.
+      redactedIdentifierCount: redacted.totalRedacted,
     } as DocumentMetadata & Record<string, unknown>,
     markdown: parsed.markdown,
   });
@@ -548,7 +553,22 @@ export async function ingestOne(
   // its hash to look "changed". A storage failure must NOT fail text
   // ingestion: the document stays searchable; it just isn't downloadable
   // until the next successful sync.
-  if (
+  if (objectStore && redacted.totalRedacted > 0) {
+    // The stored original is the RAW file. Serving it would undo redaction,
+    // so a redacted document keeps no original — and any original stored by
+    // an earlier run (before the identifier was recognised) is removed.
+    const { storageKey } = await clearDocumentStorage(db, documentId);
+    if (storageKey) {
+      try {
+        await objectStore.delete(storageKey);
+      } catch (err) {
+        log.error(
+          { err, marker: "ingest.store.delete_failed" },
+          "failed to delete stored original of a redacted document",
+        );
+      }
+    }
+  } else if (
     objectStore &&
     (contentChanged || !(await documentHasStorage(db, documentId)))
   ) {

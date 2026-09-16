@@ -64,7 +64,16 @@ export async function getDocumentDownload(
   if (!row || !isSourceAllowed(scope, row.sourceId)) {
     throw new NotFoundError(`Document ${id} not found`);
   }
-  if (!row.storageKey || !deps.objectStore) {
+  // A document whose identifiers were redacted at ingest must never be served
+  // as its raw original — ingestion also clears its storage, this is the
+  // second, independent check.
+  const redactedCount = (row.metadata as Record<string, unknown> | undefined)
+    ?.redactedIdentifierCount;
+  if (
+    !row.storageKey ||
+    !deps.objectStore ||
+    (typeof redactedCount === "number" && redactedCount > 0)
+  ) {
     throw new NotFoundError(
       `Original file for document ${id} is not available for download`,
     );

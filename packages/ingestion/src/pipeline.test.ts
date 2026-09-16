@@ -52,6 +52,7 @@ const {
   deleteDocumentByExternalIdMock,
   setDocumentStorageMock,
   logIngestEventMock,
+  clearDocumentStorageMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
@@ -61,6 +62,7 @@ const {
   deleteDocumentByExternalIdMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
   logIngestEventMock: vi.fn(),
+  clearDocumentStorageMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -72,6 +74,7 @@ vi.mock("@rag/db", () => ({
   deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
   logIngestEvent: logIngestEventMock,
+  clearDocumentStorage: clearDocumentStorageMock,
 }));
 
 interface FakePage {
@@ -179,6 +182,7 @@ beforeEach(() => {
   });
   setDocumentStorageMock.mockResolvedValue(undefined);
   logIngestEventMock.mockResolvedValue(undefined);
+  clearDocumentStorageMock.mockResolvedValue({ storageKey: null });
 });
 
 describe("runIngestion page budgeting", () => {
@@ -697,6 +701,71 @@ describe("redaction covers tables and title, not only markdown", () => {
       deps.db,
       expect.objectContaining({ title: "Ledger [REDACTED-ACCT]" }),
     );
+  });
+});
+
+describe("a redacted document never keeps a downloadable original", () => {
+  const ACCOUNT_PACK: LoadedPack = {
+    id: "acct",
+    version: "1.0.0",
+    scanners: [
+      {
+        id: "account",
+        kind: "identifying",
+        disposition: "redact",
+        re: /\bACCT-\d{6}\b/g,
+        contextWindow: 60,
+      },
+    ],
+  };
+
+  function redactingDeps() {
+    const objectStore = makeObjectStore();
+    const deps = {
+      ...makeDeps(),
+      pack: ACCOUNT_PACK,
+      objectStore,
+    } as PipelineDeps;
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockResolvedValue({
+      title: "Ledger",
+      markdown: "Account ACCT-123456 notes",
+      tables: [],
+      metadata: {},
+    });
+    return { deps, objectStore };
+  }
+
+  it("does not upload the raw bytes and records the redaction count in metadata", async () => {
+    const { deps, objectStore } = redactingDeps();
+    const { connector } = makeConnector([
+      { documents: ["ledger"], nextCursor: null, done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(objectStore.put).not.toHaveBeenCalled();
+    expect(setDocumentStorageMock).not.toHaveBeenCalled();
+    expect(upsertDocumentMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        metadata: expect.objectContaining({ redactedIdentifierCount: 1 }),
+      }),
+    );
+  });
+
+  it("removes an original stored by an earlier, pre-redaction run", async () => {
+    clearDocumentStorageMock.mockResolvedValue({
+      storageKey: "sources/src/ledger",
+    });
+    const { deps, objectStore } = redactingDeps();
+    const { connector } = makeConnector([
+      { documents: ["ledger"], nextCursor: null, done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(clearDocumentStorageMock).toHaveBeenCalledWith(deps.db, "doc-1");
+    expect(objectStore.delete).toHaveBeenCalledWith("sources/src/ledger");
   });
 });
 
