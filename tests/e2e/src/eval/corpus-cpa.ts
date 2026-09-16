@@ -41,7 +41,7 @@
  * ```ts
  * import { EVAL_DOCS_CPA, EVAL_QUESTIONS_CPA } from "./corpus-cpa.js";
  *
- * const idMap = await seedEvalCorpus(db, sourceId, embedder);
+ * const idMap = await seedEvalCorpus(db, sourceId, embedder, EVAL_DOCS_CPA);
  * const report = await runRetrievalEval(db, idMap, {
  *   weights: { dense: 0.7, sparse: 0.3 },
  *   questions: EVAL_QUESTIONS_CPA,
@@ -50,19 +50,10 @@
  * console.log(formatReport(report));
  * ```
  *
- * ⚠ **`seedEvalCorpus` does NOT take a document set yet** — it is hardcoded to
- * `EVAL_DOCS` from `corpus.ts`. Running the snippet above as written evaluates
- * CPA questions against the WRONG corpus and every metric reads ~0. Until
- * `seedEvalCorpus` grows a `docs` parameter, seed directly:
- *
- * ```ts
- * const connector = new FakeConnector(
- *   EVAL_DOCS_CPA.map((d) =>
- *     plainTextDoc({ externalId: d.externalId, title: d.title, text: d.text }),
- *   ),
- * );
- * await runOneIngestion(db, sourceId, connector, { embedder });
- * ```
+ * `seedEvalCorpus` defaults to `EVAL_DOCS` from `corpus.ts`; pass
+ * `EVAL_DOCS_CPA` as its `docs` argument, or the CPA questions are scored
+ * against the WRONG corpus and every metric reads ~0. `pnpm eval` runs this
+ * corpus as a gate in `specs/retrieval-eval-cpa.spec.ts`.
  *
  * For the negatives, assert on the scores rather than on rank position — a
  * miss here means "returned something confident," not "ranked it low."
@@ -301,3 +292,17 @@ export const EVAL_NEGATIVES_CPA: EvalQuestion[] = [
     relevant: [],
   },
 ];
+
+/**
+ * Bare-identifier queries: a work code, form acronym, or filing name typed on
+ * its own. These are what the keyword (sparse) arm of hybrid search exists
+ * for, so the gate also checks that arm actually scored the expected document
+ * — dense similarity alone must not be what carries them.
+ */
+export const EVAL_KEYWORD_QUESTIONS_CPA: EvalQuestion[] = [
+  { id: "cpa-k01", query: "BK-CATCHUP", relevant: ["time-coding"] },
+  { id: "cpa-k02", query: "ADV-PLAN", relevant: ["time-coding"] },
+  { id: "cpa-k03", query: "BOIR FinCEN", relevant: ["boi-filing"] },
+  { id: "cpa-k04", query: "UPE", relevant: ["k1-treatment", "staff-onboarding"] },
+];
+
