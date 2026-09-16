@@ -29,6 +29,12 @@ export async function searchDocuments(
   defaultTopK: number,
   scope: AuthorizationScope,
 ): Promise<SanitizedRetrievalResult[]> {
+  // The query is embedded by the configured provider, which may be an external
+  // API. Screen it under the generator's TRI policy first, exactly as /ask
+  // does. A search-only deployment (no generator) has no policy to apply.
+  if (deps.generator && typeof deps.generator.screen === "function") {
+    deps.generator.screen(input.query, []);
+  }
   const results = await deps.retriever.search(
     {
       query: input.query,
