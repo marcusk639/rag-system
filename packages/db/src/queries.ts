@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
+import { resolveEfSearch } from "./hnsw.js";
 import {
   answerFeedback,
   auditLog,
@@ -651,7 +652,8 @@ export async function hybridSearch(
 
   // Tune HNSW recall per-query via session GUC. SET LOCAL scopes it to the
   // current transaction; we wrap the query in a tx so the setting takes effect.
-  const efSearch = Math.max(40, opts.efSearch ?? 100);
+  // Must cover `pool`, or the index scan truncates the dense arm (see hnsw.ts).
+  const efSearch = resolveEfSearch(pool, opts.efSearch);
 
   const rows = await db.transaction(async (tx) => {
     await tx.execute(
