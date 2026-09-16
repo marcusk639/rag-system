@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it, vi } from "vitest";
-import { askKb, KbUnavailableError, submitFeedback } from "./rag-client.js";
+import {
+  askKb,
+  KbUnavailableError,
+  KbUserFacingError,
+  submitFeedback,
+} from "./rag-client.js";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(
@@ -149,4 +154,28 @@ describe("submitFeedback", () => {
       ),
     ).rejects.toBeInstanceOf(KbUnavailableError);
   });
+});
+
+describe("askKb error differentiation", () => {
+  const cases: Array<[number, RegExp]> = [
+    [422, /client identifiers/i],
+    [429, /wait/i],
+    [401, /credentials|sign/i],
+    [403, /credentials|sign/i],
+    [400, /rephras/i],
+    [500, /temporarily unavailable/i],
+    [503, /temporarily unavailable/i],
+  ];
+  for (const [status, message] of cases) {
+    it(`maps HTTP ${status} to a user-safe message`, async () => {
+      const fetchMock = fakeFetch(status, { error: { message: "internal detail" } });
+      const err = await askKb(
+        { question: "q", scopeToken: "t" },
+        { ragApiUrl: "http://api", fetch: fetchMock as any },
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KbUserFacingError);
+      expect((err as Error).message).toMatch(message);
+      expect((err as Error).message).not.toContain("internal detail");
+    });
+  }
 });

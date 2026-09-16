@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage, TestAdapter } from "botbuilder";
 import { KbBot, createTeamsGetMemberOids } from "./bot.js";
 import { SsoRequiredError } from "./auth.js";
+import { KbRateLimitedError } from "./rag-client.js";
 
 const SIGN_IN_CARD = {
   contentType: "application/vnd.microsoft.card.oauth",
@@ -41,6 +42,26 @@ function makeDeps(over: Partial<any> = {}) {
 }
 
 describe("KbBot", () => {
+  it("errors: shows the specific user-safe message a KbUserFacingError carries", async () => {
+    const deps = makeDeps({
+      askKb: vi.fn(async () => {
+        throw new KbRateLimitedError();
+      }),
+    });
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+    await adapter
+      .send({
+        type: "message",
+        text: "q?",
+        conversation: { conversationType: "personal", id: "dm-err" },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override
+      } as any)
+      .assertReply((a) => expect(a.type).toBe("typing"))
+      .assertReply((a) => {
+        expect(JSON.stringify(a.attachments)).toMatch(/wait a minute/i);
+      });
+  });
+
   const dm = (text: string, from = "user-1") =>
     ({
       type: "message",

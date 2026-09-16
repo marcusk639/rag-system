@@ -18,7 +18,7 @@ import {
   decodeOidFromJwt,
   resolveUserOid,
 } from "./auth.js";
-import { KbUnavailableError, askKb, submitFeedback } from "./rag-client.js";
+import { KbUserFacingError, askKb, submitFeedback } from "./rag-client.js";
 import type {
   AskAnswer,
   FeedbackRating,
@@ -93,7 +93,7 @@ export interface BotDeps {
    * handler can short-circuit an empty scope without calling the API. */
   resolveScope(input: ResolveScopeInput): Promise<ResolvedScope>;
   /** Asks the RAG API the user's question under the minted scope. Throws
-   * `KbUnavailableError` (from `rag-client.ts`) on any failure. */
+   * a `KbUserFacingError` (from `rag-client.ts`) on any failure. */
   askKb(input: {
     question: string;
     scopeToken: string;
@@ -520,7 +520,7 @@ export class KbBot extends TeamsActivityHandler {
     context: TurnContext,
     error: unknown,
   ): Promise<void> {
-    if (error instanceof KbUnavailableError) {
+    if (error instanceof KbUserFacingError) {
       await context.sendActivity({
         attachments: [errorCard(error.message)],
       });

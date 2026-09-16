@@ -24,11 +24,59 @@ export interface AskAnswer {
 
 export type FeedbackRating = "helpful" | "not_helpful";
 
-export class KbUnavailableError extends Error {
+/**
+ * An API failure whose `message` is safe to show the user verbatim. Messages
+ * are fixed here, never copied from the response body, which can carry
+ * internal detail.
+ */
+export class KbUserFacingError extends Error {}
+
+export class KbUnavailableError extends KbUserFacingError {
   constructor() {
     super("The knowledge base is temporarily unavailable.");
     this.name = "KbUnavailableError";
   }
+}
+
+/** 422: the TRI pre-flight refused the question or everything it retrieved. */
+export class KbComplianceRefusedError extends KbUserFacingError {
+  constructor() {
+    super(
+      "I can't answer that one: the question, or the documents that match it, contain client identifiers. Try asking without client-specific details.",
+    );
+    this.name = "KbComplianceRefusedError";
+  }
+}
+
+export class KbRateLimitedError extends KbUserFacingError {
+  constructor() {
+    super("Too many questions right now — please wait a minute and try again.");
+    this.name = "KbRateLimitedError";
+  }
+}
+
+export class KbAccessError extends KbUserFacingError {
+  constructor() {
+    super(
+      "The knowledge base didn't accept this request's credentials. Please try again; if it keeps happening, sign out of Teams and back in, or contact an admin.",
+    );
+    this.name = "KbAccessError";
+  }
+}
+
+export class KbInvalidQuestionError extends KbUserFacingError {
+  constructor() {
+    super("I couldn't process that question — try rephrasing it more briefly.");
+    this.name = "KbInvalidQuestionError";
+  }
+}
+
+function errorForStatus(status: number): KbUserFacingError {
+  if (status === 422) return new KbComplianceRefusedError();
+  if (status === 429) return new KbRateLimitedError();
+  if (status === 401 || status === 403) return new KbAccessError();
+  if (status === 400) return new KbInvalidQuestionError();
+  return new KbUnavailableError();
 }
 
 export interface HistoryTurn {
@@ -80,14 +128,14 @@ export async function askKb(
     });
 
     if (!res.ok) {
-      throw new KbUnavailableError();
+      throw errorForStatus(res.status);
     }
 
     const data = (await res.json()) as AskAnswer;
     return data;
   } catch (error) {
-    // Re-throw KbUnavailableError as-is
-    if (error instanceof KbUnavailableError) {
+    // Re-throw a mapped, user-safe error as-is
+    if (error instanceof KbUserFacingError) {
       throw error;
     }
     // Convert any other error to KbUnavailableError
