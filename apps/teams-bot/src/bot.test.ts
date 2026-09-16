@@ -34,12 +34,70 @@ function makeDeps(over: Partial<any> = {}) {
       citations: [],
       disclaimer: "AI draft",
     })),
+    submitFeedback: vi.fn(async () => undefined),
     storage: new MemoryStorage(),
     ...over,
   };
 }
 
 describe("KbBot", () => {
+  const ANSWER_ID = "11111111-1111-4111-8111-111111111111";
+  const feedbackActivity = (value: unknown) =>
+    ({
+      type: "message",
+      value,
+      conversation: { conversationType: "channel", id: "c1" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial Activity override
+    }) as any;
+
+  it("feedback submit: records the vote under a token minted for the VERIFIED clicking user", async () => {
+    const deps = makeDeps();
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+
+    await adapter
+      .send(feedbackActivity({ kind: "rag-feedback", answerId: ANSWER_ID, rating: "not_helpful" }))
+      .assertReply((activity) => {
+        expect(activity.text).toMatch(/thanks/i);
+      });
+
+    expect(deps.resolveScope).toHaveBeenCalledWith({
+      askerOid: "oid-A",
+      conversationKind: "dm",
+      memberOids: ["oid-A"],
+    });
+    expect(deps.submitFeedback).toHaveBeenCalledWith({
+      answerId: ANSWER_ID,
+      rating: "not_helpful",
+      scopeToken: "scope-tok",
+    });
+    expect(deps.askKb).not.toHaveBeenCalled();
+  });
+
+  it("feedback submit: a malformed payload records nothing", async () => {
+    const deps = makeDeps();
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+    await adapter.send(
+      feedbackActivity({ kind: "rag-feedback", answerId: "not-a-uuid", rating: "great" }),
+    );
+    expect(deps.submitFeedback).not.toHaveBeenCalled();
+    expect(deps.askKb).not.toHaveBeenCalled();
+  });
+
+  it("feedback submit: SSO not complete → asks the user to sign in and records nothing", async () => {
+    const deps = makeDeps({
+      resolveUserOid: vi.fn(async () => {
+        throw new SsoRequiredError("sso");
+      }),
+    });
+    const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
+    await adapter
+      .send(feedbackActivity({ kind: "rag-feedback", answerId: ANSWER_ID, rating: "helpful" }))
+      .assertReply((activity) => {
+        expect(JSON.stringify(activity)).toMatch(/sign in/i);
+      });
+    expect(deps.submitFeedback).not.toHaveBeenCalled();
+  });
+
   it("DM: sends a typing indicator, resolves personal scope, and replies with an answer card containing the disclaimer", async () => {
     const deps = makeDeps();
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));

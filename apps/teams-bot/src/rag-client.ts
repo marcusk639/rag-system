@@ -16,7 +16,11 @@ export interface AskAnswer {
   answer: string;
   citations: Citation[];
   disclaimer: string;
+  /** Server id for this answer; feedback references it. */
+  answerId?: string;
 }
+
+export type FeedbackRating = "helpful" | "not_helpful";
 
 export class KbUnavailableError extends Error {
   constructor() {
@@ -79,3 +83,35 @@ export async function askKb(
     throw new KbUnavailableError();
   }
 }
+
+interface SubmitFeedbackInput {
+  answerId: string;
+  rating: FeedbackRating;
+  scopeToken: string;
+}
+
+/** Record a Helpful/Not-helpful vote. The API derives the voter's identity from
+ * the scope token, never from this body. Throws `KbUnavailableError` on any
+ * failure. */
+export async function submitFeedback(
+  input: SubmitFeedbackInput,
+  deps: AskKbDeps,
+): Promise<void> {
+  try {
+    const res = await deps.fetch(`${deps.ragApiUrl}/feedback`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.scopeToken}`,
+        "X-RAG-Channel": "teams",
+      },
+      body: JSON.stringify({ answerId: input.answerId, rating: input.rating }),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_ASK_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new KbUnavailableError();
+  } catch (error) {
+    if (error instanceof KbUnavailableError) throw error;
+    throw new KbUnavailableError();
+  }
+}
+

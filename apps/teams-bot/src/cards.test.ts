@@ -89,4 +89,25 @@ describe("cards", () => {
       "temporarily unavailable",
     );
   });
+
+  it("answer card with an answerId offers Helpful / Not helpful submit actions carrying it", () => {
+    const att = answerCard({
+      answer: "A",
+      citations: [],
+      disclaimer: "d",
+      answerId: "11111111-1111-4111-8111-111111111111",
+    });
+    const actions = att.content.actions as Array<Record<string, any>>;
+    expect(actions).toHaveLength(2);
+    expect(actions.map((a) => a.type)).toEqual(["Action.Submit", "Action.Submit"]);
+    expect(actions.map((a) => a.data)).toEqual([
+      { kind: "rag-feedback", answerId: "11111111-1111-4111-8111-111111111111", rating: "helpful" },
+      { kind: "rag-feedback", answerId: "11111111-1111-4111-8111-111111111111", rating: "not_helpful" },
+    ]);
+  });
+
+  it("answer card without an answerId has no feedback actions", () => {
+    const att = answerCard({ answer: "A", citations: [], disclaimer: "d" });
+    expect(att.content.actions).toBeUndefined();
+  });
 });

@@ -18,9 +18,15 @@ import {
   decodeOidFromJwt,
   resolveUserOid,
 } from "./auth.js";
-import { KbUnavailableError, askKb } from "./rag-client.js";
-import type { AskAnswer } from "./rag-client.js";
-import { answerCard, emptyScopeCard, errorCard, usageCard } from "./cards.js";
+import { KbUnavailableError, askKb, submitFeedback } from "./rag-client.js";
+import type { AskAnswer, FeedbackRating } from "./rag-client.js";
+import {
+  FEEDBACK_SUBMIT_KIND,
+  answerCard,
+  emptyScopeCard,
+  errorCard,
+  usageCard,
+} from "./cards.js";
 import { createProductionScopeDeps, mintScope } from "./scope.js";
 import type { BotConfig } from "./config.js";
 
@@ -85,6 +91,13 @@ export interface BotDeps {
   /** Asks the RAG API the user's question under the minted scope. Throws
    * `KbUnavailableError` (from `rag-client.ts`) on any failure. */
   askKb(input: { question: string; scopeToken: string }): Promise<AskAnswer>;
+  /** Records a feedback vote under the clicking user's own scope token.
+   * Throws `KbUnavailableError` on failure. */
+  submitFeedback(input: {
+    answerId: string;
+    rating: FeedbackRating;
+    scopeToken: string;
+  }): Promise<void>;
   /** Holds the asker's question across the SSO handshake: stored when the
    * sign-in card is sent, answered when the `signin/tokenExchange` invoke
    * completes. Production: the same `MemoryStorage` instance the
@@ -96,6 +109,31 @@ const SIGN_IN_FALLBACK_MESSAGE =
   "Please sign in to Microsoft Teams to use the knowledge base bot.";
 const SIGNED_IN_ASK_AGAIN_MESSAGE =
   "You're signed in now — please send your question again.";
+const FEEDBACK_THANKS_MESSAGE = "Thanks for the feedback.";
+const FEEDBACK_SIGN_IN_MESSAGE =
+  "Please sign in (send me any question) before leaving feedback.";
+const FEEDBACK_FAILED_MESSAGE =
+  "Sorry — your feedback couldn't be recorded. Please try again later.";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface FeedbackVote {
+  answerId: string;
+  rating: FeedbackRating;
+}
+
+/** Strictly validate an `Action.Submit` payload as a feedback vote. Anything
+ * else (including a malformed vote) returns null and records nothing. */
+function parseFeedbackSubmit(value: unknown): FeedbackVote | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (v.kind !== FEEDBACK_SUBMIT_KIND) return null;
+  if (typeof v.answerId !== "string" || !UUID_RE.test(v.answerId)) return null;
+  if (v.rating !== "helpful" && v.rating !== "not_helpful") return null;
+  return { answerId: v.answerId, rating: v.rating };
+}
+
 const GENERIC_ERROR_MESSAGE =
   "Something went wrong answering your question. Please try again in a moment.";
 
@@ -157,6 +195,15 @@ export class KbBot extends TeamsActivityHandler {
 
   private async handleMessage(context: TurnContext): Promise<void> {
     const conversationKind = classifyConversation(context);
+
+    // An Adaptive Card `Action.Submit` arrives as a message whose `value` is
+    // the card's data and which has no text. Route feedback votes before the
+    // empty-text usage guard below would swallow them.
+    const vote = parseFeedbackSubmit(context.activity.value);
+    if (vote) {
+      await this.recordFeedback(context, vote);
+      return;
+    }
 
     // Guard BEFORE any auth/scope/API work: a message can arrive with no
     // usable text at all (attachment-only, bare @mention). Teams prefixes
@@ -239,6 +286,35 @@ export class KbBot extends TeamsActivityHandler {
       await context.sendActivity({ attachments: [answerCard(answer)] });
     } catch (error) {
       await this.sendErrorCard(context, error);
+    }
+  }
+
+  /**
+   * Record a feedback vote. Identity comes from the clicking user's verified
+   * SSO `oid` — never from the card payload — and the vote is sent under a
+   * token minted for that user alone, so it is attributed to whoever clicked,
+   * not whoever asked. Failures only cost the vote; they never surface detail.
+   */
+  private async recordFeedback(
+    context: TurnContext,
+    vote: FeedbackVote,
+  ): Promise<void> {
+    try {
+      const oid = await this.deps.resolveUserOid(context);
+      const { token } = await this.deps.resolveScope({
+        askerOid: oid,
+        conversationKind: "dm",
+        memberOids: [oid],
+      });
+      await this.deps.submitFeedback({ ...vote, scopeToken: token });
+      await context.sendActivity(FEEDBACK_THANKS_MESSAGE);
+    } catch (error) {
+      if (error instanceof SsoRequiredError) {
+        await context.sendActivity(FEEDBACK_SIGN_IN_MESSAGE);
+        return;
+      }
+      console.error("KbBot: failed to record feedback", error);
+      await context.sendActivity(FEEDBACK_FAILED_MESSAGE);
     }
   }
 
@@ -492,6 +568,8 @@ export function createProductionBotDeps(
     getMemberOids: createTeamsGetMemberOids(),
     resolveScope: (input) => mintScope(input, scopeDeps),
     askKb: (input) => askKb(input, { ragApiUrl: config.ragApiUrl, fetch }),
+    submitFeedback: (input) =>
+      submitFeedback(input, { ragApiUrl: config.ragApiUrl, fetch }),
     storage,
   };
 }
