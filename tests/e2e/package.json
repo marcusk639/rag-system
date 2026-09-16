@@ -8,6 +8,7 @@
     "test:watch": "vitest",
     "eval": "vitest run src/specs/eval-metrics.spec.ts src/specs/retrieval-eval.spec.ts src/specs/retrieval-eval-cpa.spec.ts",
     "eval:real": "tsx src/eval/run-real-eval.ts",
+    "eval:gold": "tsx src/eval/run-gold-eval.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
