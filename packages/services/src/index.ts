@@ -4,6 +4,7 @@ export { searchDocuments, type SearchInput } from "./search.js";
 export {
   askQuestion,
   askQuestionStream,
+  EMPTY_ANSWER,
   type AskInput,
   type AskResult,
   type AskStreamEvent,

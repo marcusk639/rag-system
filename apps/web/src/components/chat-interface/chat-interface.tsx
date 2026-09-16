@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { EMPTY_ANSWER } from "@rag/services";
 import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
 import { AnswerFeedback } from "@/components/answer-feedback";
@@ -16,6 +17,7 @@ interface ChatInterfaceProps {
       appendContent?: string;
       citations?: Citation[];
       answerId?: string;
+      error?: string;
     },
   ) => void;
   onCitationClick?: (citation: Citation) => void;
@@ -56,10 +58,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             updateMessage(assistantId, { appendContent: text }),
           onDone: (citations, answerId) =>
             updateMessage(assistantId, { citations, answerId }),
-          onError: (message) =>
-            updateMessage(assistantId, {
-              appendContent: `\n\n_Error: ${message}_`,
-            }),
+          onError: (message) => updateMessage(assistantId, { error: message }),
         },
       );
     } finally {
@@ -88,14 +87,30 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               >
                 {message.role === "assistant" ? (
                   <>
-                    <div className="prose prose-sm max-w-none break-words">
+                    <div
+                      data-testid="assistant-message"
+                      className="prose prose-sm max-w-none break-words"
+                    >
                       <ReactMarkdown>{message.content || "…"}</ReactMarkdown>
                     </div>
+                    {message.content.includes(EMPTY_ANSWER) && (
+                      <span data-testid="refusal" />
+                    )}
+                    {message.error && (
+                      <div
+                        data-testid="stream-error"
+                        className="mt-2 text-xs text-red-700"
+                      >
+                        {message.error}
+                      </div>
+                    )}
                     {message.citations && message.citations.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {message.citations.map((c) => (
                           <button
                             key={c.index}
+                            data-testid="citation-chip"
+                            data-doc-id={c.documentId}
                             onClick={() => onCitationClick?.(c)}
                             title={c.title}
                             className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200"

@@ -55,6 +55,7 @@ export const useChatSessions = () => {
         appendContent?: string;
         citations?: Citation[];
         answerId?: string;
+        error?: string;
       },
     ): void => {
       setSessions((prev) =>
@@ -72,6 +73,7 @@ export const useChatSessions = () => {
                     : m.content,
                 citations: patch.citations ?? m.citations,
                 answerId: patch.answerId ?? m.answerId,
+                error: patch.error ?? m.error,
               };
             }),
           };

@@ -70,7 +70,7 @@ export interface AskResult {
   answerId: string;
 }
 
-const EMPTY_ANSWER =
+export const EMPTY_ANSWER =
   "The available documents do not contain enough information to answer that.";
 
 /**

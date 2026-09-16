@@ -1,11 +1,22 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Web-app unit tests cover server-only lib functions (scope resolution,
-// admin gating, Graph client) — no DOM/React rendering needed here, so a
-// plain node environment is sufficient. Component/page-level behavior is
-// covered by the e2e suite (tests/e2e), not by this config.
+// Web-app unit tests mostly cover server-only lib functions (scope
+// resolution, admin gating, Graph client) — no DOM/React rendering needed
+// there, so a plain node environment is the default. Full page/user-flow
+// behavior is still covered by the e2e suite (tests/web-e2e), not here —
+// but a handful of `.test.tsx` files render a single component in isolation
+// (jsdom, via `environmentMatchGlobs` below) to pin down markup contracts
+// (e.g. `data-testid` hooks) that are cheap to assert without booting a
+// browser.
 export default defineConfig({
+  // Matches Next.js's own JSX handling (automatic runtime, no manual React
+  // import required in .tsx files) so component tests don't need an
+  // `import React` that production components under the App Router don't
+  // carry either.
+  esbuild: {
+    jsx: "automatic",
+  },
   resolve: {
     // Mirrors tsconfig.json's "@/*" -> "./src/*" path mapping. Tests that
     // vi.mock() every "@/..." import never need this (the mock intercepts
@@ -17,8 +28,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     environment: "node",
+    environmentMatchGlobs: [["src/**/*.test.tsx", "jsdom"]],
+    setupFiles: ["./vitest.setup.ts"],
     env: {
       // auth.ts calls NextAuth(authConfig) at module-import time, and
       // next-auth's non-lazy-config branch calls setEnvDefaults() (reading
