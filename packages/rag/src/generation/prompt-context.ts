@@ -215,6 +215,14 @@ export function buildCitations(
       chunkId: best.chunk.id,
       chunkIds: chunks.map((c) => c.chunk.id),
       score: best.score,
+      ...citationDate(document.metadata?.modifiedAt),
     }),
   );
+}
+
+/** `{ modifiedAt: "YYYY-MM-DD" }` from a leading ISO date, or nothing. */
+function citationDate(modifiedAt: unknown): { modifiedAt?: string } {
+  if (typeof modifiedAt !== "string") return {};
+  const date = modifiedAt.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? { modifiedAt: date } : {};
 }

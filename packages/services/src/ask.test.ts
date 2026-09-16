@@ -5,6 +5,7 @@ import {
   askQuestion,
   askQuestionStream,
   capChunksPerDocument,
+  dropDuplicateChunks,
   EMPTY_ANSWER,
 } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
@@ -626,5 +627,28 @@ describe("relevance floor (minDenseSimilarity)", () => {
     });
     await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
     expect(answer).toHaveBeenCalled();
+  });
+});
+
+describe("dropDuplicateChunks", () => {
+  function withText(id: string, docId: string, text: string): RetrievalResult {
+    return { ...retrievalResult(id, docId), text } as RetrievalResult;
+  }
+
+  it("keeps the best-ranked copy of a chunk whose body appears in several documents", () => {
+    const out = dropDuplicateChunks([
+      withText("1", "sop-v2", "# SOP v2 › Steps\n\n1. Create the client in Karbon."),
+      withText("2", "other", "# Other\n\nSomething else."),
+      withText("3", "sop-copy", "# SOP (copy) › Steps\n\n1.  Create the client in   Karbon."),
+    ]);
+    expect(out.map((r) => r.chunk.id)).toEqual(["chunk-1", "chunk-2"]);
+  });
+
+  it("does not collapse chunks whose bodies differ", () => {
+    const out = dropDuplicateChunks([
+      withText("1", "a", "# A\n\nStep one."),
+      withText("2", "b", "# B\n\nStep two."),
+    ]);
+    expect(out).toHaveLength(2);
   });
 });

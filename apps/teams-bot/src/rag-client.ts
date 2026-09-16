@@ -10,6 +10,8 @@ export interface Citation {
    * `/documents/:id/download` endpoint, which a Teams card link cannot reach.
    */
   url?: string;
+  /** Source document's last-modified date (YYYY-MM-DD), when known. */
+  modifiedAt?: string;
 }
 
 export interface AskAnswer {

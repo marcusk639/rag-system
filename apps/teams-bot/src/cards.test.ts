@@ -110,4 +110,15 @@ describe("cards", () => {
     const att = answerCard({ answer: "A", citations: [], disclaimer: "d" });
     expect(att.content.actions).toBeUndefined();
   });
+
+  it("shows a citation's modified date when the API supplies one", () => {
+    const att = answerCard({
+      answer: "A",
+      citations: [
+        { index: 1, title: "Intake SOP", documentId: "d1", downloadable: false, modifiedAt: "2025-11-04" },
+      ],
+      disclaimer: "d",
+    });
+    expect(text(att)).toContain("Intake SOP (modified 2025-11-04)");
+  });
 });

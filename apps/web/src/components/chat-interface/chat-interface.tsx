@@ -136,6 +136,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200"
                           >
                             [{c.index}] {c.title}
+                            {c.modifiedAt && (
+                              <span className="ml-1 text-blue-500">
+                                · {c.modifiedAt}
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>

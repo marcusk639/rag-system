@@ -87,6 +87,8 @@ export interface GenerationResult {
     /** Every retrieved chunk from this document, in reading order. */
     chunkIds: string[];
     score: number;
+    /** Source document's last-modified date (YYYY-MM-DD), when known. */
+    modifiedAt?: string;
   }>;
 }
 

@@ -99,3 +99,17 @@ describe("buildCitations — one citation per document", () => {
     expect(a?.downloadable).toBe(true);
   });
 });
+
+describe("buildCitations — modified date", () => {
+  it("carries the document's modified date (date only) when it is a valid ISO date", () => {
+    const r = chunk("A", 0, 0.9);
+    r.document.metadata = { modifiedAt: "2025-11-04T10:22:00Z" };
+    expect(buildCitations([r])[0]?.modifiedAt).toBe("2025-11-04");
+  });
+
+  it("omits a missing or malformed date", () => {
+    const r = chunk("A", 0, 0.9);
+    r.document.metadata = { modifiedAt: "yesterday" };
+    expect(buildCitations([r])[0]?.modifiedAt).toBeUndefined();
+  });
+});

@@ -13,6 +13,8 @@ export interface Citation {
   /** Every retrieved chunk from the document, in reading order. */
   chunkIds?: string[];
   score: number;
+  /** Source document's last-modified date (YYYY-MM-DD), when known. */
+  modifiedAt?: string;
 }
 
 export interface Message {

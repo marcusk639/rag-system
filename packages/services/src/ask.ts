@@ -17,6 +17,32 @@ import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
 
 /**
+ * The knowledge base is indexed as-is, so the same SOP often exists as several
+ * copies. Identical chunks from different files would otherwise take several
+ * of the `topK` context slots with one passage. Keeps the best-ranked copy.
+ *
+ * Compared on the chunk BODY: chunk text opens with a `# Title › heading` line
+ * that differs between copies with different file names, so that line is
+ * ignored, and whitespace and case are normalized.
+ */
+export function dropDuplicateChunks(
+  results: RetrievalResult[],
+): RetrievalResult[] {
+  const seen = new Set<string>();
+  return results.filter((r) => {
+    const newline = r.text.indexOf("\n");
+    const body =
+      r.text.startsWith("# ") && newline !== -1
+        ? r.text.slice(newline)
+        : r.text;
+    const key = body.replace(/\s+/g, " ").trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Per-document diversity cap. Returns a NEW array (no mutation) keeping at most
  * `cap` chunks from any single document, preserving the original relevance
  * order. Stops one long file from crowding out other sources before the
@@ -289,13 +315,16 @@ async function retrieveForAnswer(
     await retrievalQuery(deps, input),
   );
   if (maxChunksPerDocument <= 0) {
-    return deps.retriever.search(query, scope);
+    return dropDuplicateChunks(await deps.retriever.search(query, scope));
   }
   const candidates = await deps.retriever.search(
     { ...query, topK: query.topK * CAP_OVERFETCH_MULTIPLIER },
     scope,
   );
-  return capChunksPerDocument(candidates, maxChunksPerDocument).slice(
+  return capChunksPerDocument(
+    dropDuplicateChunks(candidates),
+    maxChunksPerDocument,
+  ).slice(
     0,
     query.topK,
   );
