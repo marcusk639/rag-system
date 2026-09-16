@@ -33,6 +33,11 @@ export class MarkdownChunker implements Chunker {
     let ordinal = 0;
 
     for (const section of sections) {
+      // A section with no real text — a horizontal rule, a stray table pipe,
+      // lone punctuation — would embed as a low-information vector that sits
+      // near many queries and takes a retrieval slot. Short sections with real
+      // words ("Owner: client services lead") are kept.
+      if (!hasRealText(section.body)) continue;
       const sectionChunks = this.chunkSection(section);
       for (const rawText of sectionChunks) {
         // Last-resort safety net: never let a chunk past the hard embedding
@@ -82,9 +87,16 @@ export class MarkdownChunker implements Chunker {
     for (const unit of units) {
       const unitTokens = countTokens(unit);
       if (unitTokens > this.opts.chunkSize) {
-        // Single paragraph too big — flush what we have, then hard-split.
+        // Single paragraph too big — flush what we have, then split it. A
+        // table splits by whole rows under a repeated header; anything else
+        // by sentence (hardSplit), which would cut a table mid-row and leave
+        // later rows without their column names.
         flush();
-        bodies.push(...hardSplit(unit, this.opts.chunkSize));
+        bodies.push(
+          ...(isMarkdownTable(unit)
+            ? splitTableByRows(unit, this.opts.chunkSize)
+            : hardSplit(unit, this.opts.chunkSize)),
+        );
         continue;
       }
 
@@ -146,6 +158,44 @@ function splitByHeadings(markdown: string): Section[] {
   return sections.length
     ? sections
     : [{ headingPath: [], body: markdown.trim() }];
+}
+
+function hasRealText(body: string): boolean {
+  return (body.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 3;
+}
+
+function isMarkdownTable(unit: string): boolean {
+  const lines = unit.split("\n").filter((l) => l.trim());
+  return (
+    lines.length >= 3 &&
+    lines.every((l) => l.trimStart().startsWith("|")) &&
+    /^\s*\|?\s*:?-{3,}/.test(lines[1] ?? "")
+  );
+}
+
+/**
+ * Split a markdown table into groups of whole rows, each group preceded by the
+ * header and separator lines, so every chunk is a self-describing table.
+ */
+function splitTableByRows(table: string, maxTokens: number): string[] {
+  const lines = table.split("\n").filter((l) => l.trim());
+  const head = `${lines[0]}\n${lines[1]}`;
+  const headTokens = countTokens(head);
+  const out: string[] = [];
+  let group: string[] = [];
+  let groupTokens = 0;
+  for (const row of lines.slice(2)) {
+    const rowTokens = countTokens(row);
+    if (group.length > 0 && headTokens + groupTokens + rowTokens > maxTokens) {
+      out.push(`${head}\n${group.join("\n")}`);
+      group = [];
+      groupTokens = 0;
+    }
+    group.push(row);
+    groupTokens += rowTokens;
+  }
+  if (group.length > 0) out.push(`${head}\n${group.join("\n")}`);
+  return out;
 }
 
 function splitParagraphs(text: string): string[] {
@@ -220,6 +270,12 @@ function applyOverlap(chunks: string[], overlapTokens: number): string[] {
   const out: string[] = [chunks[0]!];
   for (let i = 1; i < chunks.length; i++) {
     const prev = chunks[i - 1]!;
+    // A table group already repeats its header, and a character-sliced tail
+    // would glue half a row onto the front of it. No overlap for tables.
+    if (isMarkdownTable(chunks[i]!)) {
+      out.push(chunks[i]!);
+      continue;
+    }
     const prevTokens = encode(prev);
     // Take the tail tokens of the previous chunk as the prefix of this one.
     const tail = prevTokens.slice(-overlapTokens);
