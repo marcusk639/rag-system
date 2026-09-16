@@ -6,6 +6,7 @@ import {
   type Connector,
   type EmbeddingProvider,
   type LoadedPack,
+  type DocumentClass,
 } from "@rag/core";
 import type { Db } from "@rag/db";
 import { env, TEST_SCANNER_PACK_DIR } from "../env.js";
@@ -47,6 +48,8 @@ export async function runOneIngestion(
      * different scanner set; the pipeline rejects a missing or empty pack.
      */
     pack?: LoadedPack;
+    /** Defaults to "A" (synthetic public fixtures). */
+    sourceDocClass?: DocumentClass;
   },
 ): Promise<PipelineRunResult> {
   const logger = pino({ level: "silent" });
@@ -78,7 +81,7 @@ export async function runOneIngestion(
       // "D", so every document quarantines. Fixtures are synthetic public
       // content, so declare Class A explicitly rather than relying on a
       // permissive default — the implicit default is what this layer removed.
-      sourceDocClass: "A",
+      sourceDocClass: overrides?.sourceDocClass ?? "A",
       pack: overrides?.pack ?? CPA_PACK,
     },
   );

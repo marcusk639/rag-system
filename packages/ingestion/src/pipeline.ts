@@ -78,7 +78,8 @@ export interface PipelineDeps {
    * Data classification declared by the source being ingested.
    * Inherited from `sources.doc_class` and stamped onto every document.
    * Phase 1 accepts A and B; C and D throw ClassBlockedError.
-   * Defaults to 'A' for backwards compatibility with tests that don't set it.
+   * Undeclared fails CLOSED to 'D' (every document quarantined), never to a
+   * permissive class.
    */
   sourceDocClass?: DocumentClass;
   /**
