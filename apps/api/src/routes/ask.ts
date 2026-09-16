@@ -11,6 +11,7 @@ import {
   askQuestion,
   askQuestionStream,
   type AskResult,
+  type AskStreamEvent,
   GenerationNotConfiguredError,
 } from "@rag/services";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -108,6 +109,40 @@ function streamErrorPayload(err: unknown): {
   return { message: "Generation failed." };
 }
 
+/**
+ * Forward service stream events to an SSE sink, stopping as soon as the client
+ * is gone. Breaking out of `for await` calls the generator's `return()`, which
+ * unwinds `askQuestionStream` and the provider stream beneath it instead of
+ * letting a model finish an answer nobody will read.
+ */
+export async function pumpAskStream(
+  events: AsyncIterable<AskStreamEvent>,
+  sink: {
+    write: (chunk: string) => void;
+    isClosed: () => boolean;
+    onDone: (event: Extract<AskStreamEvent, { type: "done" }>) => void;
+  },
+): Promise<void> {
+  for await (const event of events) {
+    if (sink.isClosed()) break;
+    if (event.type === "token") {
+      sink.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
+    } else {
+      sink.onDone(event);
+      sink.write(
+        `event: done\ndata: ${JSON.stringify({
+          citations: event.citations,
+          retrieved: event.retrieved,
+          reviewStatus: event.reviewStatus,
+          disclaimer: event.disclaimer,
+          answerId: event.answerId,
+        })}\n\n`,
+      );
+    }
+    if (sink.isClosed()) break;
+  }
+}
+
 export async function registerAskRoute(
   app: FastifyInstance,
   deps: Deps,
@@ -184,40 +219,41 @@ export async function registerAskRoute(
         Connection: "keep-alive",
       });
 
+      // A client that disconnects (closed tab, new question) must not keep a
+      // model generating: stop pulling, which finalizes the service generator
+      // and, through it, the provider's stream.
+      let clientGone = false;
+      raw.on("close", () => {
+        if (!raw.writableFinished) clientGone = true;
+      });
+
       try {
-        for await (const event of askQuestionStream(
-          deps,
-          request.body,
-          config.retrieval.defaultTopK,
-          scope,
-          config.retrieval.maxChunksPerDocument,
+        await pumpAskStream(
+          askQuestionStream(
+            deps,
+            request.body,
+            config.retrieval.defaultTopK,
+            scope,
+            config.retrieval.maxChunksPerDocument,
+            {
+              neighborExpansion: config.retrieval.neighborExpansion,
+              minDenseSimilarity: config.retrieval.minDenseSimilarity,
+            },
+          ),
           {
-            neighborExpansion: config.retrieval.neighborExpansion,
-            minDenseSimilarity: config.retrieval.minDenseSimilarity,
+            isClosed: () => clientGone,
+            write: (chunk) => raw.write(chunk),
+            onDone: (event) =>
+              auditAsk(
+                deps,
+                request,
+                request.body.question,
+                event.retrieved,
+                config.generation?.model,
+                event.answerId,
+              ),
           },
-        )) {
-          if (event.type === "token") {
-            raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
-          } else {
-            auditAsk(
-              deps,
-              request,
-              request.body.question,
-              event.retrieved,
-              config.generation?.model,
-              event.answerId,
-            );
-            raw.write(
-              `event: done\ndata: ${JSON.stringify({
-                citations: event.citations,
-                retrieved: event.retrieved,
-                reviewStatus: event.reviewStatus,
-                disclaimer: event.disclaimer,
-                answerId: event.answerId,
-              })}\n\n`,
-            );
-          }
-        }
+        );
       } catch (err) {
         // The scope/PII boundary is enforced inside the service; never echo the
         // raw error (it may carry connection details). Log server-side instead.

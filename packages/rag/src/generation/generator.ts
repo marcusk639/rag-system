@@ -351,21 +351,33 @@ export class GeminiGenerator implements Generator {
   ): AsyncIterable<string> {
     const prompt = buildPrompt(question, context);
     this.preFlight(prompt);
+    // The Gemini SDK does not cancel its request when iteration stops early
+    // (the OpenAI and Anthropic stream iterators do), so a consumer that goes
+    // away — a closed browser tab — would leave the HTTP stream open until the
+    // model finished. Abort it explicitly. Per the SDK, this is client-side:
+    // tokens Google has already generated may still be billed.
+    const controller = new AbortController();
     const stream = await this.client.models.generateContentStream({
       model: this.opts.model,
       contents: prompt,
-      config: this.config(),
+      config: { ...this.config(), abortSignal: controller.signal },
     });
-    let truncated = false;
-    for await (const chunk of stream) {
-      const text = chunk.text;
-      if (text) yield text;
-      if (chunk.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS) {
-        truncated = true;
+    let completed = false;
+    try {
+      let truncated = false;
+      for await (const chunk of stream) {
+        const text = chunk.text;
+        if (text) yield text;
+        if (chunk.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS) {
+          truncated = true;
+        }
       }
-    }
-    if (truncated) {
-      yield withTruncationNotice("", true, this.opts.onTruncated);
+      completed = true;
+      if (truncated) {
+        yield withTruncationNotice("", true, this.opts.onTruncated);
+      }
+    } finally {
+      if (!completed) controller.abort();
     }
   }
 }

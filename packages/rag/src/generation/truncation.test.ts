@@ -200,3 +200,40 @@ describe("Generator.complete — bare prompt for auxiliary calls", () => {
     }
   });
 });
+
+describe("Gemini stream cancellation", () => {
+  it("aborts the provider request when the consumer stops reading early", async () => {
+    const gen = new GeminiGenerator(base);
+    let signal: AbortSignal | undefined;
+    client(gen).models.generateContentStream = vi.fn(
+      async (req: { config: { abortSignal?: AbortSignal } }) => {
+        signal = req.config.abortSignal;
+        return (async function* () {
+          yield { text: "one ", candidates: [{}] };
+          yield { text: "two", candidates: [{}] };
+        })();
+      },
+    );
+
+    for await (const _ of gen.answerStream("q", CONTEXT)) {
+      break;
+    }
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("does not abort a stream that completed normally", async () => {
+    const gen = new GeminiGenerator(base);
+    let signal: AbortSignal | undefined;
+    client(gen).models.generateContentStream = vi.fn(
+      async (req: { config: { abortSignal?: AbortSignal } }) => {
+        signal = req.config.abortSignal;
+        return (async function* () {
+          yield { text: "done", candidates: [{ finishReason: "STOP" }] };
+        })();
+      },
+    );
+    await collect(gen.answerStream("q", CONTEXT));
+    expect(signal?.aborted).toBe(false);
+  });
+});
