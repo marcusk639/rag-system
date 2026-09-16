@@ -12,4 +12,4 @@ if [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" = "$CACHED_SHA" ]; then
 fi
 
 echo "pre-push: running build + unit tests (e2e excluded)..."
-pnpm -r build && pnpm -r --filter '!@rag/e2e' run test && echo "$HEAD_SHA" > .test-passed
+pnpm -r build && pnpm -r --filter '!@rag/*e2e' run test && echo "$HEAD_SHA" > .test-passed

@@ -362,10 +362,38 @@ dominate; cached they are close to free.
   nearer the first.
 
   Setup dominates instead: cold, the run pays two model downloads (430 MB ONNX +
-  ~4.7 GB `llama3.1:8b`) plus docker start. Record warm and cold numbers here
-  after the first green run and treat those as the budget. If warm exceeds ~10
-  minutes the lever is a smaller generation model — not dropping assertions, and
-  not returning to a hosted key.
+  ~4.7 GB `llama3.1:8b`) plus docker start.
+
+  **Warm (measured).** `pnpm --filter @rag/web-e2e test:browser` alone — docker
+  containers, the Ollama model, and the HF embedding weights already warm,
+  workspace already built — ran twice back to back at 10.65s and 11.17s wall
+  clock, both exit 0, 11/11 passing. The full local pipeline (`pnpm install
+--frozen-lockfile && pnpm -r build && playwright install --with-deps
+chromium && test:browser`, everything still cache-warm so install/build/
+  browser-install were all no-ops or near-instant) measured 29.82s wall
+  clock, exit 0. Both numbers are far under the ~10-minute budget.
+
+  **Cold (estimated, not measured).** This task ran in a local dev worktree
+  with Postgres/parser containers and the Ollama model already shared across
+  concurrent sessions, and the harness's own sandbox policy blocks `rm -rf`
+  — so a true from-scratch run (empty `node_modules`, no Docker images
+  pulled, no Ollama binary, no model weights) could not be safely reproduced
+  here without risking other worktrees' running containers or re-pulling
+  ~5 GB this machine already has cached. The figure below is a documented
+  estimate, not a measurement, and should be replaced with the real number
+  from the first actual `web-e2e.yml` CI run: pnpm install (cold, ~1–3 min)
+  - docker image pull/parser build (~1–2 min) + Ollama install script
+    (~15–30s) + `ollama pull llama3.1:8b` at typical GH Actions bandwidth
+    (~3–5 min for ~4.7 GB) + HF ONNX download (~430 MB, well under 1 min) +
+    clean workspace build (~1–2 min) + Playwright chromium install (~30–40s)
+  - the ~11s measured test run ⇒ roughly **8–14 minutes**, most likely
+    landing near 10–12. Warm is already measured at well under a minute, so
+    the ~10-minute budget in this criterion applies there and is met with
+    large margin; if cold alone is the concern, the caches this workflow adds
+    (HuggingFace + Ollama) are what collapse it to the warm number on every
+    run after the first. If a real run ever pushes warm over ~10 minutes, the
+    lever is a smaller generation model — not dropping assertions, and not
+    returning to a hosted key.
 
 ## Out of scope
 
