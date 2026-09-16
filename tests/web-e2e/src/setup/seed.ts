@@ -10,27 +10,53 @@ import {
   truncateAll,
 } from "./ingestion.js";
 import { E2E_ENV } from "../env.js";
-import { FIXTURE_DOCS } from "../fixtures/corpus.js";
+import {
+  FIXTURE_DOCS,
+  OUT_OF_SCOPE_DOCS,
+  OUT_OF_SCOPE_SOURCE_NAME,
+} from "../fixtures/corpus.js";
 
-export async function seedCorpus(): Promise<{ sourceId: string }> {
+export async function seedCorpus(): Promise<void> {
   const { db, close } = createDb(E2E_ENV.DATABASE_URL, {});
   try {
     // Make the suite re-runnable: without this, a second run accumulates
     // documents and the "exactly one distinct embedding_model" coherence
     // assertion fails for the wrong reason (row count, not model drift).
     await truncateAll(db);
+
+    // One embedder for BOTH sources: the coherence check requires every chunk
+    // to share a single (provider, model) pair.
+    const embedder = createEmbeddingProvider({
+      provider: E2E_ENV.EMBEDDING_PROVIDER,
+      model: E2E_ENV.EMBEDDING_MODEL,
+      dimensions: Number(E2E_ENV.EMBEDDING_DIMENSIONS),
+      apiKey: "GEMINI_API_KEY" in E2E_ENV ? E2E_ENV.GEMINI_API_KEY : undefined,
+    } as Config["embedding"]);
+    // MUST be passed explicitly — runOneIngestion never reads env, and the
+    // local model's 512-token limit differs from production's 800.
+    const overrides = { chunkSize: Number(E2E_ENV.CHUNK_SIZE), embedder };
+
     const sourceId = await createFixtureSource(db);
-    await runOneIngestion(db, sourceId, new FakeConnector(FIXTURE_DOCS), {
-      // MUST be passed explicitly — runOneIngestion never reads env and would
-      // otherwise chunk at 800, exceeding the local model's 512-token limit.
-      chunkSize: 512,
-      embedder: createEmbeddingProvider({
-        provider: "local",
-        model: E2E_ENV.EMBEDDING_MODEL,
-        dimensions: 768,
-      } as Config["embedding"]),
-    });
-    return { sourceId };
+    await runOneIngestion(
+      db,
+      sourceId,
+      new FakeConnector(FIXTURE_DOCS),
+      overrides,
+    );
+
+    // Ingested but never granted. Its presence is what gives the scope
+    // assertions something to exclude — with only granted content in the
+    // index, "the user cannot see X" is vacuously true.
+    const outOfScopeId = await createFixtureSource(
+      db,
+      OUT_OF_SCOPE_SOURCE_NAME,
+    );
+    await runOneIngestion(
+      db,
+      outOfScopeId,
+      new FakeConnector(OUT_OF_SCOPE_DOCS),
+      overrides,
+    );
   } finally {
     await close();
   }
@@ -38,23 +64,23 @@ export async function seedCorpus(): Promise<{ sourceId: string }> {
 
 /**
  * The synthetic identity every browser spec authenticates as. Matches the
- * `oid` claim the auth fixture puts in the session cookie (Task 7).
+ * `oid` claim the auth fixture puts in the session cookie.
  */
 export const FIXTURE_OID = "web-e2e-fixture-user-oid";
 
 /**
- * Assigns the fixture user to the fixture source, then proves the assignment
- * actually resolves.
+ * Assigns the fixture user to the fixture source ONLY, then proves the
+ * resulting scope is exactly that source.
  *
- * This is not boilerplate. `resolveSourceIdsForUser` reads only the staff
- * assignment tables, and an empty result is fail-closed by design
- * (packages/core/src/oidc-auth.ts:94-98) — so without this the fixture user
- * retrieves ZERO rows, and the later "out-of-corpus question is refused"
- * assertion passes for entirely the wrong reason: an empty index also yields a
- * refusal with no citations. The non-empty check below is what stops this suite
- * reporting green while verifying nothing.
+ * Not boilerplate. `resolveSourceIdsForUser` reads only the staff assignment
+ * tables, and an empty result is fail-closed by design
+ * (packages/core/src/oidc-auth.ts:94-98) — without the grant the fixture user
+ * retrieves ZERO rows and refusal-style assertions pass for the wrong reason.
+ * The exact-scope check also catches the opposite failure: a scope that
+ * includes the out-of-scope source would make every exclusion assertion fail
+ * for the wrong reason.
  *
- * Must run AFTER truncateAll() and after the source row exists: truncateAll
+ * Must run AFTER truncateAll() and after the source rows exist: truncateAll
  * truncates `sources ... CASCADE` and staff_source_assignments.source_id is
  * ON DELETE CASCADE, so an assignment written earlier is silently removed.
  */
@@ -67,12 +93,13 @@ export async function grantFixtureAccess(sourceId: string): Promise<void> {
       grantedBy: "web-e2e-setup",
     });
     const ids = await resolveSourceIdsForUser(db, FIXTURE_OID);
-    if (ids.length === 0) {
+    if (ids.length !== 1 || ids[0] !== sourceId) {
       throw new Error(
-        "[web-e2e] the fixture user resolved to an empty source scope. " +
-          "Retrieval is fail-closed, so every retrieval assertion would pass " +
-          "for the wrong reason. Check that the assignment was written after " +
-          "truncateAll() and that the source id is current.",
+        `[web-e2e] the fixture user must resolve to exactly the fixture source ` +
+          `(${sourceId}), got ${JSON.stringify(ids)}. An empty scope makes ` +
+          `retrieval assertions pass for the wrong reason; a wider one makes ` +
+          `the out-of-scope assertions meaningless. Check the assignment was ` +
+          `written after truncateAll() and the source id is current.`,
       );
     }
   } finally {

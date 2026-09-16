@@ -18,7 +18,11 @@ export default defineConfig({
   // (--env-file-if-exists) into a suite whose whole premise is hermeticity.
   webServer: [
     {
-      command: "pnpm --filter @rag/api start",
+      // Stack bootstrap (docker up → wait → migrate) runs HERE, not in
+      // globalSetup: Playwright starts webServer before globalSetup, and the
+      // API will not boot against a missing or unmigrated database.
+      command:
+        "pnpm --filter @rag/web-e2e run stack:ready && pnpm --filter @rag/api start",
       url: `http://localhost:${API_PORT}/health`,
       env: E2E_ENV,
       reuseExistingServer: false,

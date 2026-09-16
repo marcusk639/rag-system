@@ -6,6 +6,8 @@
   "scripts": {
     "test:browser": "playwright test",
     "test:browser:ci": "playwright test --grep-invert @needs-8b-model",
+    "stack:ready": "tsx src/setup/stack-main.ts",
+    "test:pilot-gate": "WEB_E2E_PROVIDER=gemini playwright test --repeat-each=5",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
