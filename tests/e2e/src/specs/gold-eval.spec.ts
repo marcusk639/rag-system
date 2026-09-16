@@ -98,4 +98,19 @@ describe("scoreGoldRun", () => {
     expect(report.missing).toEqual(["a"]);
     expect(report.answerable).toBe(0);
   });
+
+  it("does not mistake an answer that quotes the refusal phrase for a refusal", () => {
+    const report = scoreGoldRun(
+      [q("a", ["doc-1"])],
+      [
+        obs(
+          "a",
+          ["doc-1"],
+          ["doc-1"],
+          `Escalate to a partner [1].\n\nThe SOP notes that staff should never reply "${REFUSAL}" to a client.`,
+        ),
+      ],
+    );
+    expect(report.wrongRefusals).toEqual([]);
+  });
 });

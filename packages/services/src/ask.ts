@@ -369,9 +369,9 @@ async function retrieveForAnswer(
     defaultTopK,
     await retrievalQuery(deps, input),
   );
-  if (maxChunksPerDocument <= 0) {
-    return dropDuplicateChunks(await deps.retriever.search(query, scope));
-  }
+  // Always over-fetch: both duplicate collapse and the per-document cap
+  // remove candidates, and without spare candidates the context would shrink
+  // below topK instead of being backfilled.
   const candidates = await deps.retriever.search(
     { ...query, topK: query.topK * CAP_OVERFETCH_MULTIPLIER },
     scope,
@@ -379,10 +379,7 @@ async function retrieveForAnswer(
   return capChunksPerDocument(
     dropDuplicateChunks(candidates),
     maxChunksPerDocument,
-  ).slice(
-    0,
-    query.topK,
-  );
+  ).slice(0, query.topK);
 }
 
 function buildQuery(input: AskInput, defaultTopK: number, query: string) {

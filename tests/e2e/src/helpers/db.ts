@@ -28,13 +28,16 @@ export function assertDestructiveTestTarget(
 ): void {
   let host: string;
   try {
-    host = new URL(databaseUrl).hostname;
+    // `postgres:` is not a special URL scheme, so the host is opaque: no
+    // lowercasing. An empty host is the unix-socket form
+    // (postgresql:///db?host=/var/run/postgresql), which is local.
+    host = new URL(databaseUrl).hostname.toLowerCase();
   } catch {
     throw new Error(
       "[e2e] refusing to truncate: the test DATABASE_URL could not be parsed",
     );
   }
-  if (LOCAL_HOSTS.has(host)) return;
+  if (host === "" || LOCAL_HOSTS.has(host)) return;
   if (environment.E2E_ALLOW_REMOTE_TRUNCATE === "1") return;
   throw new Error(
     `[e2e] refusing to truncate tables on non-local database host "${host}". ` +

@@ -46,9 +46,12 @@ const REFUSAL = "do not contain enough information to answer that";
 const TRUNCATION = TRUNCATION_NOTICE.trim();
 
 function isRefusal(answer: string): boolean {
-  // Mode B ("Not covered by the documents:") is a partial ANSWER, not a
-  // refusal; mode C may add a "Closest related material" line.
-  return answer.includes(REFUSAL) && !answer.includes("Not covered by the documents:");
+  // Mode C opens with the refusal sentence (optionally followed by a "Closest
+  // related material" line). Matching anywhere would misread an answer that
+  // quotes the phrase; mode B ("Not covered by the documents:") is a partial
+  // answer, not a refusal.
+  const opening = answer.trimStart().split("\n")[0] ?? "";
+  return opening.includes(REFUSAL);
 }
 
 export function scoreGoldRun(

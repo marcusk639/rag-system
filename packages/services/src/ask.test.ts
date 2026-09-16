@@ -107,9 +107,10 @@ describe("askQuestion", () => {
     );
 
     // topK omitted → falls back to defaultTopK at the retriever; scope is the
-    // mandatory second argument.
+    // mandatory second argument. The retriever is over-fetched (×3) so
+    // duplicate collapse and the per-document cap can backfill to topK.
     expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "q", topK: DEFAULT_TOP_K }),
+      expect.objectContaining({ query: "q", topK: DEFAULT_TOP_K * 3 }),
       ADMIN_SCOPE,
     );
     expect(answer).toHaveBeenCalledWith("q", retrieved);
@@ -201,7 +202,7 @@ describe("askQuestion", () => {
     expect(search).toHaveBeenCalledWith(
       {
         query: "q",
-        topK: 3,
+        topK: 9, // explicit topK 3, over-fetched ×3
         sourceIds: ["s1"],
         filter: { tag: ["x"] },
       },
@@ -434,7 +435,7 @@ describe("per-document cap keeps the context window full", () => {
     expect(seen).toHaveLength(DEFAULT_TOP_K);
   });
 
-  it("does not over-fetch when the cap is disabled", async () => {
+  it("still over-fetches with the cap disabled (duplicate collapse needs backfill) but returns at most topK", async () => {
     const search = searchReturningTopK();
     const answer = vi.fn().mockResolvedValue({ answer: "x", citations: [] });
     const deps = makeDeps({
@@ -444,7 +445,10 @@ describe("per-document cap keeps the context window full", () => {
 
     await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE, 0);
 
-    expect(search.mock.calls[0]![0].topK).toBe(DEFAULT_TOP_K);
+    expect(search.mock.calls[0]![0].topK).toBe(DEFAULT_TOP_K * 3);
+    expect(
+      (answer.mock.calls[0]![1] as RetrievalResult[]).length,
+    ).toBeLessThanOrEqual(DEFAULT_TOP_K);
   });
 });
 
@@ -728,5 +732,28 @@ describe("TRI screening before retrieval (embedding egress)", () => {
       expect.objectContaining({ marker: "ask.condensation_blocked" }),
       expect.any(String),
     );
+  });
+});
+
+describe("review follow-ups", () => {
+  it("backfills to topK after collapsing duplicates even with the per-document cap disabled", async () => {
+    const dup = (id: string) =>
+      ({ ...retrievalResult(id, `doc-${id}`), text: "# T\n\nSame body." }) as RetrievalResult;
+    const unique = (id: string) =>
+      ({ ...retrievalResult(id, `doc-${id}`), text: `# T\n\nBody ${id}.` }) as RetrievalResult;
+    const search = vi
+      .fn()
+      .mockResolvedValue([dup("1"), dup("2"), dup("3"), unique("4"), unique("5")]);
+    const answer = vi.fn().mockResolvedValue({ answer: "a", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    await askQuestion(deps, { question: "q", topK: 3 }, DEFAULT_TOP_K, ADMIN_SCOPE, 0);
+
+    expect(search.mock.calls[0]?.[0].topK).toBeGreaterThan(3);
+    const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
+    expect(context.map((r) => r.chunk.id)).toEqual(["chunk-1", "chunk-4", "chunk-5"]);
   });
 });

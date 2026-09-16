@@ -93,6 +93,35 @@ describe("KbBot", () => {
     });
   });
 
+  it("history: an exchange that finishes while another turn is in flight is not overwritten", async () => {
+    let releaseFirst: () => void = () => {};
+    const askKb = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve({ answer: "first answer", citations: [], disclaimer: "d" });
+          }),
+      )
+      .mockResolvedValueOnce({ answer: "second answer", citations: [], disclaimer: "d" })
+      .mockResolvedValue({ answer: "third", citations: [], disclaimer: "d" });
+    const deps = makeDeps({ askKb });
+    const bot = new KbBot(deps);
+    const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
+
+    const first = adapter.send(dm("first question"));
+    await vi.waitFor(() => expect(askKb).toHaveBeenCalledTimes(1));
+    await adapter.send(dm("second question"));
+    releaseFirst();
+    await first;
+    await adapter.send(dm("third question"));
+
+    const history = (askKb.mock.calls[2] as unknown as [{ history: Array<{ content: string }> }])[0].history;
+    expect(history.map((t) => t.content)).toEqual(
+      expect.arrayContaining(["first question", "first answer", "second question", "second answer"]),
+    );
+  });
+
   it("history: never shared between users in the same conversation", async () => {
     const askKb = vi.fn(async () => ({ answer: "A", citations: [], disclaimer: "d" }));
     const deps = makeDeps({ askKb });

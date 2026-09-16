@@ -318,7 +318,7 @@ export class KbBot extends TeamsActivityHandler {
       });
 
       await context.sendActivity({ attachments: [answerCard(answer)] });
-      await this.appendHistory(context, history, question, answer.answer);
+      await this.appendHistory(context, question, answer.answer);
     } catch (error) {
       await this.sendErrorCard(context, error);
     }
@@ -340,12 +340,15 @@ export class KbBot extends TeamsActivityHandler {
 
   private async appendHistory(
     context: TurnContext,
-    history: HistoryTurn[],
     question: string,
     answer: string,
   ): Promise<void> {
     const key = historyKey(context);
     if (!key) return;
+    // Re-read rather than reuse the history read before the (slow) model call:
+    // a second message from the same user can finish in the meantime, and
+    // writing the stale copy back would drop its exchange.
+    const history = await this.readHistory(context);
     const exchange: HistoryTurn[] = [
       { role: "user", content: question },
       { role: "assistant", content: answer },

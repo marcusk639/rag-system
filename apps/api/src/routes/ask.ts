@@ -125,11 +125,11 @@ export async function pumpAskStream(
   },
 ): Promise<void> {
   for await (const event of events) {
-    if (sink.isClosed()) break;
-    if (event.type === "token") {
-      sink.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
-    } else {
+    if (event.type === "done") {
+      // The answer was fully generated (and paid for): always audit it, even
+      // if the client left in the instant before this event arrived.
       sink.onDone(event);
+      if (sink.isClosed()) break;
       sink.write(
         `event: done\ndata: ${JSON.stringify({
           citations: event.citations,
@@ -139,6 +139,9 @@ export async function pumpAskStream(
           answerId: event.answerId,
         })}\n\n`,
       );
+    } else {
+      if (sink.isClosed()) break;
+      sink.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
     }
     if (sink.isClosed()) break;
   }

@@ -97,7 +97,7 @@ describe("cards", () => {
       disclaimer: "d",
       answerId: "11111111-1111-4111-8111-111111111111",
     });
-    const actions = att.content.actions as Array<Record<string, any>>;
+    const actions = att.content.actions as Array<Record<string, unknown>>;
     expect(actions).toHaveLength(2);
     expect(actions.map((a) => a.type)).toEqual(["Action.Submit", "Action.Submit"]);
     expect(actions.map((a) => a.data)).toEqual([

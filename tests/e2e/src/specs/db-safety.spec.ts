@@ -8,6 +8,8 @@ describe("assertDestructiveTestTarget", () => {
       "postgres://rag:rag@127.0.0.1:5432/rag_eval",
       "postgres://rag:rag@[::1]:5432/rag",
       "postgres://rag:rag@postgres:5432/rag",
+      "postgres://rag:rag@LOCALHOST:5432/rag",
+      "postgresql:///rag?host=/var/run/postgresql",
     ]) {
       expect(() => assertDestructiveTestTarget(url, {})).not.toThrow();
     }

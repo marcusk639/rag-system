@@ -47,4 +47,22 @@ describe("pumpAskStream", () => {
     expect(e.returned()).toBe(true);
     expect(e.produced).toEqual(["a", "b"]);
   });
+
+  it("still audits a completed answer when the client closed just before the done event", async () => {
+    async function* gen(): AsyncGenerator<AskStreamEvent> {
+      yield {
+        type: "done",
+        citations: [],
+        retrieved: [],
+        reviewStatus: "draft_requires_practitioner_review",
+        disclaimer: "d",
+        answerId: "a",
+      };
+    }
+    const write = vi.fn();
+    const onDone = vi.fn();
+    await pumpAskStream(gen(), { write, isClosed: () => true, onDone });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(write).not.toHaveBeenCalled();
+  });
 });

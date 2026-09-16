@@ -148,3 +148,30 @@ describe("askQuestion with neighbour expansion", () => {
     expect(result.citations[0]?.chunkIds).toEqual(["A-0", "A-1"]);
   });
 });
+
+describe("relevance floor then neighbour expansion", () => {
+  it("expands only documents that cleared the floor; their zero-score neighbours are kept", async () => {
+    getChunksByOrdinalsMock.mockImplementation(
+      async (_db: unknown, docId: string, ordinals: number[]) =>
+        ordinals.map((o) => row(docId, o)),
+    );
+    const answer = vi.fn().mockResolvedValue({ answer: "a [1]", citations: [] });
+    const d = {
+      ...deps(),
+      retriever: {
+        search: vi.fn().mockResolvedValue([hit("A", 1, 0.9), hit("B", 1, 0.1)]),
+      } as unknown as ServiceDeps["retriever"],
+      generator: { answer } as unknown as ServiceDeps["generator"],
+    };
+
+    await askQuestion(d, { question: "q" }, 8, ADMIN_SCOPE, 0, {
+      minDenseSimilarity: 0.5,
+      neighborExpansion: { documents: 2, chunksPerDocument: 2 },
+    });
+
+    const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
+    expect(context.map((r) => r.chunk.id)).toEqual(["A-1", "A-0", "A-2"]);
+    expect(getChunksByOrdinalsMock).toHaveBeenCalledTimes(1);
+  });
+});
+

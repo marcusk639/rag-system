@@ -52,6 +52,9 @@ export async function POST(request: Request): Promise<Response> {
   request.signal.addEventListener("abort", () => upstreamAbort.abort(), {
     once: true,
   });
+  // The listener does not fire for a signal that aborted during the awaits
+  // above (auth, config, body parsing).
+  if (request.signal.aborted) upstreamAbort.abort();
   let connectTimedOut = false;
   const connectTimer = setTimeout(() => {
     connectTimedOut = true;
