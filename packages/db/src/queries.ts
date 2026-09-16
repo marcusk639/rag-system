@@ -949,9 +949,12 @@ export interface IngestEventRow {
    * "tri-flagged" — TRI patterns detected in parsed content; ingestion
    *   continued but a compliance event was logged. Matched pattern labels
    *   are stored in rejectionReason.
+   * "failed"      — fetch/parse/embed error; the document was not indexed and
+   *   is retried on the next full sync.
    */
-  action: "ingested" | "blocked" | "tri-flagged";
-  /** Non-null for "blocked" (error message) and "tri-flagged" (pattern list). */
+  action: "ingested" | "blocked" | "tri-flagged" | "failed";
+  /** Non-null for "blocked" (error message), "tri-flagged" (pattern list) and
+   *  "failed" (error name/code — see listRetryableIngestFailures). */
   rejectionReason?: string | null;
 }
 

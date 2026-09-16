@@ -466,7 +466,7 @@ export const ingestLog = pgTable(
     externalId: text("external_id").notNull(),
     /** DocumentClass at ingest time (A | B | C | D). */
     docClass: text("doc_class").notNull(),
-    /** "ingested" | "blocked" */
+    /** "ingested" | "blocked" | "tri-flagged" | "failed" */
     action: text("action").notNull(),
     /** Non-null only when action = "blocked". */
     rejectionReason: text("rejection_reason"),

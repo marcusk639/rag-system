@@ -59,6 +59,7 @@ const {
   setDocumentStorageMock,
   logIngestEventMock,
   clearDocumentStorageMock,
+  listRetryableIngestFailuresMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
@@ -69,6 +70,7 @@ const {
   setDocumentStorageMock: vi.fn(),
   logIngestEventMock: vi.fn(),
   clearDocumentStorageMock: vi.fn(),
+  listRetryableIngestFailuresMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -81,6 +83,7 @@ vi.mock("@rag/db", () => ({
   setDocumentStorage: setDocumentStorageMock,
   logIngestEvent: logIngestEventMock,
   clearDocumentStorage: clearDocumentStorageMock,
+  listRetryableIngestFailures: listRetryableIngestFailuresMock,
 }));
 
 interface FakePage {
@@ -189,6 +192,7 @@ beforeEach(() => {
   setDocumentStorageMock.mockResolvedValue(undefined);
   logIngestEventMock.mockResolvedValue(undefined);
   clearDocumentStorageMock.mockResolvedValue({ storageKey: null });
+  listRetryableIngestFailuresMock.mockResolvedValue([]);
 });
 
 describe("runIngestion page budgeting", () => {
@@ -792,6 +796,97 @@ describe("a redacted document never keeps a downloadable original", () => {
 
     expect(clearDocumentStorageMock).toHaveBeenCalledWith(deps.db, "doc-1");
     expect(objectStore.delete).toHaveBeenCalledWith("sources/src/ledger");
+  });
+});
+
+describe("failed documents are recorded and retried", () => {
+  it("records a document that fails to ingest as action=failed", async () => {
+    const deps = makeDeps();
+    (deps.parser.parse as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("parser 503"), { name: "ParserError" }),
+    );
+    const { connector } = makeConnector([
+      { documents: ["flaky"], nextCursor: "c1", done: true },
+    ]);
+
+    const result = await runIngestion("src", connector, null, OPTS, deps);
+
+    expect(result.documentsFailed).toBe(1);
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({
+        sourceId: "src",
+        externalId: "flaky",
+        action: "failed",
+        rejectionReason: expect.stringContaining("ParserError"),
+      }),
+    );
+  });
+
+  it("with retryFailed, re-fetches and re-ingests earlier failures before listing new pages", async () => {
+    listRetryableIngestFailuresMock.mockResolvedValue(["flaky"]);
+    const deps = makeDeps();
+    const { connector } = makeConnector([
+      { documents: [], nextCursor: "c1", done: true },
+    ]);
+    (connector.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      externalId: "flaky",
+      title: "flaky",
+      modifiedAt: new Date().toISOString(),
+      mimeType: "text/plain",
+      content: Buffer.from("content"),
+      metadata: {},
+    });
+
+    const result = await runIngestion(
+      "src",
+      connector,
+      "c0",
+      { ...OPTS, retryFailed: true },
+      deps,
+    );
+
+    expect(connector.fetch).toHaveBeenCalledWith("flaky");
+    expect(upsertDocumentMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ externalId: "flaky" }),
+    );
+    expect(result.documentsRetried).toBe(1);
+  });
+
+  it("records another failed attempt when the retry fails too", async () => {
+    listRetryableIngestFailuresMock.mockResolvedValue(["gone"]);
+    const deps = makeDeps();
+    const { connector } = makeConnector([
+      { documents: [], nextCursor: "c1", done: true },
+    ]);
+    (connector.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("404"),
+    );
+
+    const result = await runIngestion(
+      "src",
+      connector,
+      "c0",
+      { ...OPTS, retryFailed: true },
+      deps,
+    );
+
+    expect(result.documentsRetried).toBe(0);
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      deps.db,
+      expect.objectContaining({ externalId: "gone", action: "failed" }),
+    );
+  });
+
+  it("does not retry unless asked (continuation jobs)", async () => {
+    listRetryableIngestFailuresMock.mockResolvedValue(["flaky"]);
+    const { connector } = makeConnector([
+      { documents: [], nextCursor: "c1", done: true },
+    ]);
+    await runIngestion("src", connector, "c0", OPTS, makeDeps());
+    expect(listRetryableIngestFailuresMock).not.toHaveBeenCalled();
+    expect(connector.fetch).not.toHaveBeenCalled();
   });
 });
 

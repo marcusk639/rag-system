@@ -114,6 +114,9 @@ export async function handleSyncSource(
         concurrency: config.worker.concurrency,
         pageSize: 50,
         maxPagesPerRun: PAGES_PER_RUN,
+        // Retry earlier fetch/parse/embed failures once per sync, not on every
+        // continuation job (each retry counts toward the attempt cap).
+        retryFailed: !continuation,
       },
       {
         db,

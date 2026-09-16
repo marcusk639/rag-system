@@ -50,6 +50,8 @@ export async function runOneIngestion(
     pack?: LoadedPack;
     /** Defaults to "A" (synthetic public fixtures). */
     sourceDocClass?: DocumentClass;
+    /** Retry earlier failed documents before listing (default false). */
+    retryFailed?: boolean;
   },
 ): Promise<PipelineRunResult> {
   const logger = pino({ level: "silent" });
@@ -70,7 +72,11 @@ export async function runOneIngestion(
     sourceId,
     connector,
     null, // cursor
-    { concurrency: 2, pageSize: 50 },
+    {
+      concurrency: 2,
+      pageSize: 50,
+      retryFailed: overrides?.retryFailed ?? false,
+    },
     {
       db,
       parser,

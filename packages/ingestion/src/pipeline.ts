@@ -18,6 +18,10 @@ import {
 import { classifyDocument } from "./classify-document.js";
 import { DeletionReconciliationError } from "./errors.js";
 import {
+  recordIngestFailure,
+  retryFailedDocuments,
+} from "./failed-documents.js";
+import {
   isExcludedPath,
   redactParsedDocument,
   ContentSafetyError,
@@ -66,6 +70,12 @@ export interface PipelineOptions {
    * value (e.g. 1) to opt into per-page continuation.
    */
   maxPagesPerRun?: number;
+  /**
+   * Before listing pages, re-fetch and re-ingest documents whose earlier
+   * attempts failed (see failed-documents.ts). The worker enables this for the
+   * first job of a sync only, not for its continuations.
+   */
+  retryFailed?: boolean;
 }
 
 export interface PipelineDeps {
@@ -112,6 +122,8 @@ export interface PipelineRunResult {
   documentsDeleted: number;
   /** Items the connector skipped for exceeding its size cap (observability only). */
   documentsSkippedOversize: number;
+  /** Previously failed documents successfully re-ingested this run. */
+  documentsRetried: number;
   /**
    * The connector's authoritative end-of-feed flag for the LAST page processed.
    * `true` => the source is fully enumerated (nothing left to re-enqueue).
@@ -173,6 +185,18 @@ export async function runIngestion(
   let documentsSkippedOversize = 0;
   let pageDone = false;
   let pagesProcessed = 0;
+  // Layer 3: no longer defaults to "A". An undeclared source class is the
+  // strongest possible reason NOT to treat content as public — the previous
+  // `?? "A"` answered "we don't know" with the most permissive class, which
+  // is how 858 unclassified documents were treated as public.
+  const docClass: DocumentClass = deps.sourceDocClass ?? "D";
+
+  const documentsRetried = opts.retryFailed
+    ? await retryFailedDocuments(
+        { db: deps.db, log, sourceId, connector, docClass },
+        (doc) => ingestOne(sourceId, doc, deps, docClass),
+      )
+    : 0;
 
   // Process up to `maxPages` connector pages, persisting the cursor after each
   // so a crash/retry resumes mid-source. We stop when EITHER the connector
@@ -196,11 +220,6 @@ export async function runIngestion(
       "fetched page",
     );
 
-    // Layer 3: no longer defaults to "A". An undeclared source class is the
-    // strongest possible reason NOT to treat content as public — the previous
-    // `?? "A"` answered "we don't know" with the most permissive class, which
-    // is how 858 unclassified documents were treated as public.
-    const docClass: DocumentClass = deps.sourceDocClass ?? "D";
     const limit = pLimit(opts.concurrency);
     const results = await Promise.allSettled(
       page.documents.map((doc) =>
@@ -208,13 +227,22 @@ export async function runIngestion(
       ),
     );
 
-    for (const r of results) {
+    for (const [i, r] of results.entries()) {
       if (r.status === "fulfilled") {
         documentsProcessed++;
         chunksCreated += r.value.chunksCreated;
       } else {
         documentsFailed++;
         log.error({ err: r.reason }, "document failed");
+        const failed = page.documents[i];
+        if (failed) {
+          await recordIngestFailure(
+            deps.db,
+            log,
+            { sourceId, externalId: failed.externalId, docClass },
+            r.reason,
+          );
+        }
       }
     }
 
@@ -291,6 +319,7 @@ export async function runIngestion(
     chunksCreated,
     documentsDeleted,
     documentsSkippedOversize,
+    documentsRetried,
     done: pageDone,
     nextCursor: cursor,
   };

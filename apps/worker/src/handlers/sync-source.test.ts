@@ -231,6 +231,20 @@ describe("handleSyncSource per-page continuation", () => {
     expect(runIngestionMock.mock.calls[0]![2]).toBe("cur0");
   });
 
+  it("retries previously failed documents on the first job only", async () => {
+    await handleSyncSource(job({}), makeDeps().deps);
+    await handleSyncSource(
+      job({ continuation: true, continuationCount: 1 }),
+      makeDeps().deps,
+    );
+    expect(runIngestionMock.mock.calls[0]?.[3]).toMatchObject({
+      retryFailed: true,
+    });
+    expect(runIngestionMock.mock.calls[1]?.[3]).toMatchObject({
+      retryFailed: false,
+    });
+  });
+
   it("a first full sync starts from a null cursor", async () => {
     const { deps } = makeDeps();
     await handleSyncSource(job({ mode: "full" }), deps);
