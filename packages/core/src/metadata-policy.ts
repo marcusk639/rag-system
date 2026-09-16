@@ -28,9 +28,11 @@ import type { DocumentMetadata, RetrievalResult } from "./types.js";
  *   - sizeBytes  document size (display only)
  *   - createdAt  ISO timestamp (display / sort)
  *   - modifiedAt ISO timestamp (display / sort)
- *   - path       structural locator within the source (e.g. "Marketing/2024/plan.docx")
  *
  * STRIPPED (PII or unvetted):
+ *   - path       folder location — at a CPA firm folder names routinely carry
+ *                client names ("Clients/Smith Family/2024"); kept internally
+ *                for structural exclusion only
  *   - author     person name
  *   - from       sender email address (email connectors)
  *   - to         recipient email addresses (email connectors)
@@ -48,7 +50,6 @@ export const EXPOSABLE_METADATA_FIELDS = [
   "sizeBytes",
   "createdAt",
   "modifiedAt",
-  "path",
   // Classification tag — non-PII; needed for citation display and
   // index-boundary enforcement at the retrieval layer.
   "docClass",
