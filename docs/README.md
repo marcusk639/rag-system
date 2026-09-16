@@ -73,6 +73,7 @@ A well-cross-linked set; read in this order.
 
 | Document                                                                                 | Covers                                                            |
 | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`RAG-REVIEW-2026-09-16.md`](./RAG-REVIEW-2026-09-16.md)                                 | Latest end-to-end review: 42 findings, fixes and deferrals (§11)  |
 | [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) | End-to-end defect review, severity-scored. Several fixed          |
 | [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md)                           | Standing backlog with resolution history                          |
 | [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md)             | This corpus, reviewed                                             |
