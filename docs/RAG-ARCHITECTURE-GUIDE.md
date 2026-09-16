@@ -166,8 +166,7 @@ Fusion**. Verified mechanics (`packages/db/src/queries.ts`):
 
 - **Dense CTE**: pure ANN — `ORDER BY embedding <=> q LIMIT pool`, no joins/filters, so the HNSW
   index is actually used. Score reported as `1 - cosine_distance`.
-- **Sparse CTE**: `ts_rank_cd(tsv, plainto_tsquery('english', query))` over the GIN index, also
-  pool-limited with no joins.
+- **Sparse CTE**: `ts_rank_cd(tsv, to_tsquery(...))` with OR-semantics (quoted lexemes joined by `|`), not AND-semantics. Splits the query with `tsvector_to_array(to_tsvector(...))`, quotes each lexeme to protect from tsquery operators, aggregates with `|`, and wraps in `to_tsquery('english', ...)`. Handles all-stop-word queries gracefully. Over the GIN index, pool-limited with no joins.
 - **Fusion**: a `FULL OUTER JOIN` on `chunk_id`, scored
   `wDense·(1/(k + denseRank)) + wSparse·(1/(k + sparseRank))` with the RRF constant **`k = 60`**
   (from the original RRF paper); a missing rank is treated as `1_000_000`. Default weights are

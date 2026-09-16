@@ -93,7 +93,7 @@ This keeps the apps as thin I/O adapters and makes each invariant — one `inges
 3. **Connector enumerates.** `connector.list({ cursor: source.cursor })` returns a page of `SourceDocument`s plus the next cursor. For Microsoft Graph this is a delta link; for Drive it's a page token; for Gmail it's a history id.
 4. **Parser converts.** For each document, the TS worker POSTs the raw bytes to the Python sidecar's `/parse` endpoint. The sidecar tries MarkItDown first (fast, broad format support), falls back to Unstructured (slower, OCR-capable) on failure. Returns `{ markdown, title, tables, metadata }`.
 5. **Hash check.** The worker SHA-256s the parsed markdown. If a row already exists for `(source_id, external_id)` with the same hash, ingestion short-circuits — no re-chunking, no re-embedding.
-6. **Chunker slices.** `MarkdownChunker.chunk()` walks the markdown by headings, splits long sections by paragraph then sentence, prepends each chunk with its heading path, and computes a per-chunk SHA-256 hash.
+6. **Chunker slices.** `MarkdownChunker.chunk()` walks the markdown by headings, splits long sections by paragraph then sentence, and prepends each chunk with `# Title › heading path` (e.g., `# Budget › 2026 › Q1 Forecast`). Overlap is applied to the section body before the heading line is added, so every chunk opens with its heading. Markdown tables in prose documents split by whole rows under a repeated header. Computes a per-chunk SHA-256 hash.
 7. **Embedder batches.** All chunks for the document go in one `embedder.embedBatch()` call. Gemini accepts up to 100 inputs per request; OpenAI up to 2048.
 8. **Storage.** A transaction deletes existing chunks for the document and inserts the new set. A trigger on `chunks.text` populates the `tsvector` for BM25 search.
 9. **Cursor commit.** After the whole page is processed, the worker persists the new cursor on the source row. A mid-page crash means re-processing that page (idempotent — see step 5), not losing it.
@@ -125,7 +125,20 @@ POST /search { query, topK, filter }
    RetrievalResult[] with citations
 ```
 
-For `/ask`, the retrieved chunks become numbered context blocks in a prompt to Gemini/OpenAI; the model is instructed to cite via `[N]` markers and to admit ignorance rather than hallucinate.
+For `/ask` (in `packages/services/src/ask.ts`), the pipeline stages are:
+
+1. **Question screening** — TRI-screened before embedding (to avoid sending identifiers to embedding providers).
+2. **Condensation** — If `history` is provided, a follow-up is rewritten into a standalone retrieval query via `contextualizeQuestion`; falls back to the original on any error.
+3. **Retrieval** — Hybrid search with over-fetch to account for deduplication and per-document capping.
+4. **Duplicate collapse** — Identical chunk bodies (ignoring heading lines) retained only once, preserving best rank.
+5. **Per-document cap** — At most `N` chunks from any single source, for diversity.
+6. **Relevance floor** (optional) — Chunks below `RETRIEVAL_MIN_DENSE_SIMILARITY` (off by default) are dropped; if none remain, a fixed refusal is returned without a model call.
+7. **Neighbor expansion** — For the top documents, adjacent chunks are fetched to complete fragmented procedures.
+8. **Per-chunk screening** — `Generator.screen()` removes context per TRI policy before generation sees it.
+9. **Prompt + generation** — Retrieved chunks become numbered context blocks; the model is instructed to cite via `[N]` markers and to admit ignorance rather than hallucinate.
+10. **Citations** — One `<document>` block and one citation per source document, carrying `chunkIds` (all chunks used), `modifiedAt` (if available), and other metadata. If the model stops at its output-token limit, the answer ends with a visible truncation notice.
+
+`hybridSearch` retries a filtered query at the maximum pool size when it returns fewer than `topK` rows.
 
 ## Why these specific choices
 
@@ -193,7 +206,7 @@ A naive recursive splitter happily slices through code fences and table rows. Th
 
 ## What this system is NOT
 
-- **Not a chat platform.** It exposes search and grounded Q&A. Conversation memory, multi-turn refinement, and tool use beyond retrieval live in the consuming agent.
+- **Not a chat platform.** It exposes search and grounded Q&A. Conversation memory, multi-turn refinement, and tool use beyond retrieval live in the consuming agent. (As of decision B0, `/ask` accepts bounded client-held `history` [max 12 turns, 4000 chars each] used only to rewrite a follow-up into a standalone retrieval query; generation still uses the original question. Server-side sessions remain future work.)
 - **Source-scoped, but not a full ACL system.** Retrieval enforces a per-token **sourceId** access boundary (see `@rag/core` `access-control.ts`): a plain `API_TOKENS` token is an admin/all-access principal, while a token in `API_PRINCIPALS` is enforced to only its `allowedSourceIds` (empty set ⇒ zero results, fail-closed). Enforcement is mandatory inside `Retriever.search`/`hybridSearch` and cannot be bypassed from the route layer; the optional caller `sourceIds` filter can only narrow _within_ the enforced scope. This is coarse-grained (per-source), not per-document or per-field — for finer-grained or per-end-user authz, wrap retrieval with your own layer.
-- **Reranking ships, but is off by default.** `Retriever.search` takes an optional `rerank` option: it over-fetches `poolMultiplier × topK` candidates, hands them to a `Reranker`, and degrades to plain RRF order (without failing the query) if the reranker errors. `HttpCrossEncoderReranker` speaks the Cohere/Jina REST shape. It is disabled by configuration — `RERANK_PROVIDER` defaults to `none` — **not absent**. Enable it with `RERANK_PROVIDER`/`RERANK_MODEL`/`RERANK_API_KEY` rather than building one.
+- **Reranking ships, but is off by default.** Prerequisites A2–A4 are complete: Jina requests send `return_documents: false` (A2), the provider score is carried as `rerankScore` (A3), and a hosted reranker is refused under `COMPLIANCE_MODE=client-data` (A4). `Retriever.search` takes an optional `rerank` option: it over-fetches `poolMultiplier × topK` candidates, hands them to a `Reranker`, and degrades to plain RRF order (without failing the query) if the reranker errors. `HttpCrossEncoderReranker` speaks the Cohere/Jina REST shape. It is disabled by configuration — `RERANK_PROVIDER` defaults to `none` — **not absent**. Enabling requires a vendor/DPA decision and a gold-set gain measurement. Enable it with `RERANK_PROVIDER`/`RERANK_MODEL`/`RERANK_API_KEY` rather than building one.
 - **Not a generation framework.** The `/ask` endpoint does a single-shot RAG generation. For chain-of-thought, query decomposition, agentic tool use, or multi-hop reasoning, build that in your app on top of `/search`.

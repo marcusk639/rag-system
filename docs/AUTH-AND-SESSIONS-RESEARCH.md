@@ -219,6 +219,8 @@ re-chunking.
 
 ### Stateful endpoint, not client-passed history
 
+> **Interim: Decision B0 (2026-09-16)** — Client-held history for query condensation has shipped: `/ask` and `/ask/stream` accept bounded `history` (max 12 turns, 4000 chars each), used only to rewrite a follow-up into a standalone retrieval query; generation still uses the original question. This satisfies the multi-turn rewrite acceptance criterion, but persistence remains future work. Server-side sessions (below) remain the destination, gated on the question-retention decision.
+
 Teams and SMS are stateless webhook receivers — each turn is an independent POST with only a
 conversation/From id. They physically cannot hold history. So state must be server-side: add
 `POST /sessions/:id/messages` (loads windowed history server-side, runs RAG, persists turns).

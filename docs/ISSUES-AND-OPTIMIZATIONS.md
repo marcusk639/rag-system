@@ -94,6 +94,8 @@ the test database — and a comment on `truncateAll` naming this hazard at the
 definition site, not just at the call site. **Effort:** S. **Value:** high — this
 is a data-loss class, not a quality one.
 
+🟡 **Partially resolved 2026-09-16 (c343ef9):** `truncateAll()` now refuses to run against non-local databases, preventing accidental production data loss.
+
 ### 🔴 C4 — `pnpm eval:gold` is documented but does not exist
 
 **Raised 2026-08-01.** `tests/e2e/src/eval/gold-set.ts:32` instructs the
@@ -114,6 +116,7 @@ on any issue, refuse on an empty set, query the **production** index read-only
 (see C3), score retrieval (`metrics.ts`) plus faithfulness (`faithfulness.ts`) for
 `tier1-automatable` questions, and **report `tier2-cpa-verified` questions as
 routed-for-review rather than scoring them**. **Effort:** M.
+✅ **Resolved 2026-09-16 (e05f8e4):** `pnpm eval:gold` exists. It validates the gold set, queries the deployed `/ask` read-only, and scores retrieval (recall@k, MRR), refusals, fabricated citations and truncation. It does not score claim-level faithfulness. See `EVAL-GOLD-SET-GUIDE.md`.
 
 ### 🟠 H1b — No corpus enumeration helper (blocks corpus-grounded eval)
 

@@ -35,6 +35,11 @@
 > the scanner catches identifier _patterns_, not client-confidential _content_,
 > which remains a firm-domain judgment for Chris/Doug.
 
+**Additional notes (2026-09-16):**
+
+- SharePoint permissions are not enforced per document — the pilot assumes only all-staff libraries are synced (review finding S-5, decision pending).
+- Deploying branch `fix/rag-review-findings` requires a full re-sync afterwards: `CONTENT_PROCESSING_VERSION=2` makes every document re-chunk and re-embed once. See `RAG-REVIEW-2026-09-16.md` §11.4.
+
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
 material confirmed in the index); gate #3 is **partially closed**, not closed.
 Engineering table last verified 2026-07-16.

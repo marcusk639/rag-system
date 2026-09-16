@@ -90,9 +90,17 @@ Enqueue an ingestion job for a source. Returns the pg-boss job id. The actual sy
 
 Retrieval-augmented generation. Returns a grounded answer with `[N]` citations.
 
-**Inputs**: same as `search_documents` but with `question` instead of `query`.
+**Inputs**:
 
-**Returns**: the answer as `text` content; `{ answer, citations, retrievedCount }` as `structuredContent`.
+| Field       | Type                                 | Default | Notes                                                                |
+| ----------- | ------------------------------------ | ------- | -------------------------------------------------------------------- |
+| `question`  | string                               | —       | The question to answer                                               |
+| `topK`      | int (1–30)                           | server  | Max chunks to retrieve (server `DEFAULT_TOP_K` when omitted)         |
+| `sourceIds` | string[] (uuid)                      | all     | Restrict search to these sources                                     |
+| `filter`    | `Record<string, string \| string[]>` | none    | Match against document metadata                                      |
+| `history`   | conversation turn[]                  | none    | Prior turns to rewrite a follow-up into a standalone retrieval query |
+
+**Returns**: the answer as `text` content; `{ answer, citations, retrievedCount }` as `structuredContent`. Citations include `chunkIds` (all chunks from that document used) and optional `modifiedAt` (document modification date).
 
 Returns an MCP error if `GENERATION_PROVIDER` / `GENERATION_MODEL` are not configured.
 

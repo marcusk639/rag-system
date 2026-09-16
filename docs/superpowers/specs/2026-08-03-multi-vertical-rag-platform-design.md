@@ -42,6 +42,15 @@ retrieval. The `cpa-consulting` research (`docs/rag/findings/r2-domain-answer-qu
 measured query rewriting as neutral-to-negative for single-document procedural
 corpora, which is the shape most of these verticals have.
 
+> **Notes (2026-09-16).** (1) That exclusion covers _single-turn_ rewriting.
+> Conversational follow-up condensation — a different problem — was adopted
+> (decision B0; `packages/rag/src/retrieval/contextualize.ts`). (2) The eval
+> harness's faithfulness scorer is unit-tested but does not yet score real
+> answers: the gold set is empty, and `pnpm eval:gold` scores retrieval,
+> refusals and citations only. (3) Enabling reranking is more than switching it
+> on: the A2–A5 prerequisites (done on `fix/rag-review-findings`) plus a
+> vendor/DPA decision and a measured gain. See `docs/RAG-REVIEW-2026-09-16.md`.
+
 ---
 
 ## 2. The three layers
@@ -581,7 +590,7 @@ rolling forward. Runs only at the client, only on demand, read-only via
 
 - **Publishing `@rag/*` to npm.** There is no external developer consuming libraries; the delivery unit is an image set plus a pack plus an env file. Publishing would also place the firm corpus findings currently embedded in `tri-scanner.ts` and `config.ts` comments on a public registry for no benefit.
 - **A multi-tenant control plane or hosted service.** Contradicts the per-client isolation model.
-- **Query rewriting, HyDE, multi-query, parent-document retrieval.** Measured as neutral-to-negative for these corpora.
+- **Query rewriting, HyDE, multi-query, parent-document retrieval.** Measured as neutral-to-negative for these corpora. (Single-turn only: conversational follow-up condensation was adopted as decision B0.)
 - **Dynamic plugin loading.** Static, in-image extensions only.
 
 ---
