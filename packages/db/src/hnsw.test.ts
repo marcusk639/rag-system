@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveEfSearch } from "./hnsw.js";
+import { resolveCandidatePool, resolveEfSearch } from "./hnsw.js";
 
 describe("resolveEfSearch", () => {
   it("defaults to 100 when the candidate pool fits", () => {
@@ -26,5 +26,20 @@ describe("resolveEfSearch", () => {
 
   it("always yields an integer (it is interpolated raw into SET LOCAL)", () => {
     expect(Number.isInteger(resolveEfSearch(96, 120.7))).toBe(true);
+  });
+});
+
+describe("resolveCandidatePool", () => {
+  it("is topK × multiplier when that fits under ef_search's ceiling", () => {
+    expect(resolveCandidatePool(12, 8)).toBe(96);
+  });
+
+  it("caps at 1000 so the dense arm (bounded by ef_search) and sparse arm stay symmetric", () => {
+    // rerank + per-document cap: 12 × 3 × 5 = 180 fetched → 1440 pool
+    expect(resolveCandidatePool(180, 8)).toBe(1000);
+  });
+
+  it("never drops below topK itself", () => {
+    expect(resolveCandidatePool(1500, 8)).toBe(1500);
   });
 });

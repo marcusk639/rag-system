@@ -18,3 +18,13 @@ export function resolveEfSearch(densePool: number, override?: number): number {
   );
   return Math.min(EF_SEARCH_MAX, Math.ceil(wanted));
 }
+
+/**
+ * Per-arm candidate pool for hybrid search. Capped at pgvector's ef_search
+ * maximum: beyond it the dense arm is truncated by the index anyway, and an
+ * uncapped sparse arm would then fuse a longer list against a shorter one.
+ * Never below `topK`, or the final LIMIT could not be met.
+ */
+export function resolveCandidatePool(topK: number, multiplier: number): number {
+  return Math.max(topK, Math.min(topK * multiplier, EF_SEARCH_MAX));
+}

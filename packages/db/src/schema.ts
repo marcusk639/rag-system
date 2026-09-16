@@ -384,7 +384,7 @@ export const auditLog = pgTable(
     endpoint: text("endpoint").notNull().default("ask"),
     /**
      * Best dense (cosine) similarity among retrieved chunks; null when nothing
-     * retrieved. Rows written before the `topRelevanceScore` fix hold the
+     * retrieved, 0 when every hit came from the sparse arm only. Rows written before the `topRelevanceScore` fix hold the
      * max-normalized RRF score instead, which is 1.0 for any non-empty result.
      */
     topScore: real("top_score"),

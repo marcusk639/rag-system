@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { RetrievalResult, SourceKind } from "@rag/core";
 import type { Db } from "./client.js";
-import { resolveEfSearch } from "./hnsw.js";
+import { resolveCandidatePool, resolveEfSearch } from "./hnsw.js";
 import {
   answerFeedback,
   auditLog,
@@ -564,7 +564,7 @@ export async function hybridSearch(
   const topK = opts.topK;
   // Pool size — see comments on `candidatePoolMultiplier`. Default 8× because
   // filters now run as a post-filter; selective filters demand more candidates.
-  const pool = topK * (opts.candidatePoolMultiplier ?? 8);
+  const pool = resolveCandidatePool(topK, opts.candidatePoolMultiplier ?? 8);
   const wDense = opts.weights?.dense ?? 0.7;
   const wSparse = opts.weights?.sparse ?? 0.3;
   const k = 60; // RRF constant from the original RRF paper.
