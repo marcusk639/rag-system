@@ -280,6 +280,22 @@ export class GeminiGenerator implements Generator {
     );
   }
 
+  /**
+   * Bare prompt in, text out — for auxiliary calls such as follow-up question
+   * condensation. No QA system prompt, but the SAME TRI + egress pre-flight
+   * and the same configured client as generation, so an auxiliary call can
+   * never become an ungoverned path to the provider.
+   */
+  async complete(prompt: string): Promise<string> {
+    this.preFlight(prompt);
+    const response = await this.client.models.generateContent({
+      model: this.opts.model,
+      contents: prompt,
+      config: { temperature: 0 },
+    });
+    return response.text ?? "";
+  }
+
   /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */
   screen(question: string, context: RetrievalResult[]): RetrievalResult[] {
     const screened = screenGenerationContext(
@@ -408,6 +424,17 @@ export class OpenAIGenerator implements Generator {
       this.opts.triPolicy ?? "block",
       this.opts.onTriDetected,
     );
+  }
+
+  /** Bare prompt in, text out, under the same pre-flight (see GeminiGenerator.complete). */
+  async complete(prompt: string): Promise<string> {
+    this.preFlight(prompt);
+    const response = await this.client.chat.completions.create({
+      model: this.opts.model,
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return response.choices[0]?.message.content ?? "";
   }
 
   /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */
@@ -552,6 +579,20 @@ export class ClaudeGenerator implements Generator {
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt }],
     };
+  }
+
+  /** Bare prompt in, text out, under the same pre-flight (see GeminiGenerator.complete). */
+  async complete(prompt: string): Promise<string> {
+    this.preFlight(prompt);
+    const response = await this.client.messages.create({
+      model: this.opts.model,
+      max_tokens: 1_024,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
   }
 
   /** Per-chunk TRI screening under this generator's policy (see screen-context.ts). */

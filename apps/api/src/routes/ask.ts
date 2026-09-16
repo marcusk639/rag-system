@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
-import { filterSchema, RagError, topRelevanceScore } from "@rag/core";
+import {
+  conversationHistorySchema,
+  filterSchema,
+  RagError,
+  topRelevanceScore,
+} from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
@@ -20,6 +25,8 @@ const AskBody = z.object({
   sourceIds: z.array(z.string().uuid()).optional(),
   // Shared bounded metadata filter (@rag/core/validation).
   filter: filterSchema.optional(),
+  // Prior turns; used only to rewrite a follow-up for retrieval.
+  history: conversationHistorySchema.optional(),
 });
 
 // "mcp" is intentionally excluded: that channel value is written only by the

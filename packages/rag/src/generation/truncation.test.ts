@@ -148,3 +148,55 @@ describe("Claude truncation", () => {
     );
   });
 });
+
+describe("Generator.complete — bare prompt for auxiliary calls", () => {
+  it("gemini: sends the prompt with no QA system prompt and returns the text", async () => {
+    const gen = new GeminiGenerator(base);
+    const generateContent = vi
+      .fn()
+      .mockResolvedValue({ text: " rewritten ", candidates: [{}] });
+    client(gen).models.generateContent = generateContent;
+    expect(await gen.complete("rewrite this")).toBe(" rewritten ");
+    const req = generateContent.mock.calls[0]?.[0];
+    expect(req.contents).toBe("rewrite this");
+    expect(req.config?.systemInstruction).toBeUndefined();
+  });
+
+  it("openai: single user message, no system prompt", async () => {
+    const gen = new OpenAIGenerator(base);
+    const create = vi
+      .fn()
+      .mockResolvedValue({ choices: [{ message: { content: "out" } }] });
+    client(gen).chat.completions.create = create;
+    expect(await gen.complete("p")).toBe("out");
+    expect(create.mock.calls[0]?.[0].messages).toEqual([
+      { role: "user", content: "p" },
+    ]);
+  });
+
+  it("claude: text blocks only, no system prompt", async () => {
+    const gen = new ClaudeGenerator(base);
+    const create = vi.fn().mockResolvedValue({
+      content: [
+        { type: "thinking", thinking: "hmm" },
+        { type: "text", text: "out" },
+      ],
+    });
+    client(gen).messages.create = create;
+    expect(await gen.complete("p")).toBe("out");
+    expect(create.mock.calls[0]?.[0].system).toBeUndefined();
+  });
+
+  it("applies the TRI pre-flight: an identifier in the prompt blocks before any provider call", async () => {
+    for (const Gen of [GeminiGenerator, OpenAIGenerator, ClaudeGenerator]) {
+      const gen = new Gen(base);
+      const spy = vi.fn();
+      const c = client(gen);
+      if (c.models) c.models.generateContent = spy;
+      if (c.chat) c.chat.completions.create = spy;
+      if (c.messages) c.messages.create = spy;
+      await expect(gen.complete("SSN 123-45-6789")).rejects.toThrow();
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+});

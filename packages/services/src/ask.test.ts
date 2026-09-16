@@ -486,3 +486,79 @@ describe("generator screening", () => {
     ]);
   });
 });
+
+describe("follow-up condensation (history)", () => {
+  const HISTORY = [
+    { role: "user" as const, content: "How do I set up a bookkeeping client?" },
+    { role: "assistant" as const, content: "Apply BK-CATCHUP [1]." },
+  ];
+
+  function depsWith(complete: ReturnType<typeof vi.fn>) {
+    const search = vi.fn().mockResolvedValue([retrievalResult("1")]);
+    const answer = vi.fn().mockResolvedValue({ answer: "a [1]", citations: [] });
+    async function* answerStream() {
+      yield "a [1]";
+    }
+    const deps = makeDeps({
+      generator: {
+        answer,
+        answerStream: vi.fn(answerStream),
+        complete,
+      } as unknown as ServiceDeps["generator"],
+      search,
+    });
+    return { deps, search, answer };
+  }
+
+  it("retrieves with the rewritten question but generates from the ORIGINAL one", async () => {
+    const complete = vi.fn().mockResolvedValue("How do I set up a payroll client?");
+    const { deps, search, answer } = depsWith(complete);
+
+    await askQuestion(
+      deps,
+      { question: "and for payroll?", history: HISTORY },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(search.mock.calls[0]?.[0].query).toBe("How do I set up a payroll client?");
+    expect(answer.mock.calls[0]?.[0]).toBe("and for payroll?");
+  });
+
+  it("does not call the model when there is no history", async () => {
+    const complete = vi.fn();
+    const { deps, search } = depsWith(complete);
+    await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
+    expect(complete).not.toHaveBeenCalled();
+    expect(search.mock.calls[0]?.[0].query).toBe("q");
+  });
+
+  it("falls back to the original question when condensation fails", async () => {
+    const complete = vi.fn().mockRejectedValue(new Error("blocked"));
+    const { deps, search } = depsWith(complete);
+    await askQuestion(
+      deps,
+      { question: "and for payroll?", history: HISTORY },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+    expect(search.mock.calls[0]?.[0].query).toBe("and for payroll?");
+  });
+
+  it("applies the same rewrite on the streaming path", async () => {
+    const complete = vi.fn().mockResolvedValue("rewritten");
+    const { deps, search } = depsWith(complete);
+    for await (const _ of askQuestionStream(
+      deps,
+      { question: "and payroll?", history: HISTORY },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    )) {
+      // drain
+    }
+    expect(search.mock.calls[0]?.[0].query).toBe("rewritten");
+    const streamCall = (deps.generator as unknown as { answerStream: ReturnType<typeof vi.fn> })
+      .answerStream.mock.calls[0];
+    expect(streamCall?.[0]).toBe("and payroll?");
+  });
+});

@@ -51,6 +51,12 @@ export interface Generator {
    * generation and citations, so `[N]` indices stay aligned.
    */
   screen?(question: string, context: RetrievalResult[]): RetrievalResult[];
+  /**
+   * Optional bare completion (prompt in, text out, no QA system prompt) under
+   * the generator's own egress and TRI policy. Used for auxiliary calls such
+   * as follow-up question condensation.
+   */
+  complete?(prompt: string): Promise<string>;
   answer(
     question: string,
     context: RetrievalResult[],

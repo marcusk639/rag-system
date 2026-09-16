@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { GenerationResult, Generator } from "@rag/rag";
-import { buildCitations, filterCitationsToAnswer } from "@rag/rag";
+import {
+  buildCitations,
+  contextualizeQuestion,
+  filterCitationsToAnswer,
+  type ConversationTurn,
+} from "@rag/rag";
 import type {
   AuthorizationScope,
   RetrievalResult,
@@ -46,6 +51,13 @@ export interface AskInput {
   topK?: number;
   sourceIds?: string[];
   filter?: Record<string, string | string[]>;
+  /**
+   * Prior turns of the conversation, already resolved by the transport (today
+   * the request body; later a server-side session). Used ONLY to rewrite a
+   * follow-up into a standalone RETRIEVAL query — generation always receives
+   * `question` itself. How many turns count is decided by the condenser.
+   */
+  history?: ConversationTurn[];
 }
 
 /**
@@ -225,6 +237,17 @@ function screenForGeneration(
   return deps.generator.screen(question, retrieved);
 }
 
+/**
+ * The text retrieval searches with: the question itself, or — when there is
+ * conversation history and the generator offers a bare completion — the
+ * follow-up rewritten as a standalone question. Condensation fails open.
+ */
+async function retrievalQuery(deps: AskDeps, input: AskInput): Promise<string> {
+  const complete = deps.generator.complete?.bind(deps.generator);
+  if (!complete || !input.history?.length) return input.question;
+  return contextualizeQuestion(complete, input.question, input.history);
+}
+
 async function retrieveForAnswer(
   deps: AskDeps,
   input: AskInput,
@@ -232,7 +255,11 @@ async function retrieveForAnswer(
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
 ): Promise<RetrievalResult[]> {
-  const query = buildQuery(input, defaultTopK);
+  const query = buildQuery(
+    input,
+    defaultTopK,
+    await retrievalQuery(deps, input),
+  );
   if (maxChunksPerDocument <= 0) {
     return deps.retriever.search(query, scope);
   }
@@ -246,9 +273,9 @@ async function retrieveForAnswer(
   );
 }
 
-function buildQuery(input: AskInput, defaultTopK: number) {
+function buildQuery(input: AskInput, defaultTopK: number, query: string) {
   return {
-    query: input.question,
+    query,
     topK: input.topK ?? defaultTopK,
     ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
     ...(input.filter ? { filter: input.filter } : {}),
