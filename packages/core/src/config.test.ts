@@ -442,3 +442,27 @@ describe("loadConfig — neighbour chunk expansion", () => {
     ).toThrow();
   });
 });
+
+describe("loadConfig — GENERATION_THINKING_BUDGET", () => {
+  const GEN = {
+    ...BASE_ENV,
+    GENERATION_PROVIDER: "gemini",
+    GENERATION_MODEL: "gemini-2.5-flash",
+    GEMINI_API_KEY: "k",
+  } as NodeJS.ProcessEnv;
+
+  it("is unset by default (provider default thinking)", () => {
+    expect(loadConfig(GEN).generation?.thinkingBudget).toBeUndefined();
+  });
+
+  it("reads an explicit budget, including 0", () => {
+    expect(
+      loadConfig({ ...GEN, GENERATION_THINKING_BUDGET: "0" }).generation
+        ?.thinkingBudget,
+    ).toBe(0);
+    expect(
+      loadConfig({ ...GEN, GENERATION_THINKING_BUDGET: "1024" }).generation
+        ?.thinkingBudget,
+    ).toBe(1024);
+  });
+});

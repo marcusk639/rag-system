@@ -47,6 +47,7 @@ export {
   createGenerator,
   buildCitations,
   filterCitationsToAnswer,
+  TRUNCATION_NOTICE,
   type Generator,
   type GenerationResult,
   type TriPolicy,

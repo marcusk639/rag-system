@@ -207,6 +207,12 @@ export const Config = z
          * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
          */
         maxOutputTokens: z.number().int().positive().default(2048),
+        /**
+         * Gemini only. Thinking tokens count against `maxOutputTokens`, so an
+         * unset (dynamic) budget can cut a long answer short. Leave unset for
+         * the provider default; set via `GENERATION_THINKING_BUDGET`.
+         */
+        thinkingBudget: z.number().int().nonnegative().optional(),
 
         /**
          * Base URL for an OpenAI-compatible generation endpoint. Set this to
@@ -717,6 +723,9 @@ export function loadConfig(
             model: env.GENERATION_MODEL,
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
+              : undefined,
+            thinkingBudget: env.GENERATION_THINKING_BUDGET
+              ? Number(env.GENERATION_THINKING_BUDGET)
               : undefined,
             baseURL: env.GENERATION_BASE_URL || undefined,
             apiKey: env.GENERATION_API_KEY || undefined,

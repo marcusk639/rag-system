@@ -241,6 +241,17 @@ export async function buildCoreDeps(
           ? { baseURL: config.generation.baseURL }
           : {}),
         maxOutputTokens: config.generation.maxOutputTokens,
+        ...(config.generation.thinkingBudget !== undefined
+          ? { thinkingBudget: config.generation.thinkingBudget }
+          : {}),
+        onTruncated: () =>
+          logger.warn(
+            {
+              marker: "generation.truncated",
+              maxOutputTokens: config.generation?.maxOutputTokens,
+            },
+            "generated answer hit the output-token limit and was cut off",
+          ),
         // The same shared policy the embedder, audit sink, and reranker use.
         // Without it the generator built its own from the environment — same
         // allow-list in practice, but nothing guaranteed it.

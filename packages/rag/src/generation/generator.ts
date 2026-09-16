@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenAI } from "@google/genai";
+import { FinishReason, GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import {
   ComplianceError,
@@ -110,6 +110,14 @@ Not covered by the documents: what to do when the client already exists in Quick
 export type { TriPolicy, DroppedContext } from "./screen-context.js";
 
 /** Options shared by every concrete `Generator` in this module. */
+/**
+ * Appended to an answer the provider cut off at its output-token limit. A
+ * procedure truncated mid-step reads as complete otherwise — the worst shape
+ * for an answer users are told to follow near-verbatim.
+ */
+export const TRUNCATION_NOTICE =
+  "\n\n_Answer cut off: the model reached its output limit. Ask a narrower question to get the rest._";
+
 export interface GeneratorOptions {
   apiKey: string;
   model: string;
@@ -146,6 +154,14 @@ export interface GeneratorOptions {
    * Called when `screen()` removes TRI-bearing chunks from the context, so the
    * operator can find and fix the source documents.
    */
+  /** Called whenever a provider reports the answer hit the output-token limit. */
+  onTruncated?: () => void;
+  /**
+   * Gemini only: explicit thinking budget in tokens. Thinking tokens draw on
+   * the same output budget as the answer, so an unset (dynamic) budget can
+   * truncate a long answer. `undefined` leaves the provider default.
+   */
+  thinkingBudget?: number;
   onContextDropped?: (dropped: DroppedContext[]) => void;
 }
 
@@ -191,6 +207,16 @@ function runPreFlight(
     }
   }
   egressPolicy.assertAllowed(endpoint);
+}
+
+function withTruncationNotice(
+  answer: string,
+  truncated: boolean,
+  onTruncated: (() => void) | undefined,
+): string {
+  if (!truncated) return answer;
+  onTruncated?.();
+  return answer + TRUNCATION_NOTICE;
 }
 
 // ----------------------------------------------------------------------------
@@ -277,16 +303,29 @@ export class GeminiGenerator implements Generator {
     const response = await this.client.models.generateContent({
       model: this.opts.model,
       contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        temperature: 0.2,
-        maxOutputTokens: this.opts.maxOutputTokens,
-      },
+      config: this.config(),
     });
 
+    const truncated =
+      response.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS;
     return {
-      answer: response.text ?? "",
+      answer: withTruncationNotice(
+        response.text ?? "",
+        truncated,
+        this.opts.onTruncated,
+      ),
       citations: buildCitations(context),
+    };
+  }
+
+  private config() {
+    return {
+      systemInstruction: SYSTEM_PROMPT,
+      temperature: 0.2,
+      maxOutputTokens: this.opts.maxOutputTokens,
+      ...(this.opts.thinkingBudget !== undefined
+        ? { thinkingConfig: { thinkingBudget: this.opts.thinkingBudget } }
+        : {}),
     };
   }
 
@@ -299,15 +338,18 @@ export class GeminiGenerator implements Generator {
     const stream = await this.client.models.generateContentStream({
       model: this.opts.model,
       contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        temperature: 0.2,
-        maxOutputTokens: this.opts.maxOutputTokens,
-      },
+      config: this.config(),
     });
+    let truncated = false;
     for await (const chunk of stream) {
       const text = chunk.text;
       if (text) yield text;
+      if (chunk.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS) {
+        truncated = true;
+      }
+    }
+    if (truncated) {
+      yield withTruncationNotice("", true, this.opts.onTruncated);
     }
   }
 }
@@ -397,8 +439,13 @@ export class OpenAIGenerator implements Generator {
         { role: "user", content: prompt },
       ],
     });
+    const choice = response.choices[0];
     return {
-      answer: response.choices[0]?.message.content ?? "",
+      answer: withTruncationNotice(
+        choice?.message.content ?? "",
+        choice?.finish_reason === "length",
+        this.opts.onTruncated,
+      ),
       citations: buildCitations(context),
     };
   }
@@ -419,9 +466,14 @@ export class OpenAIGenerator implements Generator {
         { role: "user", content: prompt },
       ],
     });
+    let truncated = false;
     for await (const chunk of stream) {
       const text = chunk.choices[0]?.delta?.content;
       if (text) yield text;
+      if (chunk.choices[0]?.finish_reason === "length") truncated = true;
+    }
+    if (truncated) {
+      yield withTruncationNotice("", true, this.opts.onTruncated);
     }
   }
 }
@@ -532,7 +584,14 @@ export class ClaudeGenerator implements Generator {
       .map((block) => block.text)
       .join("");
 
-    return { answer, citations: buildCitations(context) };
+    return {
+      answer: withTruncationNotice(
+        answer,
+        response.stop_reason === "max_tokens",
+        this.opts.onTruncated,
+      ),
+      citations: buildCitations(context),
+    };
   }
 
   async *answerStream(
@@ -546,13 +605,22 @@ export class ClaudeGenerator implements Generator {
     // `thinking_delta` blocks, and yielding those would put reasoning into an
     // answer whose citations are an audit trail — the SSE surface must carry
     // exactly what `answer()` would have returned.
+    let truncated = false;
     for await (const event of stream) {
       if (
         event.type === "content_block_delta" &&
         event.delta.type === "text_delta"
       ) {
         yield event.delta.text;
+      } else if (
+        event.type === "message_delta" &&
+        event.delta.stop_reason === "max_tokens"
+      ) {
+        truncated = true;
       }
+    }
+    if (truncated) {
+      yield withTruncationNotice("", true, this.opts.onTruncated);
     }
   }
 }
