@@ -69,7 +69,10 @@ export interface GenerationResult {
     url?: string;
     /** True when the original file can be downloaded (GET /documents/:id/download). */
     downloadable: boolean;
+    /** The document's best-ranked retrieved chunk. */
     chunkId: string;
+    /** Every retrieved chunk from this document, in reading order. */
+    chunkIds: string[];
     score: number;
   }>;
 }

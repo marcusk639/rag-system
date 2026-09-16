@@ -8,7 +8,10 @@ export interface Citation {
   url?: string;
   /** True when the original file can be downloaded via GET /documents/:id/download. */
   downloadable?: boolean;
+  /** The document's best-ranked chunk. One citation is emitted per document. */
   chunkId: string;
+  /** Every retrieved chunk from the document, in reading order. */
+  chunkIds?: string[];
   score: number;
 }
 

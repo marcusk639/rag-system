@@ -177,7 +177,12 @@ async function ask(
   return {
     answer: result.answer,
     // Faithful to what the answer actually cites, not everything retrieved.
-    citations: filterCitationsToAnswer(result.answer, result.citations),
+    // Built here, from the same `retrieved` the generator saw, so the
+    // streaming and non-streaming paths cannot drift apart.
+    citations: filterCitationsToAnswer(
+      result.answer,
+      buildCitations(retrieved),
+    ),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,

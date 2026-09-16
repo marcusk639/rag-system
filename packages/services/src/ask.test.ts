@@ -78,7 +78,7 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
@@ -109,7 +109,9 @@ describe("askQuestion", () => {
     expect(answer).toHaveBeenCalledWith("q", retrieved);
     expect(result).toEqual({
       answer: "grounded [1]",
-      citations,
+      // Citations are built by the service from `retrieved` (not threaded from
+      // the generator) so /ask and /ask/stream cannot drift apart.
+      citations: [expect.objectContaining(citations[0])],
       retrieved,
       reviewStatus: "draft_requires_practitioner_review",
       disclaimer: expect.any(String),
@@ -124,14 +126,14 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
       {
         index: 2,
         documentId: "doc-2",
-        title: "Doc 2",
+        title: "Doc doc-2",
         chunkId: "chunk-2",
         score: 0.9,
       },
@@ -152,7 +154,27 @@ describe("askQuestion", () => {
       ADMIN_SCOPE,
     );
 
-    expect(result.citations).toEqual([citations[0]]);
+    expect(result.citations).toEqual([expect.objectContaining(citations[0])]);
+  });
+
+  it("ignores citations a generator returns that do not match what was retrieved", async () => {
+    const retrieved = [retrievalResult("1")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+    const answer = vi.fn().mockResolvedValue({
+      answer: "grounded [1]",
+      citations: [
+        { index: 1, documentId: "not-retrieved", title: "X", chunkId: "x", score: 1 },
+      ],
+    });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
+
+    expect(result.citations.map((c) => c.documentId)).toEqual(["doc-1"]);
+    expect(result.citations[0]?.chunkIds).toEqual(["chunk-1"]);
   });
 
   it("uses an explicit topK over the default and forwards sourceIds/filter", async () => {
@@ -214,7 +236,7 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
