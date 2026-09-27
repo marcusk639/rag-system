@@ -7,6 +7,31 @@ Inputs: prior-session memory (claude-mem, token-optimizer wiki), `docs/PILOT-LAU
 ingest → retrieve → generate code path, and the `llm-application-dev` plugin (wshobson/agents
 v2.0.6) skills as an external best-practice checklist.
 
+> **Superseded — read `RAG-REVIEW-2026-09-16.md` §11 first.**
+>
+> This document was written on `fix/rag-retrieval-review`, **before** the
+> implementation work that followed on `fix/rag-review-findings`. Its analysis
+> and its "Defects fixed on this branch" section remain accurate for the five
+> commits that branch carried.
+>
+> Its **"Recommended next changes"** section below is **stale**: most of those
+> recommendations have since been implemented. Per-item status, verified against
+> the code on `fix/rag-review-findings`:
+>
+> | #   | Recommendation                                                | Status                                                                                                                                                                              |
+> | --- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | 1   | Follow-up questions / conversation memory                     | **Done** — `631c5c5` (ask), `7591f9e` (web BFF), `799cce8` (Teams bot)                                                                                                              |
+> | 2   | Empty-retrieval refusal never fires                           | **Done, opt-in** — `bd53ba9` adds a dense-similarity floor; `RETRIEVAL_MIN_DENSE_SIMILARITY` is unset (off) by default and must be tuned from `audit_log.top_score` before enabling |
+> | 3   | Wire `corpus-cpa.ts` into `pnpm eval`                         | **Done** — `cd95f55`; `e05f8e4` adds `pnpm eval:gold`                                                                                                                               |
+> | 4   | Calibrated faithfulness judge (100+ labelled, TPR/TNR ≥ 0.85) | **Still open** — deferred; the credentialed-CPA gold set (constraint C2) remains the bottleneck                                                                                     |
+> | 5   | Cap `topK` on `/ask` separately from `/search`                | **Done** — `MAX_ASK_TOP_K = 30` (`packages/core/src/validation.ts`); `/search` still allows 100                                                                                     |
+> | 6   | Reranking                                                     | **Prerequisites only** — `36ce4f7` finished the wire contract, score mapping and compliance gating; `RERANK_PROVIDER=none` is still the default, so no reranker runs                |
+> | 7   | Dormant redaction gap (`document.tables` never redacted)      | **Done** — `f09bb3c`; `content-safety.ts` now redacts `tables[].headers/rows` and the title                                                                                         |
+> | 8   | Doc drift                                                     | **Done** — `7ad7d39`                                                                                                                                                                |
+>
+> Only items 4 and 6 are still outstanding. Treat §11 of
+> `RAG-REVIEW-2026-09-16.md` as the status of record.
+
 ## What the system is for
 
 A permission-scoped knowledge base over one CPA firm's internal SharePoint SOPs (pilot: 47 Class A
@@ -54,7 +79,7 @@ signal. Once a week of new `top_score` values exists, set it from the observed d
 gemini-embedding-001 similarities (irrelevant matches commonly sit well above 0.3). Rows from before
 the fix hold 1.0 and are simply never flagged.
 
-## Recommended next changes (not implemented — need a decision or data)
+## Recommended next changes (as assessed on 2026-09-16 — see the status table above)
 
 Ordered by pilot impact.
 

@@ -71,15 +71,16 @@ A well-cross-linked set; read in this order.
 
 ## Current — reviews and analysis
 
-| Document                                                                                 | Covers                                                            |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`RAG-REVIEW-2026-09-16.md`](./RAG-REVIEW-2026-09-16.md)                                 | Latest end-to-end review: 42 findings, fixes and deferrals (§11)  |
-| [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) | End-to-end defect review, severity-scored. Several fixed          |
-| [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md)                           | Standing backlog with resolution history                          |
-| [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md)             | This corpus, reviewed                                             |
-| [`QUEUE-ARCHITECTURE-REVIEW.md`](./QUEUE-ARCHITECTURE-REVIEW.md)                         | Advisory: keep pg-boss. Still valid                               |
-| [`HOOK-INJECTION-FINDINGS.md`](./HOOK-INJECTION-FINDINGS.md)                             | Tooling security investigation, self-corrected                    |
-| [`CPA-READINESS-ASSESSMENT-2026-07-08.md`](./CPA-READINESS-ASSESSMENT-2026-07-08.md)     | Broad gap audit. Many items since resolved; cites one missing doc |
+| Document                                                                                 | Covers                                                                    |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`RAG-REVIEW-2026-09-16.md`](./RAG-REVIEW-2026-09-16.md)                                 | Latest end-to-end review: 42 findings, fixes and deferrals (§11)          |
+| [`RAG-CRITICAL-REVIEW-2026-09-16.md`](./RAG-CRITICAL-REVIEW-2026-09-16.md)               | Superseded by the above; retrieval-specific analysis, status table at top |
+| [`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md) | End-to-end defect review, severity-scored. Several fixed                  |
+| [`ISSUES-AND-OPTIMIZATIONS.md`](./ISSUES-AND-OPTIMIZATIONS.md)                           | Standing backlog with resolution history                                  |
+| [`DOCUMENTATION-REVIEW-2026-08-03.md`](./DOCUMENTATION-REVIEW-2026-08-03.md)             | This corpus, reviewed                                                     |
+| [`QUEUE-ARCHITECTURE-REVIEW.md`](./QUEUE-ARCHITECTURE-REVIEW.md)                         | Advisory: keep pg-boss. Still valid                                       |
+| [`HOOK-INJECTION-FINDINGS.md`](./HOOK-INJECTION-FINDINGS.md)                             | Tooling security investigation, self-corrected                            |
+| [`CPA-READINESS-ASSESSMENT-2026-07-08.md`](./CPA-READINESS-ASSESSMENT-2026-07-08.md)     | Broad gap audit. Many items since resolved; cites one missing doc         |
 
 ## Active design and plans (2026-08)
 
