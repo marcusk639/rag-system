@@ -24,9 +24,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.parsing import _is_unsupported_format_error
 from app.main import (
     _GENERIC_MIMES,
-    _is_unsupported_format_error,
     app,
 )
 

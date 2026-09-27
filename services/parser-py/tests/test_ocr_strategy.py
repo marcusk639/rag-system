@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
+from app import main, parsing
 
 client = TestClient(main.app)
 
@@ -109,6 +109,6 @@ def test_ocr_busy_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
         def release(self) -> None:  # pragma: no cover - never acquired
             raise AssertionError("released a slot that was never acquired")
 
-    monkeypatch.setattr(main, "_OCR_SLOTS", Full())
+    monkeypatch.setattr(parsing, "_OCR_SLOTS", Full())
     resp = _post_pdf()
     assert resp.status_code == 503
