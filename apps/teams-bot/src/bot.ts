@@ -19,11 +19,7 @@ import {
   resolveUserOid,
 } from "./auth.js";
 import { KbUserFacingError, askKb, submitFeedback } from "./rag-client.js";
-import type {
-  AskAnswer,
-  FeedbackRating,
-  HistoryTurn,
-} from "./rag-client.js";
+import type { AskAnswer, FeedbackRating, HistoryTurn } from "./rag-client.js";
 import {
   FEEDBACK_SUBMIT_KIND,
   answerCard,
@@ -33,6 +29,8 @@ import {
 } from "./cards.js";
 import { createProductionScopeDeps, mintScope } from "./scope.js";
 import type { BotConfig } from "./config.js";
+import { createLogger } from "./logger.js";
+import type { Logger } from "./logger.js";
 
 /** Which flavor of Teams conversation the asker is in. Drives both the
  * member-roster lookup and which scope the answer is restricted to. */
@@ -111,6 +109,13 @@ export interface BotDeps {
    * completes. Production: the same `MemoryStorage` instance the
    * `TeamsSSOTokenExchangeMiddleware` deduplicates against. */
   storage: Storage;
+  /** Structured logger for failures (N-6: routes teams-bot errors into the
+   * same pino stream as the API instead of `console.*`). Optional so
+   * existing test doubles that build a `BotDeps` object don't need to
+   * supply one — the constructor falls back to a default logger when it's
+   * omitted. Production wiring (`createProductionBotDeps` below) always
+   * supplies the real one built in `index.ts`. */
+  logger?: Logger;
 }
 
 const SIGN_IN_FALLBACK_MESSAGE =
@@ -214,10 +219,12 @@ function classifyConversation(context: TurnContext): ConversationKind {
  */
 export class KbBot extends TeamsActivityHandler {
   private readonly deps: BotDeps;
+  private readonly logger: Logger;
 
   constructor(deps: BotDeps) {
     super();
     this.deps = deps;
+    this.logger = deps.logger ?? createLogger();
 
     this.onMessage(async (context, next) => {
       await this.handleMessage(context);
@@ -329,11 +336,13 @@ export class KbBot extends TeamsActivityHandler {
     if (!key) return [];
     try {
       const stored = (await this.deps.storage.read([key]))[key] as
-        | { turns?: HistoryTurn[] }
-        | undefined;
+        { turns?: HistoryTurn[] } | undefined;
       return Array.isArray(stored?.turns) ? stored.turns : [];
     } catch (error) {
-      console.error("KbBot: failed to read conversation history", error);
+      this.logger.error(
+        { err: error },
+        "KbBot: failed to read conversation history",
+      );
       return [];
     }
   }
@@ -358,7 +367,10 @@ export class KbBot extends TeamsActivityHandler {
       await this.deps.storage.write({ [key]: { turns } });
     } catch (error) {
       // Losing history only costs the next follow-up its context.
-      console.error("KbBot: failed to store conversation history", error);
+      this.logger.error(
+        { err: error },
+        "KbBot: failed to store conversation history",
+      );
     }
   }
 
@@ -386,7 +398,7 @@ export class KbBot extends TeamsActivityHandler {
         await context.sendActivity(FEEDBACK_SIGN_IN_MESSAGE);
         return;
       }
-      console.error("KbBot: failed to record feedback", error);
+      this.logger.error({ err: error }, "KbBot: failed to record feedback");
       await context.sendActivity(FEEDBACK_FAILED_MESSAGE);
     }
   }
@@ -410,7 +422,10 @@ export class KbBot extends TeamsActivityHandler {
       } catch (error) {
         // Losing the pending question only costs the user a re-ask after
         // sign-in — still send the sign-in card.
-        console.error("KbBot: failed to store pending question", error);
+        this.logger.error(
+          { err: error },
+          "KbBot: failed to store pending question",
+        );
       }
     }
 
@@ -418,7 +433,7 @@ export class KbBot extends TeamsActivityHandler {
       const card = await this.deps.getSignInCard(context);
       await context.sendActivity({ attachments: [card] });
     } catch (error) {
-      console.error("KbBot: failed to build sign-in card", error);
+      this.logger.error({ err: error }, "KbBot: failed to build sign-in card");
       await context.sendActivity({
         attachments: [errorCard(SIGN_IN_FALLBACK_MESSAGE)],
       });
@@ -457,7 +472,7 @@ export class KbBot extends TeamsActivityHandler {
       try {
         oid = await this.deps.exchangeSsoTokenForOid(context, ssoToken);
       } catch (error) {
-        console.error("KbBot: token exchange failed", error);
+        this.logger.error({ err: error }, "KbBot: token exchange failed");
         oid = null;
       }
     }
@@ -489,7 +504,10 @@ export class KbBot extends TeamsActivityHandler {
         }
         await this.deps.storage.delete([key]);
       } catch (error) {
-        console.error("KbBot: failed to read pending question", error);
+        this.logger.error(
+          { err: error },
+          "KbBot: failed to read pending question",
+        );
       }
     }
 
@@ -512,7 +530,7 @@ export class KbBot extends TeamsActivityHandler {
       const card = await this.deps.getSignInCard(context);
       await context.sendActivity({ attachments: [card] });
     } catch (error) {
-      console.error("KbBot: failed to build sign-in card", error);
+      this.logger.error({ err: error }, "KbBot: failed to build sign-in card");
       await context.sendActivity({
         attachments: [errorCard(SIGN_IN_FALLBACK_MESSAGE)],
       });
@@ -531,12 +549,13 @@ export class KbBot extends TeamsActivityHandler {
     }
 
     // Any other error (DB failure, unexpected exception, etc.): log full
-    // detail server-side only. The user-facing card is always the generic
-    // message — never the raw error, which could leak internal details
-    // (connection strings, stack traces, etc.). `no-console` is only a warn
-    // in this repo's eslint config; this app has no pino logger wired yet
-    // (tracked separately from this task).
-    console.error("KbBot: unexpected error handling message", error);
+    // detail server-side only via the structured logger. The user-facing
+    // card is always the generic message — never the raw error, which
+    // could leak internal details (connection strings, stack traces, etc.).
+    this.logger.error(
+      { err: error },
+      "KbBot: unexpected error handling message",
+    );
     await context.sendActivity({
       attachments: [errorCard(GENERIC_ERROR_MESSAGE)],
     });
@@ -625,6 +644,7 @@ export function createTeamsGetMemberOids(
 export function createProductionBotDeps(
   config: BotConfig,
   storage: Storage,
+  logger: Logger,
 ): BotDeps {
   const connectionName = config.botOauthConnectionName;
   const authDeps = createProductionAuthDeps(connectionName);
@@ -644,5 +664,6 @@ export function createProductionBotDeps(
     submitFeedback: (input) =>
       submitFeedback(input, { ragApiUrl: config.ragApiUrl, fetch }),
     storage,
+    logger,
   };
 }

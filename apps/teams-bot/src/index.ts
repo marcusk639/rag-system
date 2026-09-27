@@ -10,6 +10,7 @@ import {
 import { loadBotConfig } from "./config.js";
 import { KbBot, createProductionBotDeps } from "./bot.js";
 import { errorCard } from "./cards.js";
+import { createLogger } from "./logger.js";
 
 /**
  * Entry point for the Teams KB bot. Reads config from env, builds the
@@ -31,6 +32,8 @@ import { errorCard } from "./cards.js";
  */
 
 const config = loadBotConfig(process.env);
+
+const logger = createLogger();
 
 const credentialsFactory = new ConfigurationServiceClientCredentialFactory({
   MicrosoftAppId: config.microsoftAppId,
@@ -65,17 +68,17 @@ adapter.use(
 // error thrown by botbuilder's own turn pipeline before/after the handler
 // runs). Never leak the raw error to the user — always the generic card.
 adapter.onTurnError = async (context, error) => {
-  console.error("Teams bot: unhandled turn error", error);
+  logger.error({ err: error }, "Teams bot: unhandled turn error");
   try {
     await context.sendActivity({
       attachments: [errorCard("Something went wrong.")],
     });
   } catch (sendError) {
-    console.error("Teams bot: failed to send error card", sendError);
+    logger.error({ err: sendError }, "Teams bot: failed to send error card");
   }
 };
 
-const bot = new KbBot(createProductionBotDeps(config, storage));
+const bot = new KbBot(createProductionBotDeps(config, storage, logger));
 
 const app = express();
 // Required by CloudAdapter.process: it expects `req.body` to already be a
@@ -93,5 +96,8 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.listen(config.port, () => {
-  console.log(`Teams bot listening on port ${config.port}`);
+  logger.info(
+    { port: config.port },
+    `Teams bot listening on port ${config.port}`,
+  );
 });
