@@ -4,32 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { GitMarkdownConnector } from "./index.js";
+import { GitMarkdownConnector, gitEnv } from "./index.js";
 
 const LOGGER = pino({ level: "silent" });
 
-// Strip inherited git env vars (GIT_DIR et al). Without this the fixture repo
-// commands hit whatever repository an ambient git process is working on, so the
-// suite fails when run from inside a git hook such as pre-push.
-const GIT_ENV = (() => {
-  const env = { ...process.env };
-  for (const key of [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_PREFIX",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-  ]) {
-    delete env[key];
-  }
-  return env;
-})();
-
 function git(repoPath: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: repoPath, env: GIT_ENV })
+  return execFileSync("git", args, { cwd: repoPath, env: gitEnv() })
     .toString()
     .trim();
 }

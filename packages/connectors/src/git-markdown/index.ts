@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
  * git at THAT repository, silently overriding `cwd`. Strip them so every call
  * below acts on `repoPath` and nothing else.
  */
-function gitEnv(): NodeJS.ProcessEnv {
+export function gitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of [
     "GIT_DIR",
