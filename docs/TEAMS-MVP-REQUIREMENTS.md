@@ -104,6 +104,10 @@ Sideloading a custom app requires the tenant to permit it. This has never been
 confirmed either way. Worth checking early — if it is disabled, §1 and §2 do not
 help, and the answer changes the plan rather than delaying it.
 
+A ready-to-send draft, including the fallback where an admin publishes the
+package to the org catalogue instead, is at
+[`EMAIL-IT-TEAMS-APP-UPLOAD.md`](./EMAIL-IT-TEAMS-APP-UPLOAD.md).
+
 ---
 
 ## Required — but not blocking Teams specifically
