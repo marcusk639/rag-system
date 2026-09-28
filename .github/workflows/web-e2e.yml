@@ -29,8 +29,55 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # The API and the ingestion setup need a real database and a real parser.
+    # Without them `pnpm --filter @rag/api start` dies on connect and Playwright
+    # reports only "Process from config.webServer was not able to start", which
+    # is why this workflow had never completed a run. Mirrors e2e.yml.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: rag
+          POSTGRES_DB: rag
+          POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://rag:rag@localhost:5432/rag
+      PARSER_URL: http://localhost:8000
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Apply pgvector init bootstrap to Postgres
+        run: |
+          PGPASSWORD=rag psql -h localhost -U rag -d rag -f docker/init-db.sql
+
+      - name: Build parser image
+        run: docker build -t rag-parser:web-e2e services/parser-py
+
+      - name: Run parser container
+        run: |
+          docker run -d --name rag-parser \
+            -p 8000:8000 \
+            -e PYTHONUNBUFFERED=1 \
+            rag-parser:web-e2e
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "parser ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "parser did not become ready" >&2
+          docker logs rag-parser
+          exit 1
 
       - uses: pnpm/action-setup@v4
         with:
