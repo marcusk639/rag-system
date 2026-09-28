@@ -81,7 +81,8 @@ export function scoreGoldRun(
       coverage.total++;
       if (refused) coverage.correctlyRefused++;
     } else {
-      for (const k of ks) recall[k]!.push(recallAtK(o.retrievedExternalIds, q.relevant, k));
+      for (const k of ks)
+        recall[k]!.push(recallAtK(o.retrievedExternalIds, q.relevant, k));
       rr.push(reciprocalRank(o.retrievedExternalIds, q.relevant));
       if (refused) wrongRefusals.push(q.id);
     }

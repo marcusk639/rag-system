@@ -10,7 +10,13 @@ export function openTestDb(): { db: Db; close: () => Promise<void> } {
   return { db, close };
 }
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1", "postgres"]);
+const LOCAL_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "[::1]",
+  "::1",
+  "postgres",
+]);
 
 /**
  * Refuse to run destructive test setup against anything but a local database.

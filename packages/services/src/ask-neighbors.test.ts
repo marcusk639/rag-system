@@ -155,7 +155,9 @@ describe("relevance floor then neighbour expansion", () => {
       async (_db: unknown, docId: string, ordinals: number[]) =>
         ordinals.map((o) => row(docId, o)),
     );
-    const answer = vi.fn().mockResolvedValue({ answer: "a [1]", citations: [] });
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "a [1]", citations: [] });
     const d = {
       ...deps(),
       retriever: {
@@ -174,4 +176,3 @@ describe("relevance floor then neighbour expansion", () => {
     expect(getChunksByOrdinalsMock).toHaveBeenCalledTimes(1);
   });
 });
-

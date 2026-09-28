@@ -81,14 +81,7 @@ describe("scoreGoldRun", () => {
   it("counts truncated answers", () => {
     const report = scoreGoldRun(
       [q("a", ["doc-1"])],
-      [
-        obs(
-          "a",
-          ["doc-1"],
-          ["doc-1"],
-          `Step [1]${TRUNCATION_NOTICE}`,
-        ),
-      ],
+      [obs("a", ["doc-1"], ["doc-1"], `Step [1]${TRUNCATION_NOTICE}`)],
     );
     expect(report.truncated).toEqual(["a"]);
   });

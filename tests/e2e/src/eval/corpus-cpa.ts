@@ -303,6 +303,9 @@ export const EVAL_KEYWORD_QUESTIONS_CPA: EvalQuestion[] = [
   { id: "cpa-k01", query: "BK-CATCHUP", relevant: ["time-coding"] },
   { id: "cpa-k02", query: "ADV-PLAN", relevant: ["time-coding"] },
   { id: "cpa-k03", query: "BOIR FinCEN", relevant: ["boi-filing"] },
-  { id: "cpa-k04", query: "UPE", relevant: ["k1-treatment", "staff-onboarding"] },
+  {
+    id: "cpa-k04",
+    query: "UPE",
+    relevant: ["k1-treatment", "staff-onboarding"],
+  },
 ];
-

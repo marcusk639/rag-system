@@ -99,10 +99,21 @@ describe("cards", () => {
     });
     const actions = att.content.actions as Array<Record<string, unknown>>;
     expect(actions).toHaveLength(2);
-    expect(actions.map((a) => a.type)).toEqual(["Action.Submit", "Action.Submit"]);
+    expect(actions.map((a) => a.type)).toEqual([
+      "Action.Submit",
+      "Action.Submit",
+    ]);
     expect(actions.map((a) => a.data)).toEqual([
-      { kind: "rag-feedback", answerId: "11111111-1111-4111-8111-111111111111", rating: "helpful" },
-      { kind: "rag-feedback", answerId: "11111111-1111-4111-8111-111111111111", rating: "not_helpful" },
+      {
+        kind: "rag-feedback",
+        answerId: "11111111-1111-4111-8111-111111111111",
+        rating: "helpful",
+      },
+      {
+        kind: "rag-feedback",
+        answerId: "11111111-1111-4111-8111-111111111111",
+        rating: "not_helpful",
+      },
     ]);
   });
 
@@ -115,7 +126,13 @@ describe("cards", () => {
     const att = answerCard({
       answer: "A",
       citations: [
-        { index: 1, title: "Intake SOP", documentId: "d1", downloadable: false, modifiedAt: "2025-11-04" },
+        {
+          index: 1,
+          title: "Intake SOP",
+          documentId: "d1",
+          downloadable: false,
+          modifiedAt: "2025-11-04",
+        },
       ],
       disclaimer: "d",
     });

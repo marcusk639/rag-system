@@ -39,7 +39,11 @@ export async function recordIngestFailure(
     });
   } catch (logErr) {
     log.error(
-      { err: logErr, externalId: row.externalId, marker: "ingest.failure_log_failed" },
+      {
+        err: logErr,
+        externalId: row.externalId,
+        marker: "ingest.failure_log_failed",
+      },
       "could not record ingest failure",
     );
   }
@@ -75,7 +79,12 @@ export async function retryFailedDocuments(
         { err, externalId, marker: "ingest.retry_failed" },
         "retry of a previously failed document failed again",
       );
-      await recordIngestFailure(db, log, { sourceId, externalId, docClass }, err);
+      await recordIngestFailure(
+        db,
+        log,
+        { sourceId, externalId, docClass },
+        err,
+      );
     }
   }
   if (externalIds.length > 0) {

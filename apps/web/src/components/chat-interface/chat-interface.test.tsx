@@ -106,7 +106,14 @@ describe("ChatInterface data-testid hooks", () => {
           role: "assistant",
           content: "Answer [1].",
           citations: [
-            { index: 1, documentId: "d", title: "Intake SOP", chunkId: "c", score: 1, modifiedAt: "2025-11-04" },
+            {
+              index: 1,
+              documentId: "d",
+              title: "Intake SOP",
+              chunkId: "c",
+              score: 1,
+              modifiedAt: "2025-11-04",
+            },
           ],
         })}
         selectedSource={null}
@@ -126,6 +133,8 @@ describe("ChatInterface data-testid hooks", () => {
         updateMessage={noop}
       />,
     );
-    expect(screen.getByRole("button", { name: "Send question" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Send question" }),
+    ).toBeInTheDocument();
   });
 });

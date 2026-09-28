@@ -74,8 +74,16 @@ describe("KbBot", () => {
   it("history: a follow-up in the same conversation sends the previous exchange", async () => {
     const askKb = vi
       .fn()
-      .mockResolvedValueOnce({ answer: "Apply BK-CATCHUP [1].", citations: [], disclaimer: "d" })
-      .mockResolvedValueOnce({ answer: "Payroll uses PR-SETUP [1].", citations: [], disclaimer: "d" });
+      .mockResolvedValueOnce({
+        answer: "Apply BK-CATCHUP [1].",
+        citations: [],
+        disclaimer: "d",
+      })
+      .mockResolvedValueOnce({
+        answer: "Payroll uses PR-SETUP [1].",
+        citations: [],
+        disclaimer: "d",
+      });
     const deps = makeDeps({ askKb });
     const bot = new KbBot(deps);
     const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
@@ -100,10 +108,19 @@ describe("KbBot", () => {
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            releaseFirst = () => resolve({ answer: "first answer", citations: [], disclaimer: "d" });
+            releaseFirst = () =>
+              resolve({
+                answer: "first answer",
+                citations: [],
+                disclaimer: "d",
+              });
           }),
       )
-      .mockResolvedValueOnce({ answer: "second answer", citations: [], disclaimer: "d" })
+      .mockResolvedValueOnce({
+        answer: "second answer",
+        citations: [],
+        disclaimer: "d",
+      })
       .mockResolvedValue({ answer: "third", citations: [], disclaimer: "d" });
     const deps = makeDeps({ askKb });
     const bot = new KbBot(deps);
@@ -116,14 +133,27 @@ describe("KbBot", () => {
     await first;
     await adapter.send(dm("third question"));
 
-    const history = (askKb.mock.calls[2] as unknown as [{ history: Array<{ content: string }> }])[0].history;
+    const history = (
+      askKb.mock.calls[2] as unknown as [
+        { history: Array<{ content: string }> },
+      ]
+    )[0].history;
     expect(history.map((t) => t.content)).toEqual(
-      expect.arrayContaining(["first question", "first answer", "second question", "second answer"]),
+      expect.arrayContaining([
+        "first question",
+        "first answer",
+        "second question",
+        "second answer",
+      ]),
     );
   });
 
   it("history: never shared between users in the same conversation", async () => {
-    const askKb = vi.fn(async () => ({ answer: "A", citations: [], disclaimer: "d" }));
+    const askKb = vi.fn(async () => ({
+      answer: "A",
+      citations: [],
+      disclaimer: "d",
+    }));
     const deps = makeDeps({ askKb });
     const bot = new KbBot(deps);
     const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
@@ -131,18 +161,29 @@ describe("KbBot", () => {
     await adapter.send(dm("first", "user-1"));
     await adapter.send(dm("second", "user-2"));
 
-    expect((askKb.mock.calls[1] as unknown as [{ history?: unknown[] }])[0].history ?? []).toEqual([]);
+    expect(
+      (askKb.mock.calls[1] as unknown as [{ history?: unknown[] }])[0]
+        .history ?? [],
+    ).toEqual([]);
   });
 
   it("history: forwards at most the 12 most recent turns", async () => {
-    const askKb = vi.fn(async () => ({ answer: "A", citations: [], disclaimer: "d" }));
+    const askKb = vi.fn(async () => ({
+      answer: "A",
+      citations: [],
+      disclaimer: "d",
+    }));
     const deps = makeDeps({ askKb });
     const bot = new KbBot(deps);
     const adapter = new TestAdapter(async (ctx) => bot.run(ctx));
 
     for (let i = 0; i < 10; i++) await adapter.send(dm(`q${i}`));
 
-    const last = (askKb.mock.calls[9] as unknown as [{ history: Array<{ content: string }> }])[0];
+    const last = (
+      askKb.mock.calls[9] as unknown as [
+        { history: Array<{ content: string }> },
+      ]
+    )[0];
     expect(last.history).toHaveLength(12);
     expect(last.history[11]?.content).toBe("A");
     expect(last.history[10]?.content).toBe("q8");
@@ -162,7 +203,13 @@ describe("KbBot", () => {
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
 
     await adapter
-      .send(feedbackActivity({ kind: "rag-feedback", answerId: ANSWER_ID, rating: "not_helpful" }))
+      .send(
+        feedbackActivity({
+          kind: "rag-feedback",
+          answerId: ANSWER_ID,
+          rating: "not_helpful",
+        }),
+      )
       .assertReply((activity) => {
         expect(activity.text).toMatch(/thanks/i);
       });
@@ -184,7 +231,11 @@ describe("KbBot", () => {
     const deps = makeDeps();
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
     await adapter.send(
-      feedbackActivity({ kind: "rag-feedback", answerId: "not-a-uuid", rating: "great" }),
+      feedbackActivity({
+        kind: "rag-feedback",
+        answerId: "not-a-uuid",
+        rating: "great",
+      }),
     );
     expect(deps.submitFeedback).not.toHaveBeenCalled();
     expect(deps.askKb).not.toHaveBeenCalled();
@@ -198,7 +249,13 @@ describe("KbBot", () => {
     });
     const adapter = new TestAdapter(async (ctx) => new KbBot(deps).run(ctx));
     await adapter
-      .send(feedbackActivity({ kind: "rag-feedback", answerId: ANSWER_ID, rating: "helpful" }))
+      .send(
+        feedbackActivity({
+          kind: "rag-feedback",
+          answerId: ANSWER_ID,
+          rating: "helpful",
+        }),
+      )
       .assertReply((activity) => {
         expect(JSON.stringify(activity)).toMatch(/sign in/i);
       });

@@ -191,7 +191,9 @@ describe("HttpCrossEncoderReranker — egress boundary", () => {
 describe("rerank wire contract, score, and compliance (plan tasks A2-A4)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function stubFetch(results: Array<{ index: number; relevance_score: number }>) {
+  function stubFetch(
+    results: Array<{ index: number; relevance_score: number }>,
+  ) {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ results }), {
@@ -249,7 +251,9 @@ describe("rerank wire contract, score, and compliance (plan tasks A2-A4)", () =>
       }),
     ).toThrow(ComplianceError);
     expect(
-      createReranker(cfg({ provider: "none" }), { complianceMode: "client-data" }),
+      createReranker(cfg({ provider: "none" }), {
+        complianceMode: "client-data",
+      }),
     ).toBeNull();
   });
 });

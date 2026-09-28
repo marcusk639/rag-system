@@ -121,7 +121,10 @@ describe("POST /ask — context size bound", () => {
 
   it("accepts topK at the bound", async () => {
     const h = harness();
-    const res = await post(h.deps, "/ask", { question: "q", topK: MAX_ASK_TOP_K });
+    const res = await post(h.deps, "/ask", {
+      question: "q",
+      topK: MAX_ASK_TOP_K,
+    });
     expect(res.statusCode).toBe(200);
   });
 });

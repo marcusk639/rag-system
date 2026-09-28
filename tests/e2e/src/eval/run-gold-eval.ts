@@ -18,7 +18,11 @@
  */
 import { writeFile } from "node:fs/promises";
 import { GOLD_QUESTIONS, validateGoldSet } from "./gold-set.js";
-import { scoreGoldRun, type GoldObservation, type GoldReport } from "./gold-eval.js";
+import {
+  scoreGoldRun,
+  type GoldObservation,
+  type GoldReport,
+} from "./gold-eval.js";
 
 interface AskResponse {
   answer: string;
@@ -63,7 +67,8 @@ async function main(): Promise<void> {
     const cached = externalIds.get(documentId);
     if (cached) return cached;
     const res = await fetch(`${apiUrl}/documents/${documentId}`, { headers });
-    if (!res.ok) throw new Error(`GET /documents/${documentId} → ${res.status}`);
+    if (!res.ok)
+      throw new Error(`GET /documents/${documentId} → ${res.status}`);
     const doc = (await res.json()) as { externalId: string };
     externalIds.set(documentId, doc.externalId);
     return doc.externalId;
@@ -84,10 +89,14 @@ async function main(): Promise<void> {
         id: q.id,
         answer: body.answer,
         retrievedExternalIds: unique(
-          await Promise.all(body.retrieved.map((r) => externalIdOf(r.document.id))),
+          await Promise.all(
+            body.retrieved.map((r) => externalIdOf(r.document.id)),
+          ),
         ),
         citedExternalIds: unique(
-          await Promise.all(body.citations.map((c) => externalIdOf(c.documentId))),
+          await Promise.all(
+            body.citations.map((c) => externalIdOf(c.documentId)),
+          ),
         ),
       });
       process.stdout.write(".");
@@ -109,7 +118,11 @@ async function main(): Promise<void> {
     );
     await writeFile(
       process.env.GOLD_OUT,
-      JSON.stringify({ ranAt: new Date().toISOString(), report, observations }, null, 2),
+      JSON.stringify(
+        { ranAt: new Date().toISOString(), report, observations },
+        null,
+        2,
+      ),
     );
   }
   const hardFail =

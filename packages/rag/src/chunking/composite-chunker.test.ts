@@ -205,9 +205,9 @@ describe("CompositeChunker", () => {
         tables: [],
         metadata: {},
       });
-      expect(chunks[0]?.text.startsWith("# New Client Onboarding SOP\n\n")).toBe(
-        true,
-      );
+      expect(
+        chunks[0]?.text.startsWith("# New Client Onboarding SOP\n\n"),
+      ).toBe(true);
       // headingPath stays the document's own structure — citations use it.
       expect(chunks[0]?.headingPath).toEqual([]);
     });
@@ -220,7 +220,9 @@ describe("CompositeChunker", () => {
         tables: [],
         metadata: {},
       });
-      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(true);
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(
+        true,
+      );
       expect(chunks[0]?.headingPath).toEqual(["Setup"]);
     });
 
@@ -232,7 +234,9 @@ describe("CompositeChunker", () => {
         tables: [],
         metadata: {},
       });
-      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(true);
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(
+        true,
+      );
     });
 
     it("prefixes the title to spreadsheet row chunks", async () => {

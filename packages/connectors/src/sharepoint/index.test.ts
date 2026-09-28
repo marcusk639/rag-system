@@ -198,7 +198,10 @@ describe("SharePointConnector", () => {
 
   describe("per-source excludePaths", () => {
     function inFolder(id: string, parentPath: string) {
-      return { ...file(id), parentReference: { driveId: "d1", path: parentPath } };
+      return {
+        ...file(id),
+        parentReference: { driveId: "d1", path: parentPath },
+      };
     }
 
     it("never downloads an item under an excluded folder, and reports it as a deletion", async () => {
@@ -218,7 +221,9 @@ describe("SharePointConnector", () => {
       expect(res.documents.map((d) => d.externalId)).toEqual(["d1:sop"]);
       // Removes any copy indexed before the exclusion was configured.
       expect(res.deletions).toEqual(["d1:client"]);
-      expect(graph.calls.some((u) => u.includes("/items/client/content"))).toBe(false);
+      expect(graph.calls.some((u) => u.includes("/items/client/content"))).toBe(
+        false,
+      );
     });
 
     it("applies the built-in client-content denylist even with no excludePaths configured", async () => {
@@ -226,7 +231,10 @@ describe("SharePointConnector", () => {
         value: [inFolder("letter", "/drive/root:/Admin/Engagement Letters")],
         "@odata.deltaLink": "x",
       });
-      const { connector, graph } = makeConnector({ siteId: "s", driveId: "d1" }, route);
+      const { connector, graph } = makeConnector(
+        { siteId: "s", driveId: "d1" },
+        route,
+      );
       const res = await connector.list({ maxItems: 50 });
       expect(res.documents).toEqual([]);
       expect(graph.calls.some((u) => u.includes("/content"))).toBe(false);
@@ -234,7 +242,9 @@ describe("SharePointConnector", () => {
 
     it("refuses to fetch an excluded item by id (retry path)", async () => {
       const route = (url: string) =>
-        url.includes("/items/client") ? inFolder("client", "/drive/root:/Clients/Jones") : undefined;
+        url.includes("/items/client")
+          ? inFolder("client", "/drive/root:/Clients/Jones")
+          : undefined;
       const { connector, graph } = makeConnector(
         { siteId: "s", driveId: "d1", excludePaths: ["/clients/"] },
         route,

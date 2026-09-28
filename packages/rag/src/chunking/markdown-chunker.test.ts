@@ -14,7 +14,8 @@ describe("MarkdownChunker — tables inside prose documents", () => {
   const separator = "| --- | --- | --- |";
   const rows = Array.from(
     { length: 60 },
-    (_, i) => `| CODE-${i} | Work type number ${i} for the time catalog | yes |`,
+    (_, i) =>
+      `| CODE-${i} | Work type number ${i} for the time catalog | yes |`,
   );
   const table = [header, separator, ...rows].join("\n");
 
@@ -62,7 +63,9 @@ describe("MarkdownChunker — degenerate chunks", () => {
   it("drops sections with no real text (rules, stray pipes, punctuation)", async () => {
     const chunker = new MarkdownChunker({ chunkSize: 800, chunkOverlap: 0 });
     const chunks = await chunker.chunk(
-      doc("# Intro\n\nReal content here.\n\n# Divider\n\n---\n\n# Empty-ish\n\n| |\n"),
+      doc(
+        "# Intro\n\nReal content here.\n\n# Divider\n\n---\n\n# Empty-ish\n\n| |\n",
+      ),
     );
     expect(chunks.map((c) => c.headingPath.join("/"))).toEqual(["Intro"]);
   });
@@ -75,7 +78,9 @@ describe("MarkdownChunker — degenerate chunks", () => {
 
   it("renumbers ordinals contiguously after dropping", async () => {
     const chunker = new MarkdownChunker({ chunkSize: 800, chunkOverlap: 0 });
-    const chunks = await chunker.chunk(doc("# A\n\nOne.\n\n# B\n\n***\n\n# C\n\nTwo."));
+    const chunks = await chunker.chunk(
+      doc("# A\n\nOne.\n\n# B\n\n***\n\n# C\n\nTwo."),
+    );
     expect(chunks.map((c) => c.ordinal)).toEqual([0, 1]);
   });
 });
@@ -86,7 +91,8 @@ describe("MarkdownChunker — overlap size", () => {
     // estimate over- or under-shoots badly.
     const paragraphs = Array.from(
       { length: 12 },
-      (_, i) => `Row ${i}: 4417 9921 0038 7765 1203 5540 8812 3309 6674 2291 end-${i}.`,
+      (_, i) =>
+        `Row ${i}: 4417 9921 0038 7765 1203 5540 8812 3309 6674 2291 end-${i}.`,
     ).join("\n\n");
     const chunker = new MarkdownChunker({ chunkSize: 80, chunkOverlap: 20 });
     const chunks = await chunker.chunk(doc(paragraphs));

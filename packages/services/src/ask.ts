@@ -233,10 +233,7 @@ export async function expandWithNeighbors(
     if (list) list.push(r);
     else byDocument.set(r.document.id, [r]);
   }
-  const topDocuments = [...byDocument.entries()].slice(
-    0,
-    expansion.documents,
-  );
+  const topDocuments = [...byDocument.entries()].slice(0, expansion.documents);
 
   try {
     const added = await Promise.all(
@@ -252,21 +249,19 @@ export async function expandWithNeighbors(
         if (ordinals.length === 0) return [];
         const rows = await getChunksByOrdinals(deps.db, documentId, ordinals);
         const document = hits[0]!.document;
-        return rows.map(
-          (row): RetrievalResult => ({
-            text: row.text,
-            score: 0,
-            denseScore: 0,
-            sparseScore: 0,
-            document,
-            chunk: {
-              id: row.id,
-              ordinal: row.ordinal,
-              headingPath: row.headingPath,
-              ...(row.page != null ? { page: row.page } : {}),
-            },
-          }),
-        );
+        return rows.map((row): RetrievalResult => ({
+          text: row.text,
+          score: 0,
+          denseScore: 0,
+          sparseScore: 0,
+          document,
+          chunk: {
+            id: row.id,
+            ordinal: row.ordinal,
+            headingPath: row.headingPath,
+            ...(row.page != null ? { page: row.page } : {}),
+          },
+        }));
       }),
     );
     return [...results, ...added.flat()];

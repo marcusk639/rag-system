@@ -374,4 +374,3 @@ function itemPath(item: DriveItem): string {
       )
     : (item.name ?? "");
 }
-

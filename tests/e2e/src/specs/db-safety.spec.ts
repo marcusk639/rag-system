@@ -26,7 +26,10 @@ describe("assertDestructiveTestTarget", () => {
 
   it("does not leak the password in the refusal", () => {
     expect(() =>
-      assertDestructiveTestTarget("postgres://u:hunter2@remote.example:5432/rag", {}),
+      assertDestructiveTestTarget(
+        "postgres://u:hunter2@remote.example:5432/rag",
+        {},
+      ),
     ).toThrow(/^(?!.*hunter2).*$/s);
   });
 

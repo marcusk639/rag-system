@@ -99,7 +99,6 @@ New client setup is handled by the client-services lead before any work is assig
 
 Not covered by the documents: what to do when the client already exists in QuickBooks Online under a different name.`;
 
-
 /**
  * What the generation-time TRI pre-flight does on a hit. The code default is
  * `block`; see the `triPolicy` doc comment in packages/core/src/config.ts for

@@ -114,9 +114,17 @@ describe("askKb", () => {
 
 describe("askKb history", () => {
   it("forwards non-empty history and omits an empty one", async () => {
-    const fetchMock = fakeFetch(200, { answer: "a", citations: [], disclaimer: "d" });
+    const fetchMock = fakeFetch(200, {
+      answer: "a",
+      citations: [],
+      disclaimer: "d",
+    });
     await askKb(
-      { question: "q", scopeToken: "t", history: [{ role: "user", content: "h" }] },
+      {
+        question: "q",
+        scopeToken: "t",
+        history: [{ role: "user", content: "h" }],
+      },
       { ragApiUrl: "http://api", fetch: fetchMock as any },
     );
     await askKb(
@@ -126,7 +134,10 @@ describe("askKb history", () => {
     const bodies = fetchMock.mock.calls.map((c) =>
       JSON.parse(String((c as unknown as [string, RequestInit])[1].body)),
     );
-    expect(bodies[0]).toEqual({ question: "q", history: [{ role: "user", content: "h" }] });
+    expect(bodies[0]).toEqual({
+      question: "q",
+      history: [{ role: "user", content: "h" }],
+    });
     expect(bodies[1]).toEqual({ question: "q" });
   });
 });
@@ -138,11 +149,21 @@ describe("submitFeedback", () => {
       { answerId: "a1", rating: "helpful", scopeToken: "tok" },
       { ragApiUrl: "http://api", fetch: fetchMock as any },
     );
-    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
     expect(url).toBe("http://api/feedback");
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer tok");
-    expect((init.headers as Record<string, string>)["X-RAG-Channel"]).toBe("teams");
-    expect(JSON.parse(String(init.body))).toEqual({ answerId: "a1", rating: "helpful" });
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
+      "Bearer tok",
+    );
+    expect((init.headers as Record<string, string>)["X-RAG-Channel"]).toBe(
+      "teams",
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      answerId: "a1",
+      rating: "helpful",
+    });
   });
 
   it("throws KbUnavailableError on a non-2xx response", async () => {
@@ -168,7 +189,9 @@ describe("askKb error differentiation", () => {
   ];
   for (const [status, message] of cases) {
     it(`maps HTTP ${status} to a user-safe message`, async () => {
-      const fetchMock = fakeFetch(status, { error: { message: "internal detail" } });
+      const fetchMock = fakeFetch(status, {
+        error: { message: "internal detail" },
+      });
       const err = await askKb(
         { question: "q", scopeToken: "t" },
         { ragApiUrl: "http://api", fetch: fetchMock as any },

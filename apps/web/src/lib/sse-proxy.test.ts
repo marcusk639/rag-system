@@ -18,7 +18,7 @@ describe("withIdleTimeout", () => {
   it("passes a live stream through unchanged", async () => {
     const source = new ReadableStream<Uint8Array>({
       start(c) {
-        c.enqueue(enc.encode("event: token\ndata: \"a\"\n\n"));
+        c.enqueue(enc.encode('event: token\ndata: "a"\n\n'));
         c.close();
       },
     });
@@ -33,7 +33,7 @@ describe("withIdleTimeout", () => {
     let cancelled = false;
     const source = new ReadableStream<Uint8Array>({
       start(c) {
-        c.enqueue(enc.encode("event: token\ndata: \"a\"\n\n"));
+        c.enqueue(enc.encode('event: token\ndata: "a"\n\n'));
         // …then nothing, ever.
       },
       cancel() {

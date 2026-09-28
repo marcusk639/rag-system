@@ -164,4 +164,3 @@ function l2Normalize(values: number[]): number[] {
   }
   return norm === 0 ? values : values.map((x) => x / norm);
 }
-

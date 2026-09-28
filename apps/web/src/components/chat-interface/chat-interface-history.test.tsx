@@ -12,7 +12,8 @@ describe("ChatInterface conversation history", () => {
   afterEach(cleanup);
   // jsdom does not implement Element.scrollTo; the send handler scrolls when done.
   beforeAll(() => {
-    Element.prototype.scrollTo = vi.fn() as unknown as typeof Element.prototype.scrollTo;
+    Element.prototype.scrollTo =
+      vi.fn() as unknown as typeof Element.prototype.scrollTo;
   });
 
   it("sends the prior completed turns with a follow-up question", async () => {
@@ -20,8 +21,17 @@ describe("ChatInterface conversation history", () => {
       id: "s",
       name: "S",
       messages: [
-        { id: "1", role: "user", content: "How do I set up a bookkeeping client?" },
-        { id: "2", role: "assistant", content: "Apply BK-CATCHUP [1].", answerId: "a" },
+        {
+          id: "1",
+          role: "user",
+          content: "How do I set up a bookkeeping client?",
+        },
+        {
+          id: "2",
+          role: "assistant",
+          content: "Apply BK-CATCHUP [1].",
+          answerId: "a",
+        },
       ],
     };
     render(

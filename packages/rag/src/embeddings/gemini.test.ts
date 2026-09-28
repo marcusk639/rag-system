@@ -10,8 +10,11 @@ function embedder(values: number[][]) {
     egressPolicy: new EgressPolicy(["generativelanguage.googleapis.com"]),
     dimensions: 3,
   });
-  (e as unknown as { client: { models: { embedContent: unknown } } }).client.models.embedContent =
-    vi.fn().mockResolvedValue({ embeddings: values.map((v) => ({ values: v })) });
+  (
+    e as unknown as { client: { models: { embedContent: unknown } } }
+  ).client.models.embedContent = vi
+    .fn()
+    .mockResolvedValue({ embeddings: values.map((v) => ({ values: v })) });
   return e;
 }
 
