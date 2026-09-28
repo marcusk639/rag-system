@@ -16,14 +16,40 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Git env vars inherited from an ambient git process (a hook, a rebase) point
+ * git at THAT repository, silently overriding `cwd`. Strip them so every call
+ * below acts on `repoPath` and nothing else.
+ */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+  ]) {
+    delete env[key];
+  }
+  return env;
+}
+
 async function git(repoPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd: repoPath });
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: repoPath,
+    env: gitEnv(),
+  });
   return stdout.trim();
 }
 
 async function gitBuffer(repoPath: string, args: string[]): Promise<Buffer> {
   const { stdout } = await execFileAsync("git", args, {
     cwd: repoPath,
+    env: gitEnv(),
     encoding: "buffer",
   } as Parameters<typeof execFileAsync>[2]);
   return stdout as unknown as Buffer;
