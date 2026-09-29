@@ -21,8 +21,13 @@ export const E2E_ENV = {
   CHUNK_SIZE: "512",
 
   GENERATION_PROVIDER: "openai",
-  GENERATION_MODEL: "llama3.1:8b",
-  GENERATION_BASE_URL: "http://127.0.0.1:11434/v1",
+  // Overridable so CI can pick a model its hardware can actually serve. A
+  // GitHub runner is CPU-only, where llama3.1:8b needs well over two minutes
+  // per RAG answer — past both the BFF's 30s time-to-headers budget and the
+  // 120s test timeout. Locally (Metal) the 8b is fast and stays the default.
+  GENERATION_MODEL: process.env.E2E_GENERATION_MODEL ?? "llama3.1:8b",
+  GENERATION_BASE_URL:
+    process.env.E2E_GENERATION_BASE_URL ?? "http://127.0.0.1:11434/v1",
   EGRESS_ALLOWED_HOSTS: "127.0.0.1",
   GENERATION_TRI_POLICY: "warn",
 
