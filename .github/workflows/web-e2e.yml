@@ -54,6 +54,22 @@ jobs:
       PARSER_URL: http://localhost:8000
 
     steps:
+      # This job is the heaviest in the repo: the parser image (~3.9GB), the
+      # llama3.1:8b pull (~4.7GB), the ONNX embedder (~430MB), a full workspace
+      # build and a Chromium download all land on one runner. Together they
+      # exhaust the ~14GB an ubuntu-latest runner starts with, and the symptom
+      # is an opaque "ENOSPC: no space left on device" from whichever step is
+      # unlucky enough to be last. Reclaim the preinstalled toolchains this job
+      # never touches (~25GB) before any of that starts. See PR #51 for the
+      # earlier round of parser CI disk exhaustion.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af || true
+          df -h /
+
       - uses: actions/checkout@v4
 
       - name: Apply pgvector init bootstrap to Postgres
