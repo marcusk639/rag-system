@@ -147,6 +147,14 @@ jobs:
       - name: Build workspace
         run: pnpm -r build
 
+      # The API asserts on boot that 0000_init.sql's HNSW/GIN indexes and the
+      # chunks_tsv_update trigger exist, and exits if they do not. The harness
+      # does call applyMigrations (setup/stack.ts), but that runs in
+      # globalSetup — after Playwright has already started the webServer — so
+      # the API dies before the harness gets a turn. Migrate here instead.
+      - name: Apply database migrations
+        run: pnpm --filter @rag/db migrate
+
       - name: Install Playwright browsers
         run: pnpm --filter @rag/web-e2e exec playwright install --with-deps chromium
 
