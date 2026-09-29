@@ -44,6 +44,20 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface Generator {
+  /**
+   * Pre-generation screening. Returns the subset of `context` that may be sent
+   * to the model (e.g. TRI-bearing chunks removed), or throws when the request
+   * must not proceed. Required: a generator without it would silently lose
+   * per-chunk screening. Callers must use the returned context for BOTH
+   * generation and citations, so `[N]` indices stay aligned.
+   */
+  screen(question: string, context: RetrievalResult[]): RetrievalResult[];
+  /**
+   * Optional bare completion (prompt in, text out, no QA system prompt) under
+   * the generator's own egress and TRI policy. Used for auxiliary calls such
+   * as follow-up question condensation.
+   */
+  complete?(prompt: string): Promise<string>;
   answer(
     question: string,
     context: RetrievalResult[],
@@ -69,8 +83,13 @@ export interface GenerationResult {
     url?: string;
     /** True when the original file can be downloaded (GET /documents/:id/download). */
     downloadable: boolean;
+    /** The document's best-ranked retrieved chunk. */
     chunkId: string;
+    /** Every retrieved chunk from this document, in reading order. */
+    chunkIds: string[];
     score: number;
+    /** Source document's last-modified date (YYYY-MM-DD), when known. */
+    modifiedAt?: string;
   }>;
 }
 

@@ -1,14 +1,50 @@
 import { randomUUID } from "node:crypto";
 import type { GenerationResult, Generator } from "@rag/rag";
-import { buildCitations, filterCitationsToAnswer } from "@rag/rag";
+import {
+  buildCitations,
+  contextualizeQuestion,
+  filterCitationsToAnswer,
+  type ConversationTurn,
+} from "@rag/rag";
 import type {
   AuthorizationScope,
   RetrievalResult,
   SanitizedRetrievalResult,
 } from "@rag/core";
-import { sanitizeRetrievalResults } from "@rag/core";
+import {
+  ComplianceError,
+  EgressError,
+  sanitizeRetrievalResults,
+} from "@rag/core";
+import { getChunksByOrdinals } from "@rag/db";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
+
+/**
+ * The knowledge base is indexed as-is, so the same SOP often exists as several
+ * copies. Identical chunks from different files would otherwise take several
+ * of the `topK` context slots with one passage. Keeps the best-ranked copy.
+ *
+ * Compared on the chunk BODY: chunk text opens with a `# Title › heading` line
+ * that differs between copies with different file names, so that line is
+ * ignored, and whitespace and case are normalized.
+ */
+export function dropDuplicateChunks(
+  results: RetrievalResult[],
+): RetrievalResult[] {
+  const seen = new Set<string>();
+  return results.filter((r) => {
+    const newline = r.text.indexOf("\n");
+    const body =
+      r.text.startsWith("# ") && newline !== -1
+        ? r.text.slice(newline)
+        : r.text;
+    const key = body.replace(/\s+/g, " ").trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 /**
  * Per-document diversity cap. Returns a NEW array (no mutation) keeping at most
@@ -45,6 +81,13 @@ export interface AskInput {
   topK?: number;
   sourceIds?: string[];
   filter?: Record<string, string | string[]>;
+  /**
+   * Prior turns of the conversation, already resolved by the transport (today
+   * the request body; later a server-side session). Used ONLY to rewrite a
+   * follow-up into a standalone RETRIEVAL query — generation always receives
+   * `question` itself. How many turns count is decided by the condenser.
+   */
+  history?: ConversationTurn[];
 }
 
 /**
@@ -93,6 +136,7 @@ export async function askQuestion(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
+  options: AskOptions = {},
 ): Promise<AskResult> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -105,12 +149,237 @@ export async function askQuestion(
     defaultTopK,
     scope,
     maxChunksPerDocument,
+    options,
   );
 }
 
-function buildQuery(input: AskInput, defaultTopK: number) {
+/**
+ * How many extra candidates to fetch when the per-document cap is on. Capping
+ * exactly `topK` results silently shrinks the generator's context — worst when
+ * one long document dominates the ranking, which is precisely when the cap is
+ * meant to make room for other sources.
+ */
+const CAP_OVERFETCH_MULTIPLIER = 3;
+
+/**
+ * "Small-to-big" context expansion. For the top `documents` documents in the
+ * ranking, fetch up to `chunksPerDocument` chunks adjacent to the ones that
+ * were retrieved, so a procedure whose steps span several chunks reaches the
+ * generator whole rather than as isolated fragments.
+ */
+export interface NeighborExpansion {
+  /** How many top-ranked documents to expand. `0` disables expansion. */
+  documents: number;
+  /** Maximum extra chunks fetched per expanded document. */
+  chunksPerDocument: number;
+}
+
+/** Tuning for /ask beyond the per-document cap. Every field is optional. */
+export interface AskOptions {
+  neighborExpansion?: NeighborExpansion;
+  /**
+   * Relevance floor. Chunks with no keyword match AND dense (cosine)
+   * similarity below this are dropped before generation; if none remain the
+   * fixed refusal is returned without a model call. Unset disables it — tune
+   * it from the audit log's `top_score` distribution for the live embedder.
+   */
+  minDenseSimilarity?: number;
+}
+
+/**
+ * Hybrid search always returns its nearest neighbours, so without a floor an
+ * off-topic question still reaches the model with whatever was least unlike
+ * it. A chunk with a keyword match is kept regardless: identifiers and form
+ * numbers score low on cosine similarity by nature.
+ */
+export function applyRelevanceFloor(
+  results: RetrievalResult[],
+  minDenseSimilarity: number | undefined,
+): RetrievalResult[] {
+  if (minDenseSimilarity === undefined) return results;
+  return results.filter(
+    (r) => r.sparseScore > 0 || r.denseScore >= minDenseSimilarity,
+  );
+}
+
+export const NO_NEIGHBOR_EXPANSION: NeighborExpansion = {
+  documents: 0,
+  chunksPerDocument: 0,
+};
+
+/**
+ * Add neighbouring chunks of the top documents to `results`. Originals keep
+ * their positions; added chunks are appended with zero scores (they were not
+ * retrieved on relevance) and share their document's object. Neighbour order
+ * follows the rank of the retrieved chunk they sit beside, so a small budget
+ * spends itself around the best evidence first.
+ *
+ * Only documents already present in `results` are touched, and those were
+ * returned by the scope-enforced retriever, so expansion cannot widen access.
+ * A failure degrades to the unexpanded results rather than failing the answer.
+ */
+export async function expandWithNeighbors(
+  deps: Pick<ServiceDeps, "db" | "logger">,
+  results: RetrievalResult[],
+  expansion: NeighborExpansion,
+): Promise<RetrievalResult[]> {
+  if (expansion.documents <= 0 || expansion.chunksPerDocument <= 0) {
+    return results;
+  }
+
+  const byDocument = new Map<string, RetrievalResult[]>();
+  for (const r of results) {
+    const list = byDocument.get(r.document.id);
+    if (list) list.push(r);
+    else byDocument.set(r.document.id, [r]);
+  }
+  const topDocuments = [...byDocument.entries()].slice(0, expansion.documents);
+
+  try {
+    const added = await Promise.all(
+      topDocuments.map(async ([documentId, hits]) => {
+        const have = new Set(hits.map((h) => h.chunk.ordinal));
+        const wanted: number[] = [];
+        for (const h of hits) {
+          for (const o of [h.chunk.ordinal - 1, h.chunk.ordinal + 1]) {
+            if (o >= 0 && !have.has(o) && !wanted.includes(o)) wanted.push(o);
+          }
+        }
+        const ordinals = wanted.slice(0, expansion.chunksPerDocument);
+        if (ordinals.length === 0) return [];
+        const rows = await getChunksByOrdinals(deps.db, documentId, ordinals);
+        const document = hits[0]!.document;
+        return rows.map((row): RetrievalResult => ({
+          text: row.text,
+          score: 0,
+          denseScore: 0,
+          sparseScore: 0,
+          document,
+          chunk: {
+            id: row.id,
+            ordinal: row.ordinal,
+            headingPath: row.headingPath,
+            ...(row.page != null ? { page: row.page } : {}),
+          },
+        }));
+      }),
+    );
+    return [...results, ...added.flat()];
+  } catch (err) {
+    deps.logger.warn(
+      { err, marker: "ask.neighbor_expansion_failed" },
+      "neighbour chunk expansion failed; answering from retrieved chunks only",
+    );
+    return results;
+  }
+}
+
+/**
+ * Let the generator remove context it must not send (per-chunk TRI screening),
+ * BEFORE generation. Everything downstream — the prompt, the citations, and the
+ * `retrieved` returned to the caller — uses the screened list, so the `[N]` the
+ * model writes always indexes the documents it was actually shown. Empty
+ * retrieval is left alone: it short-circuits without a provider call.
+ */
+function screenForGeneration(
+  deps: AskDeps,
+  question: string,
+  retrieved: RetrievalResult[],
+): RetrievalResult[] {
+  if (retrieved.length === 0) return retrieved;
+  // `screen` is required by the Generator contract; this guard only tolerates
+  // unit-test doubles cast past the type. Every real generator screens.
+  if (typeof deps.generator.screen !== "function") return retrieved;
+  return deps.generator.screen(question, retrieved);
+}
+
+/**
+ * The text retrieval searches with, screened for TRI BEFORE it is embedded.
+ *
+ * Retrieval embeds the query with the configured provider, which may be an
+ * external API. The generation pre-flight only protects the generation call,
+ * so a question carrying a client identifier used to reach the embedding API
+ * first. The question is screened here, under the generator's TRI policy,
+ * and a blocking match fails the request before any provider call.
+ *
+ * With conversation history, the follow-up is rewritten into a standalone
+ * question. The rewrite can carry an identifier forward from an EARLIER turn,
+ * so it is screened too; a blocked rewrite falls back to the (already
+ * screened) original question. Every fallback is logged, never swallowed.
+ */
+async function retrievalQuery(deps: AskDeps, input: AskInput): Promise<string> {
+  screenQuestion(deps, input.question);
+  const complete = deps.generator.complete?.bind(deps.generator);
+  if (!complete || !input.history?.length) return input.question;
+
+  const rewritten = await contextualizeQuestion(
+    complete,
+    input.question,
+    input.history,
+    {
+      onError: (err) =>
+        deps.logger.warn(
+          {
+            err,
+            marker:
+              err instanceof ComplianceError || err instanceof EgressError
+                ? "ask.condensation_blocked"
+                : "ask.condensation_failed",
+          },
+          "follow-up condensation failed; retrieving with the original question",
+        ),
+    },
+  );
+  if (rewritten === input.question) return rewritten;
+  try {
+    screenQuestion(deps, rewritten);
+    return rewritten;
+  } catch (err) {
+    deps.logger.warn(
+      { err, marker: "ask.rewrite_blocked" },
+      "rewritten follow-up failed TRI screening; retrieving with the original question",
+    );
+    return input.question;
+  }
+}
+
+/** Throws (ComplianceError) when `text` must not be sent to a provider. */
+function screenQuestion(deps: AskDeps, text: string): void {
+  // `screen` is required by the Generator contract; the guard only tolerates
+  // unit-test doubles cast past the type.
+  if (typeof deps.generator.screen === "function") {
+    deps.generator.screen(text, []);
+  }
+}
+
+async function retrieveForAnswer(
+  deps: AskDeps,
+  input: AskInput,
+  defaultTopK: number,
+  scope: AuthorizationScope,
+  maxChunksPerDocument: number,
+): Promise<RetrievalResult[]> {
+  const query = buildQuery(
+    input,
+    defaultTopK,
+    await retrievalQuery(deps, input),
+  );
+  // Always over-fetch: both duplicate collapse and the per-document cap
+  // remove candidates, and without spare candidates the context would shrink
+  // below topK instead of being backfilled.
+  const candidates = await deps.retriever.search(
+    { ...query, topK: query.topK * CAP_OVERFETCH_MULTIPLIER },
+    scope,
+  );
+  return capChunksPerDocument(
+    dropDuplicateChunks(candidates),
+    maxChunksPerDocument,
+  ).slice(0, query.topK);
+}
+
+function buildQuery(input: AskInput, defaultTopK: number, query: string) {
   return {
-    query: input.question,
+    query,
     topK: input.topK ?? defaultTopK,
     ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
     ...(input.filter ? { filter: input.filter } : {}),
@@ -123,11 +392,26 @@ async function ask(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
+  options: AskOptions,
 ): Promise<AskResult> {
   const answerId = randomUUID();
-  const retrieved = capChunksPerDocument(
-    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
-    maxChunksPerDocument,
+  const retrieved = screenForGeneration(
+    deps,
+    input.question,
+    await expandWithNeighbors(
+      deps,
+      applyRelevanceFloor(
+        await retrieveForAnswer(
+          deps,
+          input,
+          defaultTopK,
+          scope,
+          maxChunksPerDocument,
+        ),
+        options.minDenseSimilarity,
+      ),
+      options.neighborExpansion ?? NO_NEIGHBOR_EXPANSION,
+    ),
   );
 
   if (retrieved.length === 0) {
@@ -145,7 +429,12 @@ async function ask(
   return {
     answer: result.answer,
     // Faithful to what the answer actually cites, not everything retrieved.
-    citations: filterCitationsToAnswer(result.answer, result.citations),
+    // Built here, from the same `retrieved` the generator saw, so the
+    // streaming and non-streaming paths cannot drift apart.
+    citations: filterCitationsToAnswer(
+      result.answer,
+      buildCitations(retrieved),
+    ),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,
@@ -184,6 +473,7 @@ export async function* askQuestionStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument = 0,
+  options: AskOptions = {},
 ): AsyncGenerator<AskStreamEvent> {
   if (!deps.generator) {
     throw new GenerationNotConfiguredError();
@@ -194,6 +484,7 @@ export async function* askQuestionStream(
     defaultTopK,
     scope,
     maxChunksPerDocument,
+    options,
   );
 }
 
@@ -203,11 +494,26 @@ async function* askStream(
   defaultTopK: number,
   scope: AuthorizationScope,
   maxChunksPerDocument: number,
+  options: AskOptions,
 ): AsyncGenerator<AskStreamEvent> {
   const answerId = randomUUID();
-  const retrieved = capChunksPerDocument(
-    await deps.retriever.search(buildQuery(input, defaultTopK), scope),
-    maxChunksPerDocument,
+  const retrieved = screenForGeneration(
+    deps,
+    input.question,
+    await expandWithNeighbors(
+      deps,
+      applyRelevanceFloor(
+        await retrieveForAnswer(
+          deps,
+          input,
+          defaultTopK,
+          scope,
+          maxChunksPerDocument,
+        ),
+        options.minDenseSimilarity,
+      ),
+      options.neighborExpansion ?? NO_NEIGHBOR_EXPANSION,
+    ),
   );
 
   if (retrieved.length === 0) {

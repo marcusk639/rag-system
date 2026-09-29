@@ -18,11 +18,19 @@ import {
   decodeOidFromJwt,
   resolveUserOid,
 } from "./auth.js";
-import { KbUnavailableError, askKb } from "./rag-client.js";
-import type { AskAnswer } from "./rag-client.js";
-import { answerCard, emptyScopeCard, errorCard, usageCard } from "./cards.js";
+import { KbUserFacingError, askKb, submitFeedback } from "./rag-client.js";
+import type { AskAnswer, FeedbackRating, HistoryTurn } from "./rag-client.js";
+import {
+  FEEDBACK_SUBMIT_KIND,
+  answerCard,
+  emptyScopeCard,
+  errorCard,
+  usageCard,
+} from "./cards.js";
 import { createProductionScopeDeps, mintScope } from "./scope.js";
 import type { BotConfig } from "./config.js";
+import { createLogger } from "./logger.js";
+import type { Logger } from "./logger.js";
 
 /** Which flavor of Teams conversation the asker is in. Drives both the
  * member-roster lookup and which scope the answer is restricted to. */
@@ -83,19 +91,62 @@ export interface BotDeps {
    * handler can short-circuit an empty scope without calling the API. */
   resolveScope(input: ResolveScopeInput): Promise<ResolvedScope>;
   /** Asks the RAG API the user's question under the minted scope. Throws
-   * `KbUnavailableError` (from `rag-client.ts`) on any failure. */
-  askKb(input: { question: string; scopeToken: string }): Promise<AskAnswer>;
+   * a `KbUserFacingError` (from `rag-client.ts`) on any failure. */
+  askKb(input: {
+    question: string;
+    scopeToken: string;
+    history?: HistoryTurn[];
+  }): Promise<AskAnswer>;
+  /** Records a feedback vote under the clicking user's own scope token.
+   * Throws `KbUnavailableError` on failure. */
+  submitFeedback(input: {
+    answerId: string;
+    rating: FeedbackRating;
+    scopeToken: string;
+  }): Promise<void>;
   /** Holds the asker's question across the SSO handshake: stored when the
    * sign-in card is sent, answered when the `signin/tokenExchange` invoke
    * completes. Production: the same `MemoryStorage` instance the
    * `TeamsSSOTokenExchangeMiddleware` deduplicates against. */
   storage: Storage;
+  /** Structured logger for failures (N-6: routes teams-bot errors into the
+   * same pino stream as the API instead of `console.*`). Optional so
+   * existing test doubles that build a `BotDeps` object don't need to
+   * supply one — the constructor falls back to a default logger when it's
+   * omitted. Production wiring (`createProductionBotDeps` below) always
+   * supplies the real one built in `index.ts`. */
+  logger?: Logger;
 }
 
 const SIGN_IN_FALLBACK_MESSAGE =
   "Please sign in to Microsoft Teams to use the knowledge base bot.";
 const SIGNED_IN_ASK_AGAIN_MESSAGE =
   "You're signed in now — please send your question again.";
+const FEEDBACK_THANKS_MESSAGE = "Thanks for the feedback.";
+const FEEDBACK_SIGN_IN_MESSAGE =
+  "Please sign in (send me any question) before leaving feedback.";
+const FEEDBACK_FAILED_MESSAGE =
+  "Sorry — your feedback couldn't be recorded. Please try again later.";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface FeedbackVote {
+  answerId: string;
+  rating: FeedbackRating;
+}
+
+/** Strictly validate an `Action.Submit` payload as a feedback vote. Anything
+ * else (including a malformed vote) returns null and records nothing. */
+function parseFeedbackSubmit(value: unknown): FeedbackVote | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (v.kind !== FEEDBACK_SUBMIT_KIND) return null;
+  if (typeof v.answerId !== "string" || !UUID_RE.test(v.answerId)) return null;
+  if (v.rating !== "helpful" && v.rating !== "not_helpful") return null;
+  return { answerId: v.answerId, rating: v.rating };
+}
+
 const GENERIC_ERROR_MESSAGE =
   "Something went wrong answering your question. Please try again in a moment.";
 
@@ -118,6 +169,30 @@ function pendingQuestionKey(context: TurnContext): string | null {
     return null;
   }
   return `teams-bot/pending-question/${channelId}/${conversationId}/${userId}`;
+}
+
+/**
+ * Conversation history for follow-up questions (decision B0: ephemeral,
+ * in-process). Kept in the same `Storage` as the pending question, so it
+ * inherits `MemoryStorage`'s single-instance constraint: a restart loses it
+ * and the bot degrades to single-turn answers, never to wrong ones.
+ *
+ * Keyed per (channel, conversation, user) — one user's conversation is never
+ * fed into another user's retrieval, even in a shared channel.
+ *
+ * `HISTORY_STORED_TURNS` bounds storage growth; `HISTORY_FORWARDED_TURNS` is
+ * the API's request bound (@rag/core MAX_HISTORY_TURNS). How many turns the
+ * rewrite actually uses is decided server-side by the condenser.
+ */
+const HISTORY_STORED_TURNS = 20;
+const HISTORY_FORWARDED_TURNS = 12;
+
+function historyKey(context: TurnContext): string | null {
+  const channelId = context.activity.channelId;
+  const conversationId = context.activity.conversation?.id;
+  const userId = context.activity.from?.id;
+  if (!channelId || !conversationId || !userId) return null;
+  return `teams-bot/history/${channelId}/${conversationId}/${userId}`;
 }
 
 /**
@@ -144,10 +219,12 @@ function classifyConversation(context: TurnContext): ConversationKind {
  */
 export class KbBot extends TeamsActivityHandler {
   private readonly deps: BotDeps;
+  private readonly logger: Logger;
 
   constructor(deps: BotDeps) {
     super();
     this.deps = deps;
+    this.logger = deps.logger ?? createLogger();
 
     this.onMessage(async (context, next) => {
       await this.handleMessage(context);
@@ -157,6 +234,15 @@ export class KbBot extends TeamsActivityHandler {
 
   private async handleMessage(context: TurnContext): Promise<void> {
     const conversationKind = classifyConversation(context);
+
+    // An Adaptive Card `Action.Submit` arrives as a message whose `value` is
+    // the card's data and which has no text. Route feedback votes before the
+    // empty-text usage guard below would swallow them.
+    const vote = parseFeedbackSubmit(context.activity.value);
+    if (vote) {
+      await this.recordFeedback(context, vote);
+      return;
+    }
 
     // Guard BEFORE any auth/scope/API work: a message can arrive with no
     // usable text at all (attachment-only, bare @mention). Teams prefixes
@@ -231,14 +317,89 @@ export class KbBot extends TeamsActivityHandler {
         return;
       }
 
+      const history = await this.readHistory(context);
       const answer = await this.deps.askKb({
         question,
         scopeToken: token,
+        history: history.slice(-HISTORY_FORWARDED_TURNS),
       });
 
       await context.sendActivity({ attachments: [answerCard(answer)] });
+      await this.appendHistory(context, question, answer.answer);
     } catch (error) {
       await this.sendErrorCard(context, error);
+    }
+  }
+
+  private async readHistory(context: TurnContext): Promise<HistoryTurn[]> {
+    const key = historyKey(context);
+    if (!key) return [];
+    try {
+      const stored = (await this.deps.storage.read([key]))[key] as
+        { turns?: HistoryTurn[] } | undefined;
+      return Array.isArray(stored?.turns) ? stored.turns : [];
+    } catch (error) {
+      this.logger.error(
+        { err: error },
+        "KbBot: failed to read conversation history",
+      );
+      return [];
+    }
+  }
+
+  private async appendHistory(
+    context: TurnContext,
+    question: string,
+    answer: string,
+  ): Promise<void> {
+    const key = historyKey(context);
+    if (!key) return;
+    // Re-read rather than reuse the history read before the (slow) model call:
+    // a second message from the same user can finish in the meantime, and
+    // writing the stale copy back would drop its exchange.
+    const history = await this.readHistory(context);
+    const exchange: HistoryTurn[] = [
+      { role: "user", content: question },
+      { role: "assistant", content: answer },
+    ];
+    const turns = [...history, ...exchange].slice(-HISTORY_STORED_TURNS);
+    try {
+      await this.deps.storage.write({ [key]: { turns } });
+    } catch (error) {
+      // Losing history only costs the next follow-up its context.
+      this.logger.error(
+        { err: error },
+        "KbBot: failed to store conversation history",
+      );
+    }
+  }
+
+  /**
+   * Record a feedback vote. Identity comes from the clicking user's verified
+   * SSO `oid` — never from the card payload — and the vote is sent under a
+   * token minted for that user alone, so it is attributed to whoever clicked,
+   * not whoever asked. Failures only cost the vote; they never surface detail.
+   */
+  private async recordFeedback(
+    context: TurnContext,
+    vote: FeedbackVote,
+  ): Promise<void> {
+    try {
+      const oid = await this.deps.resolveUserOid(context);
+      const { token } = await this.deps.resolveScope({
+        askerOid: oid,
+        conversationKind: "dm",
+        memberOids: [oid],
+      });
+      await this.deps.submitFeedback({ ...vote, scopeToken: token });
+      await context.sendActivity(FEEDBACK_THANKS_MESSAGE);
+    } catch (error) {
+      if (error instanceof SsoRequiredError) {
+        await context.sendActivity(FEEDBACK_SIGN_IN_MESSAGE);
+        return;
+      }
+      this.logger.error({ err: error }, "KbBot: failed to record feedback");
+      await context.sendActivity(FEEDBACK_FAILED_MESSAGE);
     }
   }
 
@@ -261,7 +422,10 @@ export class KbBot extends TeamsActivityHandler {
       } catch (error) {
         // Losing the pending question only costs the user a re-ask after
         // sign-in — still send the sign-in card.
-        console.error("KbBot: failed to store pending question", error);
+        this.logger.error(
+          { err: error },
+          "KbBot: failed to store pending question",
+        );
       }
     }
 
@@ -269,7 +433,7 @@ export class KbBot extends TeamsActivityHandler {
       const card = await this.deps.getSignInCard(context);
       await context.sendActivity({ attachments: [card] });
     } catch (error) {
-      console.error("KbBot: failed to build sign-in card", error);
+      this.logger.error({ err: error }, "KbBot: failed to build sign-in card");
       await context.sendActivity({
         attachments: [errorCard(SIGN_IN_FALLBACK_MESSAGE)],
       });
@@ -308,7 +472,7 @@ export class KbBot extends TeamsActivityHandler {
       try {
         oid = await this.deps.exchangeSsoTokenForOid(context, ssoToken);
       } catch (error) {
-        console.error("KbBot: token exchange failed", error);
+        this.logger.error({ err: error }, "KbBot: token exchange failed");
         oid = null;
       }
     }
@@ -340,7 +504,10 @@ export class KbBot extends TeamsActivityHandler {
         }
         await this.deps.storage.delete([key]);
       } catch (error) {
-        console.error("KbBot: failed to read pending question", error);
+        this.logger.error(
+          { err: error },
+          "KbBot: failed to read pending question",
+        );
       }
     }
 
@@ -363,7 +530,7 @@ export class KbBot extends TeamsActivityHandler {
       const card = await this.deps.getSignInCard(context);
       await context.sendActivity({ attachments: [card] });
     } catch (error) {
-      console.error("KbBot: failed to build sign-in card", error);
+      this.logger.error({ err: error }, "KbBot: failed to build sign-in card");
       await context.sendActivity({
         attachments: [errorCard(SIGN_IN_FALLBACK_MESSAGE)],
       });
@@ -374,7 +541,7 @@ export class KbBot extends TeamsActivityHandler {
     context: TurnContext,
     error: unknown,
   ): Promise<void> {
-    if (error instanceof KbUnavailableError) {
+    if (error instanceof KbUserFacingError) {
       await context.sendActivity({
         attachments: [errorCard(error.message)],
       });
@@ -382,12 +549,13 @@ export class KbBot extends TeamsActivityHandler {
     }
 
     // Any other error (DB failure, unexpected exception, etc.): log full
-    // detail server-side only. The user-facing card is always the generic
-    // message — never the raw error, which could leak internal details
-    // (connection strings, stack traces, etc.). `no-console` is only a warn
-    // in this repo's eslint config; this app has no pino logger wired yet
-    // (tracked separately from this task).
-    console.error("KbBot: unexpected error handling message", error);
+    // detail server-side only via the structured logger. The user-facing
+    // card is always the generic message — never the raw error, which
+    // could leak internal details (connection strings, stack traces, etc.).
+    this.logger.error(
+      { err: error },
+      "KbBot: unexpected error handling message",
+    );
     await context.sendActivity({
       attachments: [errorCard(GENERIC_ERROR_MESSAGE)],
     });
@@ -476,6 +644,7 @@ export function createTeamsGetMemberOids(
 export function createProductionBotDeps(
   config: BotConfig,
   storage: Storage,
+  logger: Logger,
 ): BotDeps {
   const connectionName = config.botOauthConnectionName;
   const authDeps = createProductionAuthDeps(connectionName);
@@ -492,6 +661,9 @@ export function createProductionBotDeps(
     getMemberOids: createTeamsGetMemberOids(),
     resolveScope: (input) => mintScope(input, scopeDeps),
     askKb: (input) => askKb(input, { ragApiUrl: config.ragApiUrl, fetch }),
+    submitFeedback: (input) =>
+      submitFeedback(input, { ragApiUrl: config.ragApiUrl, fetch }),
     storage,
+    logger,
   };
 }

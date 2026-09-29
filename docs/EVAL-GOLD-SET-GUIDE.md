@@ -144,3 +144,30 @@ If the resulting scores are near-perfect on the first run, **suspect the questio
 set before believing the system.** That is precisely how the starter corpus
 misled — 100% recall and MRR 1.000 on a corpus that could not discriminate
 anything at all.
+
+---
+
+## Running `pnpm eval:gold`
+
+After questions are added to `tests/e2e/src/eval/gold-set.ts`:
+
+```bash
+GOLD_API_URL=https://<your-rag-api-host> \
+GOLD_API_TOKEN=<API token scoped to the sources the questions cover> \
+GOLD_OUT=gold-2026-09-16.json \  # optional
+pnpm eval:gold
+```
+
+- Calls the deployed `POST /ask` for each question (read-only) and resolves
+  retrieved and cited documents to connector `externalId`s via
+  `GET /documents/:id`. Paced to the `/ask` rate limit (~10/min).
+- Reports recall@1/3/5 and MRR for questions with non-empty `relevant`;
+  correct refusals for out-of-coverage questions (`relevant: []`); answerable
+  questions that were refused; fabricated citations; truncated answers.
+- Does **not** score claim-level faithfulness or tier-2 CPA correctness —
+  those still need a calibrated judge or a credentialed reviewer.
+- `GOLD_API_URL` must be https (http only for localhost).
+- `GOLD_OUT` is a file path; it contains **real knowledge-base answers**.
+  `gold-*.json` is gitignored, but treat the file as firm-confidential.
+- Exit codes: 2 — gold set empty/invalid or bad configuration; 1 — a
+  fabricated citation or a failed request; 0 — otherwise.

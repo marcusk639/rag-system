@@ -18,7 +18,11 @@ interface AdaptiveCard {
   type: string;
   version: string;
   body: AdaptiveCardElement[];
+  actions?: Array<Record<string, unknown>>;
 }
+
+/** `Action.Submit` payload kind the bot routes as a feedback vote. */
+export const FEEDBACK_SUBMIT_KIND = "rag-feedback";
 
 export function answerCard(a: AskAnswer): Attachment {
   const body: AdaptiveCardElement[] = [];
@@ -42,7 +46,7 @@ export function answerCard(a: AskAnswer): Attachment {
     for (const citation of a.citations) {
       const citationItem: AdaptiveCardElement = {
         type: "TextBlock",
-        text: `${citation.index}. ${citation.title}`,
+        text: `${citation.index}. ${citation.title}${citation.modifiedAt ? ` (modified ${citation.modifiedAt})` : ""}`,
         wrap: true,
       };
 
@@ -79,9 +83,31 @@ export function answerCard(a: AskAnswer): Attachment {
     type: "AdaptiveCard",
     version: "1.4",
     body,
+    ...(a.answerId
+      ? {
+          actions: [
+            feedbackAction("👍 Helpful", a.answerId, "helpful"),
+            feedbackAction("👎 Not helpful", a.answerId, "not_helpful"),
+          ],
+        }
+      : {}),
   };
 
   return CardFactory.adaptiveCard(card);
+}
+
+function feedbackAction(
+  title: string,
+  answerId: string,
+  rating: "helpful" | "not_helpful",
+): Record<string, unknown> {
+  // Carries only the answer and the vote. Who voted is established by the bot
+  // from the clicking user's SSO identity, never from card data.
+  return {
+    type: "Action.Submit",
+    title,
+    data: { kind: FEEDBACK_SUBMIT_KIND, answerId, rating },
+  };
 }
 
 export function emptyScopeCard(kind: "dm" | "channel"): Attachment {

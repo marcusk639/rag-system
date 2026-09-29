@@ -1,5 +1,10 @@
 import type { Config, Reranker, RetrievalResult } from "@rag/core";
-import { EgressPolicy, ValidationError, NO_REDIRECT_INIT } from "@rag/core";
+import {
+  ComplianceError,
+  EgressPolicy,
+  ValidationError,
+  NO_REDIRECT_INIT,
+} from "@rag/core";
 
 /**
  * Hosted cross-encoder reranker for the Cohere / Jina rerank REST APIs, which
@@ -37,6 +42,12 @@ export class HttpCrossEncoderReranker implements Reranker {
       endpoint: string;
       model: string;
       apiKey: string;
+      /**
+       * Extra request fields for this provider. Jina's `return_documents`
+       * defaults to TRUE, echoing every candidate's full text back; Cohere
+       * defaults to false. Same field names, different defaults.
+       */
+      extraBody?: Record<string, unknown>;
       /**
        * Defaults to `EgressPolicy.fromEnv()` so a directly-constructed instance
        * is still gated — matching `GeminiGenerator`/`OpenAIGenerator`. The
@@ -79,6 +90,7 @@ export class HttpCrossEncoderReranker implements Reranker {
         query,
         documents: candidates.map((c) => c.text),
         top_n: Math.min(topK, candidates.length),
+        ...this.opts.extraBody,
       }),
     });
 
@@ -95,12 +107,17 @@ export class HttpCrossEncoderReranker implements Reranker {
     const ranked = body.results ?? [];
 
     // Map provider indices back to our candidates, dropping any out-of-range
-    // index defensively. Reuse the original objects (RRF scores preserved); the
-    // array order now reflects relevance.
+    // index defensively. RRF `score` is preserved; the provider's relevance is
+    // carried as `rerankScore`, and the array order now reflects it.
     return ranked
       .filter((r) => Number.isInteger(r.index) && candidates[r.index])
       .slice(0, topK)
-      .map((r) => candidates[r.index]!);
+      .map((r) => {
+        const candidate = candidates[r.index]!;
+        return typeof r.relevance_score === "number"
+          ? { ...candidate, rerankScore: r.relevance_score }
+          : candidate;
+      });
   }
 }
 
@@ -119,8 +136,20 @@ export class HttpCrossEncoderReranker implements Reranker {
  */
 export function createReranker(
   cfg: Config["rerank"],
-  opts?: { egressPolicy?: EgressPolicy },
+  opts?: {
+    egressPolicy?: EgressPolicy;
+    complianceMode?: "none" | "client-data";
+  },
 ): Reranker | null {
+  // A hosted reranker ships retrieved chunk text to a third party, exactly as a
+  // hosted embedder would. Same gate as createEmbeddingProvider.
+  if (opts?.complianceMode === "client-data" && cfg.provider !== "none") {
+    throw new ComplianceError(
+      `COMPLIANCE_MODE=client-data does not allow a hosted reranker ` +
+        `(RERANK_PROVIDER="${cfg.provider}"): it would send document text to ` +
+        `an external API (IRC §7216). Set RERANK_PROVIDER=none.`,
+    );
+  }
   switch (cfg.provider) {
     case "none":
       return null;
@@ -144,6 +173,7 @@ export function createReranker(
         endpoint: "https://api.jina.ai/v1/rerank",
         model: cfg.model ?? "jina-reranker-v2-base-multilingual",
         apiKey: cfg.apiKey,
+        extraBody: { return_documents: false },
         egressPolicy: opts?.egressPolicy,
       });
     case "llm":

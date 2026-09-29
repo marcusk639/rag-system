@@ -4,7 +4,12 @@ import { Retriever } from "@rag/rag";
 import type { Db } from "@rag/db";
 import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
 import { runOneIngestion } from "../helpers/ingestion.js";
-import { EVAL_DOCS, EVAL_QUESTIONS, type EvalQuestion } from "./corpus.js";
+import {
+  EVAL_DOCS,
+  EVAL_QUESTIONS,
+  type EvalDoc,
+  type EvalQuestion,
+} from "./corpus.js";
 import {
   mean,
   ndcgAtK,
@@ -57,9 +62,10 @@ export async function seedEvalCorpus(
   db: Db,
   sourceId: string,
   embedder?: EmbeddingProvider,
+  docs: EvalDoc[] = EVAL_DOCS,
 ): Promise<Map<string, string>> {
   const connector = new FakeConnector(
-    EVAL_DOCS.map((d) =>
+    docs.map((d) =>
       plainTextDoc({
         externalId: d.externalId,
         title: d.title,

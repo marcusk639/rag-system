@@ -8,6 +8,7 @@ import { handleSyncSource } from "@rag/worker";
 import { loadPack } from "@rag/core";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 import { env, TEST_SCANNER_PACK_DIR } from "../env.js";
+import { runOneIngestion } from "../helpers/ingestion.js";
 
 /**
  * End-to-end classification gate: when a source's real `data_class` column is
@@ -133,5 +134,41 @@ describe("E2E: data-class ingestion gate (Phase 3 compliance)", () => {
     expect(logEntries[0]?.action).toBe("blocked");
     expect(logEntries[0]?.doc_class).toBe("D");
     expect(logEntries[0]?.external_id).toBe("blocked-doc-1");
+  });
+
+  // Class C has no sources.data_class mapping today (client_confidential maps
+  // to D), so the handler test above can never exercise it. C and D share one
+  // enum path in places, so a change that lets C through could let D through:
+  // prove C is blocked end to end too, through the real pipeline and database.
+  it("blocks a Class C source end to end and records it as Class C", async () => {
+    const sourceId = await createCustomSource(db, "class-c-gate-test");
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "class-c-doc",
+        title: "Class C Document",
+        text: "This document should be blocked as Class C.",
+      }),
+    ]);
+
+    const result = await runOneIngestion(db, sourceId, connector, {
+      sourceDocClass: "C",
+    });
+
+    expect(result.chunksCreated).toBe(0);
+    const counts = await db
+      .execute<{ docs: string; chunks: string }>(
+        sql`SELECT (SELECT COUNT(*) FROM documents)::text AS docs,
+                   (SELECT COUNT(*) FROM chunks)::text AS chunks`,
+      )
+      .then((r) => r.rows[0]);
+    expect(Number(counts?.docs)).toBe(0);
+    expect(Number(counts?.chunks)).toBe(0);
+
+    const log = await db
+      .execute<{ action: string; doc_class: string }>(
+        sql`SELECT action, doc_class FROM ingest_log WHERE source_id = ${sourceId}`,
+      )
+      .then((r) => r.rows);
+    expect(log).toEqual([{ action: "blocked", doc_class: "C" }]);
   });
 });

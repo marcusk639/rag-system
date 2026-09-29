@@ -24,3 +24,28 @@ export const filterSchema = z
   .refine((obj) => Object.keys(obj).length <= MAX_FILTER_KEYS, {
     message: `filter accepts at most ${MAX_FILTER_KEYS} keys`,
   });
+
+/**
+ * Bounded conversation history for `/ask`, `/ask/stream`, and the MCP `ask`
+ * tool. A DoS bound only — how many turns actually feed the follow-up rewrite
+ * is decided server-side by the condenser, never by clients.
+ */
+export const MAX_HISTORY_TURNS = 12;
+export const MAX_HISTORY_TURN_CHARS = 4000;
+
+export const conversationHistorySchema = z
+  .array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.string().max(MAX_HISTORY_TURN_CHARS),
+    }),
+  )
+  .max(MAX_HISTORY_TURNS);
+
+/**
+ * Upper bound on `topK` for /ask and the MCP `ask` tool. Every retrieved chunk
+ * (~800 tokens) lands in the generation prompt, so a caller-chosen 100 meant an
+ * ~80k-token prompt per request. /search returns chunks without generating and
+ * keeps its own, larger bound.
+ */
+export const MAX_ASK_TOP_K = 30;

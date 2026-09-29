@@ -1,4 +1,10 @@
 import { auth } from "@/lib/auth";
+import { buildUpstreamAskBody } from "@/lib/chat-request";
+import {
+  UPSTREAM_CONNECT_TIMEOUT_MS,
+  UPSTREAM_IDLE_TIMEOUT_MS,
+  withIdleTimeout,
+} from "@/lib/sse-proxy";
 import { getScopeAssertionToken } from "@/lib/scope-token";
 import {
   getRagApiConfig,
@@ -39,6 +45,22 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(400, "INVALID_BODY", "Request body must be JSON.");
   }
 
+  // One controller for the whole upstream request: aborted if the browser
+  // disconnects, if the API does not answer with headers in time, or if the
+  // stream goes idle (below). Without it a closed tab left the API generating.
+  const upstreamAbort = new AbortController();
+  request.signal.addEventListener("abort", () => upstreamAbort.abort(), {
+    once: true,
+  });
+  // The listener does not fire for a signal that aborted during the awaits
+  // above (auth, config, body parsing).
+  if (request.signal.aborted) upstreamAbort.abort();
+  let connectTimedOut = false;
+  const connectTimer = setTimeout(() => {
+    connectTimedOut = true;
+    upstreamAbort.abort();
+  }, UPSTREAM_CONNECT_TIMEOUT_MS);
+
   let upstream: Response;
   try {
     upstream = await fetch(`${config.url}/ask/stream`, {
@@ -47,10 +69,15 @@ export async function POST(request: Request): Promise<Response> {
         Authorization: `Bearer ${resolved.token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildUpstreamAskBody(body)),
+      signal: upstreamAbort.signal,
     });
   } catch {
-    return jsonError(502, "UPSTREAM_UNREACHABLE", "RAG API is unreachable.");
+    return connectTimedOut
+      ? jsonError(504, "UPSTREAM_TIMEOUT", "RAG API did not respond in time.")
+      : jsonError(502, "UPSTREAM_UNREACHABLE", "RAG API is unreachable.");
+  } finally {
+    clearTimeout(connectTimer);
   }
 
   // Non-streaming failure (e.g. 401/403/503): surface the JSON error envelope.
@@ -62,7 +89,10 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  return new Response(upstream.body, {
+  const stream = withIdleTimeout(upstream.body, UPSTREAM_IDLE_TIMEOUT_MS, () =>
+    upstreamAbort.abort(),
+  );
+  return new Response(stream, {
     status: 200,
     headers: {
       "Content-Type": "text/event-stream",

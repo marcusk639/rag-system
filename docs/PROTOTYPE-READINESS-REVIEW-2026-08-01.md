@@ -46,32 +46,32 @@ unobtainable for a normal question a staff member would actually ask.
 
 ## Findings at a glance
 
-| ID       | Severity | Finding                                                                              | Status             |
-| -------- | -------- | ------------------------------------------------------------------------------------ | ------------------ |
-| **C-1**  | 🔴       | TRI pre-flight turns routine tax-SOP questions into `500 Internal server error`      | ✅ **Fixed**       |
-| **H-1**  | 🟠       | Sparse retrieval is dead on 33% of natural questions (`plainto_tsquery` ANDs)        | ✅ **Fixed**       |
-| **H-1b** | 🟠       | The "flat weight sweep → corpus is too easy" conclusion is partly wrong              | ✅ **Corrected**   |
-| **H-2**  | 🟠       | No conversation memory — follow-up questions fail on both surfaces                   | Documented; spec'd |
-| **H-3**  | 🟠       | A parser or embedding failure permanently drops a document from the index            | Documented         |
-| **H-4**  | 🟠       | Tables inside `.docx`/`.pdf` get no table-aware chunking                             | Documented         |
-| **H-5**  | 🟠       | Reranking is implemented but disabled — on a corpus with confirmed near-duplicates   | Documented         |
-| **H-6**  | 🟠       | Superseded/duplicate documents are retrieved with equal confidence                   | Documented         |
-| **H-7**  | 🟠       | Grouped citations (`[1, 2]`, `[1-3]`) silently render an answer with zero sources    | ✅ **Fixed**       |
-| **M-1**  | 🟡       | The Teams bot captures no feedback — the primary surface yields zero quality signal  | Documented         |
-| **M-2**  | 🟡       | Web BFF has no upstream timeout — a hung API spins forever                           | Documented         |
-| **M-3**  | 🟡       | No Anthropic/Claude generator despite being a stated requirement                     | Documented         |
-| **M-4**  | 🟡       | Relevance scores are relative — the top hit is always 1.0, even when irrelevant      | Documented         |
-| **M-5**  | 🟡       | Screenshots and diagrams inside SOPs are silently dropped                            | Documented         |
-| **M-6**  | 🟡       | `source_modified_at` is dead; supersession depends on a silent-failure metadata path | Documented         |
-| **M-7**  | 🟡       | `pnpm typecheck` is red on `main`; the launch doc claims the gate is green           | Documented         |
-| **M-8**  | 🟡       | Teams collapses every non-2xx into one undifferentiated message                      | Documented         |
-| **M-9**  | 🟡       | ~40 calculator spreadsheets chunk into meaningless rows                              | Documented         |
-| **M-10** | 🟡       | `pnpm eval:kb` documented but absent; `run-real-eval.ts` truncates the DB            | Documented         |
-| **L-1**  | 🟢       | Teams bot logs via `console.*`, against repo convention                              | Documented         |
-| **L-2**  | 🟢       | `WEB_AUTH_MODE=static-fallback` has no expiry or alert                               | Documented         |
-| **L-3**  | 🟢       | Teams bot is single-instance only (`MemoryStorage`)                                  | Documented         |
-| **L-4**  | 🟢       | `ts_rank_cd` runs unnormalized — mildly favors long chunks                           | Documented         |
-| **L-5**  | 🟢       | Metadata merge order lets a future parser change clobber `modifiedAt`/`title`/`url`  | Documented         |
+| ID       | Severity | Finding                                                                              | Status           |
+| -------- | -------- | ------------------------------------------------------------------------------------ | ---------------- |
+| **C-1**  | 🔴       | TRI pre-flight turns routine tax-SOP questions into `500 Internal server error`      | ✅ **Fixed**     |
+| **H-1**  | 🟠       | Sparse retrieval is dead on 33% of natural questions (`plainto_tsquery` ANDs)        | ✅ **Fixed**     |
+| **H-1b** | 🟠       | The "flat weight sweep → corpus is too easy" conclusion is partly wrong              | ✅ **Corrected** |
+| **H-2**  | 🟠       | No conversation memory — follow-up questions fail on both surfaces                   | ✅ **Resolved**  |
+| **H-3**  | 🟠       | A parser or embedding failure permanently drops a document from the index            | ✅ **Resolved**  |
+| **H-4**  | 🟠       | Tables inside `.docx`/`.pdf` get no table-aware chunking                             | ✅ **Resolved**  |
+| **H-5**  | 🟠       | Reranking is implemented but disabled — on a corpus with confirmed near-duplicates   | 🟡 **Partial**   |
+| **H-6**  | 🟠       | Superseded/duplicate documents are retrieved with equal confidence                   | 🟡 **Partial**   |
+| **H-7**  | 🟠       | Grouped citations (`[1, 2]`, `[1-3]`) silently render an answer with zero sources    | ✅ **Fixed**     |
+| **M-1**  | 🟡       | The Teams bot captures no feedback — the primary surface yields zero quality signal  | ✅ **Resolved**  |
+| **M-2**  | 🟡       | Web BFF has no upstream timeout — a hung API spins forever                           | ✅ **Resolved**  |
+| **M-3**  | 🟡       | No Anthropic/Claude generator despite being a stated requirement                     | Documented       |
+| **M-4**  | 🟡       | Relevance scores are relative — the top hit is always 1.0, even when irrelevant      | 🟡 **Partial**   |
+| **M-5**  | 🟡       | Screenshots and diagrams inside SOPs are silently dropped                            | Documented       |
+| **M-6**  | 🟡       | `source_modified_at` is dead; supersession depends on a silent-failure metadata path | 🟡 **Partial**   |
+| **M-7**  | 🟡       | `pnpm typecheck` is red on `main`; the launch doc claims the gate is green           | Documented       |
+| **M-8**  | 🟡       | Teams collapses every non-2xx into one undifferentiated message                      | ✅ **Resolved**  |
+| **M-9**  | 🟡       | ~40 calculator spreadsheets chunk into meaningless rows                              | Documented       |
+| **M-10** | 🟡       | `pnpm eval:kb` documented but absent; `run-real-eval.ts` truncates the DB            | 🟡 **Partial**   |
+| **L-1**  | 🟢       | Teams bot logs via `console.*`, against repo convention                              | Documented       |
+| **L-2**  | 🟢       | `WEB_AUTH_MODE=static-fallback` has no expiry or alert                               | Documented       |
+| **L-3**  | 🟢       | Teams bot is single-instance only (`MemoryStorage`)                                  | Documented       |
+| **L-4**  | 🟢       | `ts_rank_cd` runs unnormalized — mildly favors long chunks                           | Documented       |
+| **L-5**  | 🟢       | Metadata merge order lets a future parser change clobber `modifiedAt`/`title`/`url`  | Documented       |
 
 ---
 
@@ -314,6 +314,24 @@ still blocked on the same conversation. What it changes is the _reasoning_: the
 flat sweep was evidence of **a bug plus an easy corpus**, and it was read as
 evidence of the corpus alone. The general lesson is worth keeping — **a
 degenerate metric is a reason to suspect the instrument, not only the data.**
+
+## Resolution Notes (2026-09-16)
+
+Fixed on branch `fix/rag-review-findings`; full mapping in
+[`RAG-REVIEW-2026-09-16.md` §11](./RAG-REVIEW-2026-09-16.md#11-implementation-status).
+
+- **C-1 correction:** the code default for `GENERATION_TRI_POLICY` is `block`, not `warn` (`packages/core/src/config.ts`); production sets `warn` explicitly. A stale comment saying otherwise was corrected in `7fadbb8`.
+- **H-2 — follow-ups:** ✅ follow-up questions are rewritten into standalone retrieval queries from bounded client-held history (decision B0): `631c5c5`, `7591f9e`, `799cce8`.
+- **H-3 — failed documents:** ✅ recorded as `failed` in `ingest_log` and retried on the next sync: `5ba583e`.
+- **H-4 — tables in docx/pdf:** ✅ split by whole rows under a repeated header: `ec50000`.
+- **H-5 — reranking:** 🟡 prerequisites A2–A4 done (`36ce4f7`); still off pending a vendor/DPA decision.
+- **H-6 — duplicates:** 🟡 duplicate chunk bodies collapsed before the per-document cap, and citations show modified dates (`d155bfa`); no recency prior.
+- **M-1 — Teams feedback:** ✅ Helpful / Not helpful on answer cards: `c972d19`.
+- **M-2 — web BFF timeout:** ✅ 30s connect timeout (504), 60s stream idle timeout, upstream abort on browser disconnect: `94884b1`.
+- **M-4 — relative scores:** 🟡 `audit_log.top_score` records absolute similarity (`6d42f1e`); an opt-in relevance floor exists (`bd53ba9`). Returned scores are still normalized.
+- **M-6 — modified dates:** 🟡 dates reach citations (`d155bfa`); `source_modified_at` is still not read at retrieval.
+- **M-8 — Teams errors:** ✅ distinct messages for 422 (compliance refusal), 429, 401/403, and 400: `1682e26`.
+- **M-10 — eval:kb / truncation:** 🟡 `pnpm eval:gold` exists (`e05f8e4`) and `truncateAll` refuses non-local databases (`c343ef9`).
 
 ---
 

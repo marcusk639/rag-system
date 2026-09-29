@@ -97,4 +97,44 @@ describe("ChatInterface data-testid hooks", () => {
     const chip = screen.getByTestId("citation-chip");
     expect(chip).toHaveAttribute("data-doc-id", "doc-abc");
   });
+
+  it("shows a citation's modified date on its chip", () => {
+    render(
+      <ChatInterface
+        session={sessionWith({
+          id: "9",
+          role: "assistant",
+          content: "Answer [1].",
+          citations: [
+            {
+              index: 1,
+              documentId: "d",
+              title: "Intake SOP",
+              chunkId: "c",
+              score: 1,
+              modifiedAt: "2025-11-04",
+            },
+          ],
+        })}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    expect(screen.getByTestId("citation-chip")).toHaveTextContent("2025-11-04");
+  });
+
+  it("gives the icon-only send button an accessible name", () => {
+    render(
+      <ChatInterface
+        session={{ id: "s", name: "S", messages: [] }}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Send question" }),
+    ).toBeInTheDocument();
+  });
 });

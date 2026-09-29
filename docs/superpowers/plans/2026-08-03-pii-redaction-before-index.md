@@ -1,8 +1,6 @@
 # PII redaction before chunking, indexing, or storage
 
-**Status:** design — not built. **Blocks:** re-ingestion of the firm corpus.
-**Context:** the index was purged 2026-08-03 after a screen found client
-identifiers in 355 of 858 documents. Nothing is re-ingested until this exists.
+**Status:** ✅ Built (status confirmed 2026-09-16). **Context:** the index was purged 2026-08-03 after a screen found client identifiers in 355 of 858 documents. Redaction is now implemented in `packages/core/src/content-safety.ts` and integrated into `packages/ingestion/src/pipeline.ts`. Tables and titles are also redacted (f09bb3c), not only markdown body text.
 
 > **The design constraint that shapes everything below.** Redaction must happen
 > **before the embedding call**, not before storage. Embeddings go to a third

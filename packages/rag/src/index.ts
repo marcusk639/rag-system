@@ -40,6 +40,14 @@ export {
   createReranker,
 } from "./retrieval/reranker.js";
 
+// Conversation (follow-up condensation for retrieval)
+export {
+  buildContextualizePrompt,
+  contextualizeQuestion,
+  type ContextualizeOptions,
+  type ConversationTurn,
+} from "./retrieval/contextualize.js";
+
 // Generation
 export {
   GeminiGenerator,
@@ -47,6 +55,7 @@ export {
   createGenerator,
   buildCitations,
   filterCitationsToAnswer,
+  TRUNCATION_NOTICE,
   type Generator,
   type GenerationResult,
   type TriPolicy,

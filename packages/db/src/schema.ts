@@ -175,7 +175,8 @@ export const documents = pgTable(
 
 // ----------------------------------------------------------------------------
 // chunks — one row per embedded slice of a document. The `embedding` column
-// is a pgvector type; dimension is 768 to match Gemini text-embedding-004.
+// is a pgvector type; dimension is 768 to match Gemini gemini-embedding-001 (outputDimensionality
+// 768; text-embedding-004 is retired).
 //
 // IMPORTANT: if you change embedding model dimensions, this column needs to
 // be re-typed and the HNSW index rebuilt. See migration file 0000_init.sql
@@ -381,7 +382,11 @@ export const auditLog = pgTable(
     retrievedCount: integer("retrieved_count").notNull(),
     /** "ask" | "search" — discriminates which endpoint produced this row. */
     endpoint: text("endpoint").notNull().default("ask"),
-    /** Top retrieval result's combined score (0-1); null when nothing retrieved. */
+    /**
+     * Best dense (cosine) similarity among retrieved chunks; null when nothing
+     * retrieved, 0 when every hit came from the sparse arm only. Rows written before the `topRelevanceScore` fix hold the
+     * max-normalized RRF score instead, which is 1.0 for any non-empty result.
+     */
     topScore: real("top_score"),
     /** The answer this row is for; links feedback to answer context. Nullable — pre-0018 rows have none. */
     answerId: text("answer_id"),
@@ -461,7 +466,7 @@ export const ingestLog = pgTable(
     externalId: text("external_id").notNull(),
     /** DocumentClass at ingest time (A | B | C | D). */
     docClass: text("doc_class").notNull(),
-    /** "ingested" | "blocked" */
+    /** "ingested" | "blocked" | "tri-flagged" | "failed" */
     action: text("action").notNull(),
     /** Non-null only when action = "blocked". */
     rejectionReason: text("rejection_reason"),

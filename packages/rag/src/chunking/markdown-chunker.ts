@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { encode } from "gpt-tokenizer";
+import { decode, encode } from "gpt-tokenizer";
 import type { Chunk, Chunker, ParsedDocument } from "@rag/core";
 import { clampToTokenLimit } from "./token-clamp.js";
 
@@ -33,6 +33,11 @@ export class MarkdownChunker implements Chunker {
     let ordinal = 0;
 
     for (const section of sections) {
+      // A section with no real text — a horizontal rule, a stray table pipe,
+      // lone punctuation — would embed as a low-information vector that sits
+      // near many queries and takes a retrieval slot. Short sections with real
+      // words ("Owner: client services lead") are kept.
+      if (!hasRealText(section.body)) continue;
       const sectionChunks = this.chunkSection(section);
       for (const rawText of sectionChunks) {
         // Last-resort safety net: never let a chunk past the hard embedding
@@ -53,28 +58,28 @@ export class MarkdownChunker implements Chunker {
   }
 
   private chunkSection(section: Section): string[] {
-    const tokens = countTokens(section.body);
-    if (tokens <= this.opts.chunkSize) {
+    // The heading line goes on AFTER overlap is applied, so every chunk opens
+    // with its heading. Applying overlap to header-prefixed strings put the
+    // previous chunk's tail text above the heading of every continuation
+    // chunk, burying the structural context the header exists to provide.
+    const header = section.headingPath.length
+      ? `# ${section.headingPath.join(" › ")}\n\n`
+      : "";
+
+    if (countTokens(section.body) <= this.opts.chunkSize) {
       // Whole section fits; prepend the heading line so the chunk is self-contained.
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
       return [header + section.body];
     }
 
     // Split by blank lines (paragraphs / code blocks treated as one unit).
     const units = splitParagraphs(section.body);
-    const chunks: string[] = [];
+    const bodies: string[] = [];
     let buffer: string[] = [];
     let bufferTokens = 0;
 
     const flush = () => {
       if (buffer.length === 0) return;
-      const text = buffer.join("\n\n");
-      const header = section.headingPath.length
-        ? `# ${section.headingPath.join(" › ")}\n\n`
-        : "";
-      chunks.push(header + text);
+      bodies.push(buffer.join("\n\n"));
       buffer = [];
       bufferTokens = 0;
     };
@@ -82,14 +87,16 @@ export class MarkdownChunker implements Chunker {
     for (const unit of units) {
       const unitTokens = countTokens(unit);
       if (unitTokens > this.opts.chunkSize) {
-        // Single paragraph too big — flush what we have, then hard-split.
+        // Single paragraph too big — flush what we have, then split it. A
+        // table splits by whole rows under a repeated header; anything else
+        // by sentence (hardSplit), which would cut a table mid-row and leave
+        // later rows without their column names.
         flush();
-        for (const piece of hardSplit(unit, this.opts.chunkSize)) {
-          const header = section.headingPath.length
-            ? `# ${section.headingPath.join(" › ")}\n\n`
-            : "";
-          chunks.push(header + piece);
-        }
+        bodies.push(
+          ...(isMarkdownTable(unit)
+            ? splitTableByRows(unit, this.opts.chunkSize)
+            : hardSplit(unit, this.opts.chunkSize)),
+        );
         continue;
       }
 
@@ -101,7 +108,9 @@ export class MarkdownChunker implements Chunker {
     }
     flush();
 
-    return applyOverlap(chunks, this.opts.chunkOverlap);
+    return applyOverlap(bodies, this.opts.chunkOverlap).map(
+      (body) => header + body,
+    );
   }
 }
 
@@ -149,6 +158,44 @@ function splitByHeadings(markdown: string): Section[] {
   return sections.length
     ? sections
     : [{ headingPath: [], body: markdown.trim() }];
+}
+
+function hasRealText(body: string): boolean {
+  return (body.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 3;
+}
+
+function isMarkdownTable(unit: string): boolean {
+  const lines = unit.split("\n").filter((l) => l.trim());
+  return (
+    lines.length >= 3 &&
+    lines.every((l) => l.trimStart().startsWith("|")) &&
+    /^\s*\|?\s*:?-{3,}/.test(lines[1] ?? "")
+  );
+}
+
+/**
+ * Split a markdown table into groups of whole rows, each group preceded by the
+ * header and separator lines, so every chunk is a self-describing table.
+ */
+function splitTableByRows(table: string, maxTokens: number): string[] {
+  const lines = table.split("\n").filter((l) => l.trim());
+  const head = `${lines[0]}\n${lines[1]}`;
+  const headTokens = countTokens(head);
+  const out: string[] = [];
+  let group: string[] = [];
+  let groupTokens = 0;
+  for (const row of lines.slice(2)) {
+    const rowTokens = countTokens(row);
+    if (group.length > 0 && headTokens + groupTokens + rowTokens > maxTokens) {
+      out.push(`${head}\n${group.join("\n")}`);
+      group = [];
+      groupTokens = 0;
+    }
+    group.push(row);
+    groupTokens += rowTokens;
+  }
+  if (group.length > 0) out.push(`${head}\n${group.join("\n")}`);
+  return out;
 }
 
 function splitParagraphs(text: string): string[] {
@@ -223,14 +270,16 @@ function applyOverlap(chunks: string[], overlapTokens: number): string[] {
   const out: string[] = [chunks[0]!];
   for (let i = 1; i < chunks.length; i++) {
     const prev = chunks[i - 1]!;
-    const prevTokens = encode(prev);
-    // Take the tail tokens of the previous chunk as the prefix of this one.
-    const tail = prevTokens.slice(-overlapTokens);
-    // Decoding back to string isn't exact for arbitrary tokens, so we
-    // approximate by slicing the previous chunk's string. For most languages
-    // the ratio is ~4 chars/token; this overshoots slightly, which is fine.
-    const approxChars = tail.length * 4;
-    const overlapText = prev.slice(-approxChars);
+    // A table group already repeats its header, and a character-sliced tail
+    // would glue half a row onto the front of it. No overlap for tables.
+    if (isMarkdownTable(chunks[i]!)) {
+      out.push(chunks[i]!);
+      continue;
+    }
+    // Carry exactly the previous chunk's last `overlapTokens` tokens. A
+    // 4-chars-per-token estimate carried twice the intended overlap on
+    // digit-heavy text (account numbers, amounts, codes).
+    const overlapText = decode(encode(prev).slice(-overlapTokens));
     out.push(`${overlapText}\n\n${chunks[i]}`);
   }
   return out;

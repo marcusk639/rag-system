@@ -3,6 +3,8 @@ import {
   type Connector,
   type ConnectorListOptions,
   type ConnectorListResult,
+  DEFAULT_EXCLUDED_PATH_FRAGMENTS,
+  isExcludedPath,
   type SourceDocument,
   ValidationError,
 } from "@rag/core";
@@ -180,6 +182,16 @@ export class SharePointConnector implements Connector {
         );
         continue;
       }
+      // Excluded location: never download it. Reported as a deletion so a copy
+      // indexed before the exclusion existed is removed.
+      if (this.isExcluded(item)) {
+        deletions.push(`${driveId}:${item.id}`);
+        this.logger.debug(
+          { marker: "ingest.skip.excluded_path", id: item.id },
+          "sharepoint item is under an excluded path, skipping",
+        );
+        continue;
+      }
       // Document budget for this page is full: keep scanning (to collect any
       // later tombstones) but stop downloading more file content.
       if (documents.length >= remaining) continue;
@@ -214,6 +226,11 @@ export class SharePointConnector implements Connector {
     const item = await this.graph.getJson<DriveItem>(
       `/drives/${driveId}/items/${itemId}`,
     );
+    if (this.isExcluded(item)) {
+      throw new ValidationError(
+        `sharepoint item ${externalId} is under an excluded path`,
+      );
+    }
     const doc = await this.toSourceDocument(driveId, item, {
       forceFetch: true,
     });
@@ -228,6 +245,13 @@ export class SharePointConnector implements Connector {
   // --------------------------------------------------------------------------
   // Internals
   // --------------------------------------------------------------------------
+
+  private isExcluded(item: DriveItem): boolean {
+    return isExcludedPath(itemPath(item), [
+      ...DEFAULT_EXCLUDED_PATH_FRAGMENTS,
+      ...this.config.excludePaths,
+    ]).excluded;
+  }
 
   /**
    * Build the initial cursor. When `driveId` is configured we walk only that
@@ -312,12 +336,7 @@ export class SharePointConnector implements Connector {
       `/drives/${driveId}/items/${item.id}/content`,
     );
 
-    const path = item.parentReference?.path
-      ? `${item.parentReference.path.replace(/^\/drive\/root:?/, "")}/${item.name ?? ""}`.replace(
-          /\/+/g,
-          "/",
-        )
-      : (item.name ?? "");
+    const path = itemPath(item);
 
     return {
       externalId,
@@ -344,4 +363,14 @@ export class SharePointConnector implements Connector {
       },
     };
   }
+}
+
+/** Library-relative path of a drive item, e.g. "/Clients/Smith/notes.pdf". */
+function itemPath(item: DriveItem): string {
+  return item.parentReference?.path
+    ? `${item.parentReference.path.replace(/^\/drive\/root:?/, "")}/${item.name ?? ""}`.replace(
+        /\/+/g,
+        "/",
+      )
+    : (item.name ?? "");
 }

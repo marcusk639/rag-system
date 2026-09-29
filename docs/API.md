@@ -218,11 +218,24 @@ Retrieve + generate. Requires `GENERATION_PROVIDER` and `GENERATION_MODEL` to be
   "question": "What is our PTO policy?",
   "topK": 6,
   "sourceIds": ["uuid"],
-  "filter": { "category": "hr" }
+  "filter": { "category": "hr" },
+  "history": [
+    { "role": "user", "content": "What's the vacation policy?" },
+    {
+      "role": "assistant",
+      "content": "15 days per year for full-time employees."
+    }
+  ]
 }
 ```
 
-Same `topK` / `sourceIds` / `filter` semantics as `/search`.
+| Field       | Type                                         | Notes                                                                                                                                                |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `question`  | string (≤ 2000)                              | The question to answer                                                                                                                               |
+| `topK`      | int (1–30)                                   | Chunks to retrieve; defaults to `DEFAULT_TOP_K`                                                                                                      |
+| `sourceIds` | uuid[]                                       | Narrow retrieval to these sources (always intersected with the caller's scope)                                                                       |
+| `filter`    | object                                       | Metadata filter, same semantics as `/search`                                                                                                         |
+| `history`   | `{ role: "user" \| "assistant", content }[]` | Optional, ≤ 12 turns, ≤ 4000 chars each. Used only to rewrite a follow-up into a standalone retrieval query; the answer is generated from `question` |
 
 **Response 200**:
 
@@ -236,21 +249,34 @@ Same `topK` / `sourceIds` / `filter` semantics as `/search`.
       "title": "Employee Handbook 2026",
       "url": "https://...",
       "chunkId": "uuid",
-      "score": 1.0
+      "chunkIds": ["uuid", "uuid"],
+      "score": 1.0,
+      "modifiedAt": "2026-01-15"
     },
     {
       "index": 2,
       "documentId": "...",
       "title": "...",
       "chunkId": "...",
-      "score": 0.83
+      "chunkIds": ["..."],
+      "score": 0.83,
+      "modifiedAt": "2025-12-01"
     }
   ],
-  "retrieved": [/* same shape as /search results */]
+  "retrieved": [/* same shape as /search results */],
+  "reviewStatus": "draft_requires_practitioner_review",
+  "disclaimer": "Draft — AI-generated and may be inaccurate. Requires review by a qualified practitioner before use.",
+  "answerId": "uuid"
 }
 ```
 
-The `[N]` markers in `answer` correspond to the `index` field in `citations`.
+| Citation field | Type           | Notes                                                         |
+| -------------- | -------------- | ------------------------------------------------------------- |
+| `index`        | integer        | Corresponds to `[N]` markers in `answer`                      |
+| `chunkId`      | UUID           | The best-ranked chunk from this document                      |
+| `chunkIds`     | array of UUIDs | All chunks from this document used in generation, in order    |
+| `score`        | float (0–1)    | Normalized fusion score of the best-ranked chunk (relative)   |
+| `modifiedAt`   | ISO 8601 date  | Optional; document modification date if available in metadata |
 
 If retrieval returns zero chunks, the endpoint short-circuits — no LLM call is made, and the response is:
 

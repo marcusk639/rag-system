@@ -3,6 +3,7 @@ import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
+import { toHistory } from "@/lib/chat-request";
 import { AnswerFeedback } from "@/components/answer-feedback";
 import type { ChatSession, Citation, Message, Source } from "@/types";
 
@@ -51,6 +52,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const question = chatMessage.trim();
     if (!question || streaming) return;
 
+    // Captured before this turn is added: `session` is the render-time value.
+    const history = toHistory(session.messages);
     addMessage({ id: newMessageId(), role: "user", content: question });
     const assistantId = newMessageId();
     addMessage({ id: assistantId, role: "assistant", content: "" });
@@ -62,6 +65,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           question,
           sourceIds: selectedSource ? [selectedSource.id] : undefined,
+          history,
         },
         {
           onToken: (text) =>
@@ -132,6 +136,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200"
                           >
                             [{c.index}] {c.title}
+                            {c.modifiedAt && (
+                              <span className="ml-1 text-blue-500">
+                                · {c.modifiedAt}
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -179,6 +188,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               }}
             />
             <button
+              aria-label="Send question"
               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50"
               onClick={handleSendMessage}
               disabled={streaming}

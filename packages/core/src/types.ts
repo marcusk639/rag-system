@@ -238,6 +238,12 @@ export interface RetrievalResult {
   denseScore: number;
   /** Sparse (BM25) score component */
   sparseScore: number;
+  /**
+   * Cross-encoder relevance from the reranker, when one ran. Kept separate
+   * from `score` (RRF) so result ORDER after reranking and the displayed or
+   * audited scores never silently disagree.
+   */
+  rerankScore?: number;
   /** Document this chunk came from */
   document: {
     id: string;

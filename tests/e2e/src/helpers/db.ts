@@ -10,6 +10,48 @@ export function openTestDb(): { db: Db; close: () => Promise<void> } {
   return { db, close };
 }
 
+const LOCAL_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "[::1]",
+  "::1",
+  "postgres",
+]);
+
+/**
+ * Refuse to run destructive test setup against anything but a local database.
+ *
+ * `truncateAll` wipes documents, chunks, and sources, and the harness takes its
+ * target from `DATABASE_URL` — the same variable production uses. One
+ * `pnpm eval:real` in a shell with a production URL exported would erase the
+ * index. Local hosts (and `postgres`, the docker-compose service name) pass;
+ * anything else needs `E2E_ALLOW_REMOTE_TRUNCATE=1`. The refusal names the host
+ * but never echoes the URL, which carries the password.
+ */
+export function assertDestructiveTestTarget(
+  databaseUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  let host: string;
+  try {
+    // `postgres:` is not a special URL scheme, so the host is opaque: no
+    // lowercasing. An empty host is the unix-socket form
+    // (postgresql:///db?host=/var/run/postgresql), which is local.
+    host = new URL(databaseUrl).hostname.toLowerCase();
+  } catch {
+    throw new Error(
+      "[e2e] refusing to truncate: the test DATABASE_URL could not be parsed",
+    );
+  }
+  if (host === "" || LOCAL_HOSTS.has(host)) return;
+  if (environment.E2E_ALLOW_REMOTE_TRUNCATE === "1") return;
+  throw new Error(
+    `[e2e] refusing to truncate tables on non-local database host "${host}". ` +
+      "Point E2E_DATABASE_URL at a local test database, or set " +
+      "E2E_ALLOW_REMOTE_TRUNCATE=1 if this remote database is disposable.",
+  );
+}
+
 /**
  * Truncate every application table. Called by each spec's beforeEach so specs
  * don't leak ingested data into each other.
@@ -19,6 +61,7 @@ export function openTestDb(): { db: Db; close: () => Promise<void> } {
  * don't have to enumerate dependents.
  */
 export async function truncateAll(db: Db): Promise<void> {
+  assertDestructiveTestTarget(env.databaseUrl);
   await db.execute(sql`
     TRUNCATE TABLE chunks, documents, ingestion_jobs, sources
     RESTART IDENTITY CASCADE

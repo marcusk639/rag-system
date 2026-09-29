@@ -90,3 +90,6 @@ corpus-analysis/
 # `.serena/.gitignore` already excludes its cache and local-only config, so
 # only the shared project config is tracked.
 .token-optimizer/
+
+# eval:gold reports contain real knowledge-base answers
+gold-*.json

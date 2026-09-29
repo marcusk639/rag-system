@@ -1,8 +1,15 @@
 #!/usr/bin/env node
-// Pre-commit secret scan: blocks commits whose staged files contain
-// API-key/token/private-key material. Zero dependencies.
+// Secret scan: blocks content containing API-key/token/private-key material.
+// Zero dependencies.
+//
+// Modes: staged (default in pre-commit) checks staged content; tree checks every
+// tracked file's working-tree content, used when nothing is staged or with --all.
+// A staged-only check silently passes when run outside a commit — it inspects
+// zero files and exits 0 — which is how the db-safety fixtures below went
+// unscanned for weeks.
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const PATTERNS = [
   { regex: /sk-or-[\w-]{3,}/, description: "OpenRouter API key" },
@@ -36,6 +43,12 @@ const ALLOWLIST = [
   /^readiness-report\.md$/,
   /\.test\.(ts|tsx|mjs)$/,
   /^packages\/test-fixtures\//,
+  // Fixtures for `assertDestructiveTestTarget`, the guard that refuses to run
+  // destructive tests against a non-local database. It must assert on BOTH
+  // local URLs (allowed) and deliberately remote ones (rejected), so it
+  // necessarily contains non-local credential-shaped strings. Allowlisted by
+  // exact path rather than widening the list to every *.spec.ts.
+  /^tests\/e2e\/src\/specs\/db-safety\.spec\.ts$/,
 ];
 
 function stagedFiles() {
@@ -60,10 +73,34 @@ function stagedContent(file) {
   }
 }
 
+function trackedFiles() {
+  return execFileSync("git", ["ls-files"], { encoding: "utf-8" })
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+}
+
+function workingContent(file) {
+  try {
+    return readFileSync(file, "utf-8");
+  } catch (err) {
+    if (err?.code === "ENOENT") return null;
+    unreadable.push({ file, reason: String(err?.code ?? err?.message) });
+    return null;
+  }
+}
+
+const unreadable = [];
+const forceAll = process.argv.includes("--all");
+const staged = forceAll ? [] : stagedFiles();
+const useStaged = staged.length > 0;
+const files = useStaged ? staged : trackedFiles();
+const readContent = useStaged ? stagedContent : workingContent;
+
 let blocked = false;
-for (const file of stagedFiles()) {
+for (const file of files) {
   if (ALLOWLIST.some((re) => re.test(file))) continue;
-  const content = stagedContent(file);
+  const content = readContent(file);
   if (content === null) continue;
   const lines = content.split("\n");
   for (const { regex, description } of PATTERNS) {
@@ -74,6 +111,14 @@ for (const file of stagedFiles()) {
       }
     });
   }
+}
+
+if (unreadable.length > 0) {
+  console.error(
+    `\n  BLOCKED: ${unreadable.length} file(s) could not be read, so they were never scanned:`,
+  );
+  for (const u of unreadable) console.error(`    ${u.file}: ${u.reason}`);
+  blocked = true;
 }
 
 if (blocked) {

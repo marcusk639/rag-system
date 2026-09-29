@@ -22,6 +22,14 @@
 Together: 1 and 2 are offline and run in CI; 3 and 4 are online and accumulate
 from real use.
 
+> **Correction (2026-09-16).** What runs in CI for 2 is the faithfulness
+> _scorer's_ unit tests; no real answer is scored yet, because the gold set is
+> empty. `pnpm eval` now also gates on the harder CPA corpus
+> (`tests/e2e/src/specs/retrieval-eval-cpa.spec.ts`), and `pnpm eval:gold`
+> scores the deployed knowledge base against the gold set once it exists —
+> retrieval, refusals, fabricated citations and truncation, not claim-level
+> faithfulness. See `EVAL-GOLD-SET-GUIDE.md`.
+
 ---
 
 ## Tier 1 — automatable, no CPA required
@@ -142,6 +150,9 @@ API_TOKENS=<non-empty> AUTH_PROVIDER=static-token \
 E2E_DATABASE_URL=postgres://rag:rag@localhost:5432/rag \
 DATABASE_URL=postgres://rag:rag@localhost:5432/rag \
   pnpm eval:real
+
+# gold set against the deployed API (see EVAL-GOLD-SET-GUIDE.md)
+GOLD_API_URL=https://<api-host> GOLD_API_TOKEN=... pnpm eval:gold
 
 # faithfulness + gold-set validation unit tests
 npx vitest run --root tests/e2e src/specs/eval-faithfulness.spec.ts

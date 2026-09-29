@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  conversationHistorySchema,
   filterSchema,
+  MAX_HISTORY_TURNS,
+  MAX_HISTORY_TURN_CHARS,
   MAX_FILTER_KEYS,
   MAX_FILTER_KEY_LEN,
   MAX_FILTER_VALUES_PER_KEY,
@@ -80,5 +83,34 @@ describe("filterSchema DoS caps — values per key", () => {
       () => "v",
     );
     expect(() => filterSchema.parse({ k: values })).toThrow();
+  });
+});
+
+describe("conversationHistorySchema", () => {
+  it("accepts user/assistant turns", () => {
+    const turns = [
+      { role: "user", content: "q" },
+      { role: "assistant", content: "a" },
+    ];
+    expect(conversationHistorySchema.parse(turns)).toEqual(turns);
+  });
+
+  it("rejects more than MAX_HISTORY_TURNS turns", () => {
+    const turns = Array.from({ length: MAX_HISTORY_TURNS + 1 }, () => ({
+      role: "user",
+      content: "q",
+    }));
+    expect(() => conversationHistorySchema.parse(turns)).toThrow();
+  });
+
+  it("rejects an over-long turn and an unknown role", () => {
+    expect(() =>
+      conversationHistorySchema.parse([
+        { role: "user", content: "x".repeat(MAX_HISTORY_TURN_CHARS + 1) },
+      ]),
+    ).toThrow();
+    expect(() =>
+      conversationHistorySchema.parse([{ role: "system", content: "x" }]),
+    ).toThrow();
   });
 });

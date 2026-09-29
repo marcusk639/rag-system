@@ -28,6 +28,7 @@
     "e2e": "pnpm --filter @rag/e2e test",
     "eval": "pnpm --filter @rag/e2e run eval",
     "eval:real": "pnpm --filter @rag/e2e run eval:real",
+    "eval:gold": "pnpm --filter @rag/e2e run eval:gold",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f",

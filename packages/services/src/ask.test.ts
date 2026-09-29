@@ -1,43 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RetrievalResult } from "@rag/core";
 import { ADMIN_SCOPE } from "@rag/core";
-import { askQuestion, askQuestionStream, capChunksPerDocument } from "./ask.js";
-import type { ServiceDeps } from "./deps.js";
+import { askQuestion, askQuestionStream } from "./ask.js";
 import { GenerationNotConfiguredError } from "./errors.js";
-
-function retrievalResult(id: string, docId = `doc-${id}`): RetrievalResult {
-  return {
-    chunkId: `chunk-${id}`,
-    documentId: docId,
-    score: 1,
-    text: `text ${id}`,
-    document: {
-      id: docId,
-      sourceId: "src",
-      externalId: id,
-      title: `Doc ${docId}`,
-      url: undefined,
-      metadata: {},
-    },
-    chunk: { id: `chunk-${id}`, ordinal: 0, headingPath: [] },
-  } as unknown as RetrievalResult;
-}
-
-/** Build ServiceDeps with mockable retriever/generator; other deps unused here. */
-function makeDeps(opts: {
-  generator: ServiceDeps["generator"];
-  search: ReturnType<typeof vi.fn>;
-}): ServiceDeps {
-  return {
-    db: {} as ServiceDeps["db"],
-    queue: {} as ServiceDeps["queue"],
-    retriever: { search: opts.search } as unknown as ServiceDeps["retriever"],
-    generator: opts.generator,
-    logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
-  };
-}
-
-const DEFAULT_TOP_K = 8;
+import {
+  retrievalResult,
+  makeDeps,
+  DEFAULT_TOP_K,
+} from "./ask.test-harness.js";
 
 describe("askQuestion", () => {
   it("throws GenerationNotConfiguredError and never touches the retriever when no generator", async () => {
@@ -78,7 +47,7 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
@@ -101,15 +70,18 @@ describe("askQuestion", () => {
     );
 
     // topK omitted → falls back to defaultTopK at the retriever; scope is the
-    // mandatory second argument.
+    // mandatory second argument. The retriever is over-fetched (×3) so
+    // duplicate collapse and the per-document cap can backfill to topK.
     expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "q", topK: DEFAULT_TOP_K }),
+      expect.objectContaining({ query: "q", topK: DEFAULT_TOP_K * 3 }),
       ADMIN_SCOPE,
     );
     expect(answer).toHaveBeenCalledWith("q", retrieved);
     expect(result).toEqual({
       answer: "grounded [1]",
-      citations,
+      // Citations are built by the service from `retrieved` (not threaded from
+      // the generator) so /ask and /ask/stream cannot drift apart.
+      citations: [expect.objectContaining(citations[0])],
       retrieved,
       reviewStatus: "draft_requires_practitioner_review",
       disclaimer: expect.any(String),
@@ -124,14 +96,14 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
       {
         index: 2,
         documentId: "doc-2",
-        title: "Doc 2",
+        title: "Doc doc-2",
         chunkId: "chunk-2",
         score: 0.9,
       },
@@ -152,7 +124,38 @@ describe("askQuestion", () => {
       ADMIN_SCOPE,
     );
 
-    expect(result.citations).toEqual([citations[0]]);
+    expect(result.citations).toEqual([expect.objectContaining(citations[0])]);
+  });
+
+  it("ignores citations a generator returns that do not match what was retrieved", async () => {
+    const retrieved = [retrievalResult("1")];
+    const search = vi.fn().mockResolvedValue(retrieved);
+    const answer = vi.fn().mockResolvedValue({
+      answer: "grounded [1]",
+      citations: [
+        {
+          index: 1,
+          documentId: "not-retrieved",
+          title: "X",
+          chunkId: "x",
+          score: 1,
+        },
+      ],
+    });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "q" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+    );
+
+    expect(result.citations.map((c) => c.documentId)).toEqual(["doc-1"]);
+    expect(result.citations[0]?.chunkIds).toEqual(["chunk-1"]);
   });
 
   it("uses an explicit topK over the default and forwards sourceIds/filter", async () => {
@@ -173,7 +176,7 @@ describe("askQuestion", () => {
     expect(search).toHaveBeenCalledWith(
       {
         query: "q",
-        topK: 3,
+        topK: 9, // explicit topK 3, over-fetched ×3
         sourceIds: ["s1"],
         filter: { tag: ["x"] },
       },
@@ -214,7 +217,7 @@ describe("askQuestion", () => {
       {
         index: 1,
         documentId: "doc-1",
-        title: "Doc 1",
+        title: "Doc doc-1",
         chunkId: "chunk-1",
         score: 1,
       },
@@ -316,30 +319,47 @@ describe("askQuestionStream", () => {
   });
 });
 
-describe("capChunksPerDocument", () => {
-  it("keeps at most `cap` chunks per document, preserving order, without mutating", () => {
-    const input = [
-      retrievalResult("1", "doc-A"),
-      retrievalResult("2", "doc-A"),
-      retrievalResult("3", "doc-B"),
-      retrievalResult("4", "doc-A"),
-      retrievalResult("5", "doc-B"),
-      retrievalResult("6", "doc-A"),
-    ];
+describe("review follow-ups", () => {
+  it("backfills to topK after collapsing duplicates even with the per-document cap disabled", async () => {
+    const dup = (id: string) =>
+      ({
+        ...retrievalResult(id, `doc-${id}`),
+        text: "# T\n\nSame body.",
+      }) as RetrievalResult;
+    const unique = (id: string) =>
+      ({
+        ...retrievalResult(id, `doc-${id}`),
+        text: `# T\n\nBody ${id}.`,
+      }) as RetrievalResult;
+    const search = vi
+      .fn()
+      .mockResolvedValue([
+        dup("1"),
+        dup("2"),
+        dup("3"),
+        unique("4"),
+        unique("5"),
+      ]);
+    const answer = vi.fn().mockResolvedValue({ answer: "a", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
 
-    const capped = capChunksPerDocument(input, 2);
+    await askQuestion(
+      deps,
+      { question: "q", topK: 3 },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      0,
+    );
 
-    expect(capped).toHaveLength(4); // doc-A ×2, doc-B ×2
-    expect(capped.filter((r) => r.document.id === "doc-A")).toHaveLength(2);
-    expect(capped.filter((r) => r.document.id === "doc-B")).toHaveLength(2);
-    expect(input).toHaveLength(6); // input untouched (no mutation)
-  });
-
-  it("is a no-op when cap <= 0", () => {
-    const input = [
-      retrievalResult("1", "doc-A"),
-      retrievalResult("2", "doc-A"),
-    ];
-    expect(capChunksPerDocument(input, 0)).toBe(input);
+    expect(search.mock.calls[0]?.[0].topK).toBeGreaterThan(3);
+    const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
+    expect(context.map((r) => r.chunk.id)).toEqual([
+      "chunk-1",
+      "chunk-4",
+      "chunk-5",
+    ]);
   });
 });

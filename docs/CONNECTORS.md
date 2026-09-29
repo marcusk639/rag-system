@@ -48,9 +48,12 @@ MS_CLIENT_SECRET=...
 {
   "siteId": "contoso.sharepoint.com,abc123...,def456...",
   "driveId": "b!xyz...", // optional — omit to ingest all document libraries
-  "folderPath": "Marketing/2026" // optional — restrict to subfolder
+  "folderPath": "Marketing/2026", // optional — restrict to subfolder
+  "excludePaths": ["/clients/", "archive"] // optional — case-insensitive path fragments, applied before download
 }
 ```
+
+**`excludePaths`:** case-insensitive substrings of an item's library path. Matching files are never downloaded or indexed. Applied on top of the built-in client-content denylist (`DEFAULT_EXCLUDED_PATH_FRAGMENTS` in `packages/core/src/content-safety.ts`, e.g. `engagement letter`, `billing analysis`). An excluded item is reported as a deletion, so a copy indexed before the exclusion was added is removed. Put firm-specific folder names here rather than in code.
 
 To find the `siteId`, GET `https://graph.microsoft.com/v1.0/sites/{hostname}:/sites/{site-path}`.
 

@@ -164,6 +164,20 @@ export const Config = z
        * one long file from crowding out other sources. `0` disables the cap.
        */
       maxChunksPerDocument: z.number().int().nonnegative().default(3),
+      /**
+       * "Small-to-big" expansion for /ask: for the top `documents` documents,
+       * also hand the generator up to `chunksPerDocument` chunks adjacent to
+       * the retrieved ones, so a multi-chunk procedure arrives whole. `0` in
+       * either field disables it. Does not affect /search.
+       */
+      neighborExpansion: z
+        .object({
+          documents: z.number().int().nonnegative().default(2),
+          chunksPerDocument: z.number().int().nonnegative().default(4),
+        })
+        .default({}),
+      /** /ask relevance floor (RETRIEVAL_MIN_DENSE_SIMILARITY). Unset = off. */
+      minDenseSimilarity: z.number().min(-1).max(1).optional(),
     }),
 
     /**
@@ -195,6 +209,12 @@ export const Config = z
          * defaults. Tunable via `GENERATION_MAX_OUTPUT_TOKENS`.
          */
         maxOutputTokens: z.number().int().positive().default(2048),
+        /**
+         * Gemini only. Thinking tokens count against `maxOutputTokens`, so an
+         * unset (dynamic) budget can cut a long answer short. Leave unset for
+         * the provider default; set via `GENERATION_THINKING_BUDGET`.
+         */
+        thinkingBudget: z.number().int().nonnegative().optional(),
 
         /**
          * Base URL for an OpenAI-compatible generation endpoint. Set this to
@@ -678,6 +698,19 @@ export function loadConfig(
         env.MAX_CHUNKS_PER_DOCUMENT !== undefined
           ? Number(env.MAX_CHUNKS_PER_DOCUMENT)
           : undefined,
+      neighborExpansion: {
+        documents:
+          env.NEIGHBOR_EXPANSION_DOCUMENTS !== undefined
+            ? Number(env.NEIGHBOR_EXPANSION_DOCUMENTS)
+            : undefined,
+        chunksPerDocument:
+          env.NEIGHBOR_EXPANSION_CHUNKS !== undefined
+            ? Number(env.NEIGHBOR_EXPANSION_CHUNKS)
+            : undefined,
+      },
+      minDenseSimilarity: env.RETRIEVAL_MIN_DENSE_SIMILARITY
+        ? Number(env.RETRIEVAL_MIN_DENSE_SIMILARITY)
+        : undefined,
     },
     rerank: {
       provider: (env.RERANK_PROVIDER ?? "none") as
@@ -695,6 +728,9 @@ export function loadConfig(
             model: env.GENERATION_MODEL,
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
+              : undefined,
+            thinkingBudget: env.GENERATION_THINKING_BUDGET
+              ? Number(env.GENERATION_THINKING_BUDGET)
               : undefined,
             baseURL: env.GENERATION_BASE_URL || undefined,
             apiKey: env.GENERATION_API_KEY || undefined,

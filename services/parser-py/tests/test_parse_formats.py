@@ -24,9 +24,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.parsing import _is_unsupported_format_error
 from app.main import (
     _GENERIC_MIMES,
-    _is_unsupported_format_error,
     app,
 )
 
@@ -138,7 +138,7 @@ def test_unsupported_binary_returns_422(monkeypatch: pytest.MonkeyPatch) -> None
         _raise(_MarkItDownUnsupported("Could not convert '/tmp/x.bin'. ['.bin','.sndr'] not supported")),
     )
 
-    def partition(filename: str):
+    def partition(filename: str, **_kwargs):
         raise ValueError(
             f"Invalid file {filename}. The FileType.UNK file type is not supported in partition."
         )
@@ -157,7 +157,7 @@ def test_internal_unstructured_error_still_returns_500(monkeypatch: pytest.Monke
         _raise(_MarkItDownUnsupported("Could not convert '/tmp/x.bin'. ['.bin','.sndr'] not supported")),
     )
 
-    def partition(filename: str):
+    def partition(filename: str, **_kwargs):
         raise RuntimeError("OCR engine crashed mid-page")
 
     _install_fake_unstructured(monkeypatch, partition)

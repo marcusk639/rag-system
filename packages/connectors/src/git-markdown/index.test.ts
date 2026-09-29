@@ -4,12 +4,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { GitMarkdownConnector } from "./index.js";
+import { GitMarkdownConnector, gitEnv } from "./index.js";
 
 const LOGGER = pino({ level: "silent" });
 
 function git(repoPath: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: repoPath }).toString().trim();
+  return execFileSync("git", args, { cwd: repoPath, env: gitEnv() })
+    .toString()
+    .trim();
 }
 
 describe("GitMarkdownConnector", () => {

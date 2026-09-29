@@ -174,7 +174,10 @@ export async function buildCoreDeps(
   // Same shared policy as the embedder and audit sink above — a hosted
   // reranker ships firm document text to a third-party vendor, so it belongs
   // behind the one `EGRESS_ALLOWED_HOSTS` allow-list, not outside it.
-  const reranker = createReranker(config.rerank, { egressPolicy });
+  const reranker = createReranker(config.rerank, {
+    egressPolicy,
+    complianceMode: config.complianceMode,
+  });
 
   const retriever = new Retriever(
     db,
@@ -241,6 +244,17 @@ export async function buildCoreDeps(
           ? { baseURL: config.generation.baseURL }
           : {}),
         maxOutputTokens: config.generation.maxOutputTokens,
+        ...(config.generation.thinkingBudget !== undefined
+          ? { thinkingBudget: config.generation.thinkingBudget }
+          : {}),
+        onTruncated: () =>
+          logger.warn(
+            {
+              marker: "generation.truncated",
+              maxOutputTokens: config.generation?.maxOutputTokens,
+            },
+            "generated answer hit the output-token limit and was cut off",
+          ),
         // The same shared policy the embedder, audit sink, and reranker use.
         // Without it the generator built its own from the environment — same
         // allow-list in practice, but nothing guaranteed it.
@@ -250,6 +264,18 @@ export async function buildCoreDeps(
           logger.warn(
             { triPatterns: patterns, marker: "generation.tri.warned" },
             "TRI patterns detected in generation prompt; proceeding under triPolicy=warn",
+          ),
+        onContextDropped: (dropped) =>
+          logger.warn(
+            {
+              dropped: dropped.map((d) => ({
+                chunkId: d.chunkId,
+                documentId: d.documentId,
+                triPatterns: d.patterns,
+              })),
+              marker: "generation.tri.context_dropped",
+            },
+            "TRI-bearing chunks removed from generation context; fix or exclude the source documents",
           ),
       });
       if (config.generation.baseURL) {

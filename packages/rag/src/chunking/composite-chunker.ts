@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+import { encode } from "gpt-tokenizer";
 import type { Chunk, Chunker, ParsedDocument, ParsedTable } from "@rag/core";
 import {
   MarkdownChunker,
   type MarkdownChunkerOptions,
 } from "./markdown-chunker.js";
 import { TableChunker, type TableChunkerOptions } from "./table-chunker.js";
+import { clampToTokenLimit } from "./token-clamp.js";
 
 /**
  * Composite chunker that routes per-document:
@@ -42,10 +45,10 @@ export class CompositeChunker implements Chunker {
     const isSpreadsheet = (document.tables ?? []).some(
       (t) => t.sheetType != null,
     );
-    if (isSpreadsheet) {
-      return this.chunkSpreadsheet(document);
-    }
-    return this.markdownChunker.chunk(document);
+    const chunks = isSpreadsheet
+      ? await this.chunkSpreadsheet(document)
+      : await this.markdownChunker.chunk(document);
+    return chunks.map((c) => withDocumentTitle(c, document.title));
   }
 
   private async chunkSpreadsheet(document: ParsedDocument): Promise<Chunk[]> {
@@ -97,4 +100,46 @@ export class CompositeChunker implements Chunker {
       ordinal: startOrdinal + i,
     }));
   }
+}
+
+/**
+ * Put the document title at the front of a chunk's text.
+ *
+ * The chunk text is what gets embedded and keyword-indexed. A fragment like
+ * "3. Apply the template and route for signature" matches every SOP equally;
+ * without the title neither the vector nor the tsvector knows which procedure
+ * it belongs to. Word/PDF output often has no markdown headings at all, so the
+ * heading-path header the chunkers add is frequently empty.
+ *
+ * `headingPath` is left untouched — it describes the document's own structure
+ * and is what citations display as the section.
+ */
+/** @internal Exported for unit tests. */
+export function withDocumentTitle(chunk: Chunk, rawTitle: string): Chunk {
+  const title = rawTitle.replace(/\s+/g, " ").trim();
+  if (!title) return chunk;
+
+  const newline = chunk.text.indexOf("\n");
+  const firstLine = newline === -1 ? chunk.text : chunk.text.slice(0, newline);
+  let text: string;
+  // Only a header line the chunkers themselves wrote — exactly the heading
+  // path — is merged into. Any other line starting with "# " is document
+  // content (e.g. a comment in a split code block) and is left intact.
+  const heading = chunk.headingPath.join(" › ");
+  if (heading && firstLine === `# ${heading}`) {
+    const firstSegment = chunk.headingPath[0]?.trim().toLowerCase();
+    if (firstSegment === title.toLowerCase()) return chunk;
+    text = `# ${title} › ${heading}${chunk.text.slice(firstLine.length)}`;
+  } else {
+    text = `# ${title}\n\n${chunk.text}`;
+  }
+  text = clampToTokenLimit(text);
+  return {
+    ...chunk,
+    text,
+    tokenCount: encode(text).length,
+    hash: createHash("sha256")
+      .update(`${chunk.headingPath.join("/")}::${text}`)
+      .digest("hex"),
+  };
 }

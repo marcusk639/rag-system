@@ -58,7 +58,8 @@ function resultFixture() {
     document: { id: "doc-1", sourceId: SRC_A, title: "Doc" },
     chunk: { id: "chunk-1", headingPath: [], page: null },
     text: "some retrieved text",
-    score: 0.8,
+    score: 1,
+    denseScore: 0.8,
   };
 }
 

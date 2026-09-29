@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope } from "@rag/core";
-import { filterSchema } from "@rag/core";
+import {
+  conversationHistorySchema,
+  filterSchema,
+  MAX_ASK_TOP_K,
+  topRelevanceScore,
+} from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
@@ -11,7 +16,7 @@ import {
 } from "@rag/services";
 import type { Deps } from "../deps.js";
 
-const MAX_TOP_K = 50;
+const MAX_TOP_K = MAX_ASK_TOP_K;
 
 const inputSchema = {
   question: z
@@ -37,6 +42,11 @@ const inputSchema = {
     .optional()
     .describe(
       "Metadata filter applied to document.metadata. AND across keys, OR across values per key.",
+    ),
+  history: conversationHistorySchema
+    .optional()
+    .describe(
+      "Prior conversation turns (oldest first). Used only to rewrite a follow-up question into a standalone search query; the answer is still generated from `question` and the retrieved documents.",
     ),
 };
 
@@ -94,7 +104,7 @@ function auditAsk(
     docIds: [...new Set(retrieved.map((r) => r.document.id))],
     retrievedCount: retrieved.length,
     endpoint: "ask",
-    topScore: retrieved[0]?.score ?? null,
+    topScore: topRelevanceScore(retrieved),
     answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
@@ -112,7 +122,7 @@ export function registerAsk(
         "Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), and retrievedCount. Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case.",
       inputSchema,
     },
-    async ({ question, topK, sourceIds, filter }) => {
+    async ({ question, topK, sourceIds, filter, history }) => {
       // Thin adapter: the generator-null guard and empty-results short-circuit
       // live in askQuestion (canonical behavior). We only translate the
       // not-configured case into an MCP isError with a tool-specific hint.
@@ -120,10 +130,14 @@ export function registerAsk(
       try {
         result = await askQuestion(
           deps,
-          { question, topK, sourceIds, filter },
+          { question, topK, sourceIds, filter, history },
           deps.config.retrieval.defaultTopK,
           scope,
           deps.config.retrieval.maxChunksPerDocument,
+          {
+            neighborExpansion: deps.config.retrieval.neighborExpansion,
+            minDenseSimilarity: deps.config.retrieval.minDenseSimilarity,
+          },
         );
       } catch (err) {
         if (err instanceof GenerationNotConfiguredError) {

@@ -1,11 +1,18 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
-import { filterSchema, RagError } from "@rag/core";
+import {
+  conversationHistorySchema,
+  filterSchema,
+  MAX_ASK_TOP_K,
+  RagError,
+  topRelevanceScore,
+} from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
   askQuestionStream,
   type AskResult,
+  type AskStreamEvent,
   GenerationNotConfiguredError,
 } from "@rag/services";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -16,10 +23,12 @@ import { scopeFromRequest } from "./authz.js";
 
 const AskBody = z.object({
   question: z.string().min(1).max(2000),
-  topK: z.number().int().positive().max(100).optional(),
+  topK: z.number().int().positive().max(MAX_ASK_TOP_K).optional(),
   sourceIds: z.array(z.string().uuid()).optional(),
   // Shared bounded metadata filter (@rag/core/validation).
   filter: filterSchema.optional(),
+  // Prior turns; used only to rewrite a follow-up for retrieval.
+  history: conversationHistorySchema.optional(),
 });
 
 // "mcp" is intentionally excluded: that channel value is written only by the
@@ -65,7 +74,7 @@ function auditAsk(
     docIds: [...new Set(retrieved.map((r) => r.document.id))],
     retrievedCount: retrieved.length,
     endpoint: "ask",
-    topScore: retrieved[0]?.score ?? null,
+    topScore: topRelevanceScore(retrieved),
     answerId,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
@@ -101,6 +110,43 @@ function streamErrorPayload(err: unknown): {
   return { message: "Generation failed." };
 }
 
+/**
+ * Forward service stream events to an SSE sink, stopping as soon as the client
+ * is gone. Breaking out of `for await` calls the generator's `return()`, which
+ * unwinds `askQuestionStream` and the provider stream beneath it instead of
+ * letting a model finish an answer nobody will read.
+ */
+export async function pumpAskStream(
+  events: AsyncIterable<AskStreamEvent>,
+  sink: {
+    write: (chunk: string) => void;
+    isClosed: () => boolean;
+    onDone: (event: Extract<AskStreamEvent, { type: "done" }>) => void;
+  },
+): Promise<void> {
+  for await (const event of events) {
+    if (event.type === "done") {
+      // The answer was fully generated (and paid for): always audit it, even
+      // if the client left in the instant before this event arrived.
+      sink.onDone(event);
+      if (sink.isClosed()) break;
+      sink.write(
+        `event: done\ndata: ${JSON.stringify({
+          citations: event.citations,
+          retrieved: event.retrieved,
+          reviewStatus: event.reviewStatus,
+          disclaimer: event.disclaimer,
+          answerId: event.answerId,
+        })}\n\n`,
+      );
+    } else {
+      if (sink.isClosed()) break;
+      sink.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
+    }
+    if (sink.isClosed()) break;
+  }
+}
+
 export async function registerAskRoute(
   app: FastifyInstance,
   deps: Deps,
@@ -130,6 +176,10 @@ export async function registerAskRoute(
         config.retrieval.defaultTopK,
         scopeFromRequest(request),
         config.retrieval.maxChunksPerDocument,
+        {
+          neighborExpansion: config.retrieval.neighborExpansion,
+          minDenseSimilarity: config.retrieval.minDenseSimilarity,
+        },
       );
       auditAsk(
         deps,
@@ -173,36 +223,41 @@ export async function registerAskRoute(
         Connection: "keep-alive",
       });
 
+      // A client that disconnects (closed tab, new question) must not keep a
+      // model generating: stop pulling, which finalizes the service generator
+      // and, through it, the provider's stream.
+      let clientGone = false;
+      raw.on("close", () => {
+        if (!raw.writableFinished) clientGone = true;
+      });
+
       try {
-        for await (const event of askQuestionStream(
-          deps,
-          request.body,
-          config.retrieval.defaultTopK,
-          scope,
-          config.retrieval.maxChunksPerDocument,
-        )) {
-          if (event.type === "token") {
-            raw.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
-          } else {
-            auditAsk(
-              deps,
-              request,
-              request.body.question,
-              event.retrieved,
-              config.generation?.model,
-              event.answerId,
-            );
-            raw.write(
-              `event: done\ndata: ${JSON.stringify({
-                citations: event.citations,
-                retrieved: event.retrieved,
-                reviewStatus: event.reviewStatus,
-                disclaimer: event.disclaimer,
-                answerId: event.answerId,
-              })}\n\n`,
-            );
-          }
-        }
+        await pumpAskStream(
+          askQuestionStream(
+            deps,
+            request.body,
+            config.retrieval.defaultTopK,
+            scope,
+            config.retrieval.maxChunksPerDocument,
+            {
+              neighborExpansion: config.retrieval.neighborExpansion,
+              minDenseSimilarity: config.retrieval.minDenseSimilarity,
+            },
+          ),
+          {
+            isClosed: () => clientGone,
+            write: (chunk) => raw.write(chunk),
+            onDone: (event) =>
+              auditAsk(
+                deps,
+                request,
+                request.body.question,
+                event.retrieved,
+                config.generation?.model,
+                event.answerId,
+              ),
+          },
+        );
       } catch (err) {
         // The scope/PII boundary is enforced inside the service; never echo the
         // raw error (it may carry connection details). Log server-side instead.

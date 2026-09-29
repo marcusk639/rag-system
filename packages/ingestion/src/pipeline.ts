@@ -16,9 +16,19 @@ import {
   type SourceDocument,
 } from "@rag/core";
 import { classifyDocument } from "./classify-document.js";
-import { isExcludedPath, redactOrThrow, ContentSafetyError } from "@rag/core";
+import { DeletionReconciliationError } from "./errors.js";
+import {
+  recordIngestFailure,
+  retryFailedDocuments,
+} from "./failed-documents.js";
+import {
+  isExcludedPath,
+  redactParsedDocument,
+  ContentSafetyError,
+} from "@rag/core";
 import {
   type Db,
+  clearDocumentStorage,
   deleteDocumentByExternalId,
   documentHasChunks,
   documentHasStorage,
@@ -60,6 +70,12 @@ export interface PipelineOptions {
    * value (e.g. 1) to opt into per-page continuation.
    */
   maxPagesPerRun?: number;
+  /**
+   * Before listing pages, re-fetch and re-ingest documents whose earlier
+   * attempts failed (see failed-documents.ts). The worker enables this for the
+   * first job of a sync only, not for its continuations.
+   */
+  retryFailed?: boolean;
 }
 
 export interface PipelineDeps {
@@ -72,7 +88,8 @@ export interface PipelineDeps {
    * Data classification declared by the source being ingested.
    * Inherited from `sources.doc_class` and stamped onto every document.
    * Phase 1 accepts A and B; C and D throw ClassBlockedError.
-   * Defaults to 'A' for backwards compatibility with tests that don't set it.
+   * Undeclared fails CLOSED to 'D' (every document quarantined), never to a
+   * permissive class.
    */
   sourceDocClass?: DocumentClass;
   /**
@@ -82,7 +99,7 @@ export interface PipelineDeps {
    */
   objectStore?: ObjectStore | null;
   /**
-   * The loaded identifier-scanner pack `redactOrThrow` runs before anything
+   * The loaded identifier-scanner pack `redactParsedDocument` runs before anything
    * downstream (see 1b below). Every caller supplies one: the worker loads it
    * at startup from `config.worker.scannerPackDir` (default `packs/cpa`) and
    * hands it down through `WorkerDeps.pack`.
@@ -105,6 +122,8 @@ export interface PipelineRunResult {
   documentsDeleted: number;
   /** Items the connector skipped for exceeding its size cap (observability only). */
   documentsSkippedOversize: number;
+  /** Previously failed documents successfully re-ingested this run. */
+  documentsRetried: number;
   /**
    * The connector's authoritative end-of-feed flag for the LAST page processed.
    * `true` => the source is fully enumerated (nothing left to re-enqueue).
@@ -166,6 +185,18 @@ export async function runIngestion(
   let documentsSkippedOversize = 0;
   let pageDone = false;
   let pagesProcessed = 0;
+  // Layer 3: no longer defaults to "A". An undeclared source class is the
+  // strongest possible reason NOT to treat content as public — the previous
+  // `?? "A"` answered "we don't know" with the most permissive class, which
+  // is how 858 unclassified documents were treated as public.
+  const docClass: DocumentClass = deps.sourceDocClass ?? "D";
+
+  const documentsRetried = opts.retryFailed
+    ? await retryFailedDocuments(
+        { db: deps.db, log, sourceId, connector, docClass },
+        (doc) => ingestOne(sourceId, doc, deps, docClass),
+      )
+    : 0;
 
   // Process up to `maxPages` connector pages, persisting the cursor after each
   // so a crash/retry resumes mid-source. We stop when EITHER the connector
@@ -189,11 +220,6 @@ export async function runIngestion(
       "fetched page",
     );
 
-    // Layer 3: no longer defaults to "A". An undeclared source class is the
-    // strongest possible reason NOT to treat content as public — the previous
-    // `?? "A"` answered "we don't know" with the most permissive class, which
-    // is how 858 unclassified documents were treated as public.
-    const docClass: DocumentClass = deps.sourceDocClass ?? "D";
     const limit = pLimit(opts.concurrency);
     const results = await Promise.allSettled(
       page.documents.map((doc) =>
@@ -201,19 +227,30 @@ export async function runIngestion(
       ),
     );
 
-    for (const r of results) {
+    for (const [i, r] of results.entries()) {
       if (r.status === "fulfilled") {
         documentsProcessed++;
         chunksCreated += r.value.chunksCreated;
       } else {
         documentsFailed++;
         log.error({ err: r.reason }, "document failed");
+        const failed = page.documents[i];
+        if (failed) {
+          await recordIngestFailure(
+            deps.db,
+            log,
+            { sourceId, externalId: failed.externalId, docClass },
+            r.reason,
+          );
+        }
       }
     }
 
     // Reconcile deletions (delta tombstones): remove the document AND its
     // chunks (FK cascade) so files deleted in the source stop surfacing in
-    // search. A single failed delete must not abort the whole sync.
+    // search. Every tombstone is attempted; any failure fails the page AFTER
+    // the loop and BEFORE the cursor is saved (see DeletionReconciliationError).
+    const failedDeletions: string[] = [];
     for (const externalId of page.deletions ?? []) {
       try {
         const del = await deleteDocumentByExternalId(
@@ -237,8 +274,15 @@ export async function runIngestion(
           }
         }
       } catch (err) {
-        log.error({ err, externalId }, "failed to reconcile deleted document");
+        failedDeletions.push(externalId);
+        log.error(
+          { err, externalId, marker: "ingest.delete_failed" },
+          "failed to reconcile deleted document; cursor will not advance",
+        );
       }
+    }
+    if (failedDeletions.length > 0) {
+      throw new DeletionReconciliationError(sourceId, failedDeletions);
     }
     documentsSkippedOversize += page.skippedOversize ?? 0;
 
@@ -275,10 +319,24 @@ export async function runIngestion(
     chunksCreated,
     documentsDeleted,
     documentsSkippedOversize,
+    documentsRetried,
     done: pageDone,
     nextCursor: cursor,
   };
 }
+
+/**
+ * Version of everything between the parsed markdown and the stored chunks
+ * (redaction scope, chunking, chunk text shape). It is folded into the
+ * document content hash, so bumping it makes the next sync re-chunk and
+ * re-embed every document even though its source bytes did not change.
+ *
+ * Bump it whenever that processing changes the chunks produced from the same
+ * markdown. History:
+ *   1 — implicit: hash of the markdown alone.
+ *   2 — document title prefixed to every chunk; tables and titles redacted.
+ */
+export const CONTENT_PROCESSING_VERSION = 2;
 
 /**
  * Process a single source document: parse, chunk, embed, store.
@@ -376,7 +434,17 @@ export async function ingestOne(
           "quarantined until then.",
       );
     }
-    redacted = redactOrThrow(parsed.markdown, deps.pack);
+    // Every text-bearing field, not only markdown: spreadsheet chunks are
+    // built from `tables`, and the title is stored, cited, and sent to the
+    // model. Redacting markdown alone left those fields raw.
+    redacted = redactParsedDocument(
+      {
+        title: parsed.title,
+        markdown: parsed.markdown,
+        tables: parsed.tables,
+      },
+      deps.pack,
+    );
   } catch (err) {
     // Fail CLOSED: quarantine by skipping, never index raw.
     log.error(
@@ -419,7 +487,9 @@ export async function ingestOne(
       "redacted identifiers before indexing",
     );
   }
-  parsed.markdown = redacted.text;
+  parsed.markdown = redacted.markdown;
+  parsed.tables = redacted.tables;
+  parsed.title = redacted.title;
 
   // 1c. Layer 3 — per-document classification gate. The source's declared class
   //     is a CEILING, not a verdict: evidence from this document can only make
@@ -462,13 +532,15 @@ export async function ingestOne(
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched
   //    documents (source updated metadata only) skip embedding work.
-  const contentHash = sha256(parsed.markdown);
+  const contentHash = sha256(
+    `v${CONTENT_PROCESSING_VERSION}\n${parsed.markdown}`,
+  );
 
   // 3. Upsert document row; if hash unchanged, we can short-circuit.
   const { id: documentId, contentChanged } = await upsertDocument(db, {
     sourceId,
     externalId: source.externalId,
-    title: parsed.title || source.title,
+    title: parsed.title,
     mimeType: source.mimeType,
     sourceModifiedAt: new Date(source.modifiedAt),
     contentHash,
@@ -482,6 +554,10 @@ export async function ingestOne(
       // Stamp the classification tag into the stored metadata so it is
       // available for retrieval filtering and citation display.
       docClass,
+      // Internal only (not in the exposable-metadata allowlist): lets the
+      // download path refuse a redacted document even if a stale original
+      // somehow survived.
+      redactedIdentifierCount: redacted.totalRedacted,
     } as DocumentMetadata & Record<string, unknown>,
     markdown: parsed.markdown,
   });
@@ -522,7 +598,22 @@ export async function ingestOne(
   // its hash to look "changed". A storage failure must NOT fail text
   // ingestion: the document stays searchable; it just isn't downloadable
   // until the next successful sync.
-  if (
+  if (objectStore && redacted.totalRedacted > 0) {
+    // The stored original is the RAW file. Serving it would undo redaction,
+    // so a redacted document keeps no original — and any original stored by
+    // an earlier run (before the identifier was recognised) is removed.
+    const { storageKey } = await clearDocumentStorage(db, documentId);
+    if (storageKey) {
+      try {
+        await objectStore.delete(storageKey);
+      } catch (err) {
+        log.error(
+          { err, marker: "ingest.store.delete_failed" },
+          "failed to delete stored original of a redacted document",
+        );
+      }
+    }
+  } else if (
     objectStore &&
     (contentChanged || !(await documentHasStorage(db, documentId)))
   ) {

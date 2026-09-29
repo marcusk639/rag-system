@@ -84,4 +84,16 @@ describe("getDocumentDownload", () => {
       getDocumentDownload(makeDeps(null), "doc-1", ADMIN_SCOPE),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
+  it("refuses to serve the original of a document that had identifiers redacted", async () => {
+    getDocumentMock.mockResolvedValue({
+      ...ROW,
+      metadata: { redactedIdentifierCount: 2 },
+    });
+    const objectStore = makeObjectStore();
+
+    await expect(
+      getDocumentDownload(makeDeps(objectStore), "doc-1", ADMIN_SCOPE),
+    ).rejects.toThrow(NotFoundError);
+    expect(objectStore.get).not.toHaveBeenCalled();
+  });
 });

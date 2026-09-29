@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { encode } from "gpt-tokenizer";
 import type { ParsedDocument, ParsedTable } from "@rag/core";
-import { CompositeChunker } from "./composite-chunker.js";
+import { CompositeChunker, withDocumentTitle } from "./composite-chunker.js";
 import { MAX_EMBEDDING_TOKENS } from "./token-clamp.js";
 
 function makeTable(
@@ -194,5 +194,121 @@ describe("CompositeChunker", () => {
         expect(line.trimEnd().endsWith("|")).toBe(true);
       }
     }
+  });
+
+  describe("document title context", () => {
+    it("prefixes the title to a chunk from a document with no headings", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "New Client Onboarding SOP",
+        markdown: "Apply the template and route the letter for signature.",
+        tables: [],
+        metadata: {},
+      });
+      expect(
+        chunks[0]?.text.startsWith("# New Client Onboarding SOP\n\n"),
+      ).toBe(true);
+      // headingPath stays the document's own structure — citations use it.
+      expect(chunks[0]?.headingPath).toEqual([]);
+    });
+
+    it("joins the title onto an existing heading path", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Karbon Guide",
+        markdown: "# Setup\n\nCreate the client record.",
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(
+        true,
+      );
+      expect(chunks[0]?.headingPath).toEqual(["Setup"]);
+    });
+
+    it("does not repeat a title that is already the first heading", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Karbon Guide",
+        markdown: "# Karbon Guide\n\n## Setup\n\nCreate the client record.",
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Karbon Guide › Setup\n\n")).toBe(
+        true,
+      );
+    });
+
+    it("prefixes the title to spreadsheet row chunks", async () => {
+      const chunker = new CompositeChunker(opts);
+      const chunks = await chunker.chunk({
+        title: "Time Codes",
+        markdown: "",
+        tables: [
+          makeTable({
+            markdown: "md",
+            sheetName: "Codes",
+            sheetType: "tabular",
+            headers: ["Code", "Meaning"],
+            rows: [["BK-CATCHUP", "Bookkeeping catch-up"]],
+          }),
+        ],
+        metadata: {},
+      });
+      expect(chunks[0]?.text.startsWith("# Time Codes › Codes\n\n")).toBe(true);
+    });
+
+    it("recomputes the chunk hash so re-titled chunks are not treated as unchanged", async () => {
+      const chunker = new CompositeChunker(opts);
+      const base = { markdown: "Same body.", tables: [], metadata: {} };
+      const [a] = await chunker.chunk({ ...base, title: "Doc A" });
+      const [b] = await chunker.chunk({ ...base, title: "Doc B" });
+      expect(a?.hash).not.toBe(b?.hash);
+    });
+  });
+
+  describe("heading and title survive chunk overlap (production chunkOverlap)", () => {
+    const overlapping = {
+      markdown: { chunkSize: 60, chunkOverlap: 20 },
+      table: { chunkSize: 200, rowOverlap: 0 },
+    };
+    const paragraphs = Array.from(
+      { length: 8 },
+      (_, i) =>
+        `Step ${i + 1}: open the client record, confirm the engagement letter, and apply the work template before assigning.`,
+    ).join("\n\n");
+
+    it("starts EVERY chunk of a multi-chunk section with the title and heading, before any overlap text", async () => {
+      const chunker = new CompositeChunker(overlapping);
+      const chunks = await chunker.chunk({
+        title: "Onboarding SOP",
+        markdown: `# Setup\n\n${paragraphs}`,
+        tables: [],
+        metadata: {},
+      });
+      expect(chunks.length).toBeGreaterThan(2);
+      for (const c of chunks) {
+        expect(c.text.startsWith("# Onboarding SOP › Setup\n\n")).toBe(true);
+        // The heading appears once, at the top — not again after overlap text.
+        expect(c.text.indexOf("# Setup")).toBe(-1);
+      }
+      // Overlap is still carried: chunk 2 repeats the tail of chunk 1's body.
+      const firstBodyTail = chunks[0]!.text.slice(-30);
+      expect(chunks[1]!.text).toContain(firstBodyTail.trim().slice(-15));
+    });
+  });
+
+  describe("withDocumentTitle", () => {
+    it("only merges into a header line the chunker itself wrote", () => {
+      const chunk = {
+        hash: "h",
+        text: "# comment line from a split code block\nmore",
+        tokenCount: 5,
+        ordinal: 0,
+        headingPath: [],
+      };
+      const out = withDocumentTitle(chunk, "Runbook");
+      expect(out.text.startsWith("# Runbook\n\n# comment line")).toBe(true);
+    });
   });
 });

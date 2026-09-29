@@ -47,7 +47,9 @@ describe("sanitizeMetadata", () => {
     expect(safe.sizeBytes).toBe(12345);
     expect(safe.createdAt).toBe("2024-01-01T00:00:00.000Z");
     expect(safe.modifiedAt).toBe("2024-02-01T00:00:00.000Z");
-    expect(safe.path).toBe("Clients/2024/workpaper.pdf");
+    // Folder paths are NOT exposed: at a CPA firm they routinely name clients
+    // ("Clients/Smith Family/2024"). Kept internally for path exclusion only.
+    expect((safe as Record<string, unknown>).path).toBeUndefined();
   });
 
   it("is default-deny: drops `extra` and any unknown passthrough keys", () => {
@@ -143,7 +145,9 @@ describe("sanitizeRetrievalResult", () => {
     expect(safe.document.id).toBe(baseResult.document.id);
     expect(safe.document.title).toBe("Q3 Tax Workpaper");
     expect(safe.document.metadata.title).toBe("Q3 Tax Workpaper");
-    expect(safe.document.metadata.path).toBe("Inbox/thread-1");
+    expect(
+      (safe.document.metadata as Record<string, unknown>).path,
+    ).toBeUndefined();
   });
 
   it("does not mutate the input result", () => {

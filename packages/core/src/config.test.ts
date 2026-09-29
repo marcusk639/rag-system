@@ -414,3 +414,72 @@ describe("loadConfig — platform PORT fallback", () => {
     expect(cfg.mcp.httpPort).toBe(3001);
   });
 });
+
+describe("loadConfig — neighbour chunk expansion", () => {
+  it("defaults to expanding the top 2 documents by up to 4 chunks each", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.retrieval.neighborExpansion).toEqual({
+      documents: 2,
+      chunksPerDocument: 4,
+    });
+  });
+
+  it("reads NEIGHBOR_EXPANSION_DOCUMENTS / NEIGHBOR_EXPANSION_CHUNKS, where 0 disables", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      NEIGHBOR_EXPANSION_DOCUMENTS: "0",
+      NEIGHBOR_EXPANSION_CHUNKS: "6",
+    });
+    expect(cfg.retrieval.neighborExpansion).toEqual({
+      documents: 0,
+      chunksPerDocument: 6,
+    });
+  });
+
+  it("rejects a negative value", () => {
+    expect(() =>
+      loadConfig({ ...BASE_ENV, NEIGHBOR_EXPANSION_CHUNKS: "-1" }),
+    ).toThrow();
+  });
+});
+
+describe("loadConfig — GENERATION_THINKING_BUDGET", () => {
+  const GEN = {
+    ...BASE_ENV,
+    GENERATION_PROVIDER: "gemini",
+    GENERATION_MODEL: "gemini-2.5-flash",
+    GEMINI_API_KEY: "k",
+  } as NodeJS.ProcessEnv;
+
+  it("is unset by default (provider default thinking)", () => {
+    expect(loadConfig(GEN).generation?.thinkingBudget).toBeUndefined();
+  });
+
+  it("reads an explicit budget, including 0", () => {
+    expect(
+      loadConfig({ ...GEN, GENERATION_THINKING_BUDGET: "0" }).generation
+        ?.thinkingBudget,
+    ).toBe(0);
+    expect(
+      loadConfig({ ...GEN, GENERATION_THINKING_BUDGET: "1024" }).generation
+        ?.thinkingBudget,
+    ).toBe(1024);
+  });
+});
+
+describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
+  it("is off by default", () => {
+    expect(
+      loadConfig({ ...BASE_ENV }).retrieval.minDenseSimilarity,
+    ).toBeUndefined();
+  });
+  it("reads a floor and rejects one outside [-1, 1]", () => {
+    expect(
+      loadConfig({ ...BASE_ENV, RETRIEVAL_MIN_DENSE_SIMILARITY: "0.55" })
+        .retrieval.minDenseSimilarity,
+    ).toBe(0.55);
+    expect(() =>
+      loadConfig({ ...BASE_ENV, RETRIEVAL_MIN_DENSE_SIMILARITY: "2" }),
+    ).toThrow();
+  });
+});
