@@ -52,6 +52,10 @@ jobs:
     env:
       DATABASE_URL: postgres://rag:rag@localhost:5432/rag
       PARSER_URL: http://localhost:8000
+      # Postgres is a service container and the parser is started above, so the
+      # harness must not try to `docker compose up` its own stack. Same flag
+      # e2e.yml sets for the same reason.
+      E2E_SKIP_DOCKER_UP: "1"
 
     steps:
       # This job is the heaviest in the repo: the parser image (~3.9GB), the
