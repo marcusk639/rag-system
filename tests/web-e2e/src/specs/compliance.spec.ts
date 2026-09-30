@@ -10,12 +10,16 @@ import { E2E_ENV, API_PORT } from "../env.js";
 // emits none produces an empty citations array — and every later spec that
 // loops over citations (`[].every(...)`) would pass vacuously instead of
 // catching the regression.
-test("the API answers with at least one citation", async ({ request }) => {
-  const res = await request.post(`http://localhost:${API_PORT}/ask`, {
-    headers: { authorization: `Bearer ${E2E_ENV.API_TOKENS}` },
-    data: { question: "What is the first step to onboard a new client?" },
-  });
-  expect(res.status()).toBe(200);
-  const body = await res.json();
-  expect(body.citations.length).toBeGreaterThan(0);
-});
+test(
+  "the API answers with at least one citation",
+  { tag: "@needs-8b-model" },
+  async ({ request }) => {
+    const res = await request.post(`http://localhost:${API_PORT}/ask`, {
+      headers: { authorization: `Bearer ${E2E_ENV.API_TOKENS}` },
+      data: { question: "What is the first step to onboard a new client?" },
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.citations.length).toBeGreaterThan(0);
+  },
+);
