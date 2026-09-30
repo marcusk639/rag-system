@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test:browser": "playwright test",
-    "test:browser:ci": "playwright test src/specs/auth.spec.ts src/specs/grant.spec.ts src/specs/seed.spec.ts src/specs/stack.spec.ts",
+    "test:browser:ci": "playwright test --grep-invert @needs-8b-model",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

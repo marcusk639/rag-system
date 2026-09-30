@@ -119,6 +119,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # globalSetup seeds the fixture corpus with the local ONNX embedder on
+      # EVERY run, whichever specs are selected, so this ~430MB model is still
+      # needed here even though the Ollama pull is gone. Cache it.
+      - name: Cache Hugging Face models (ONNX embedder, ~430MB)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-bge-base-en-v1.5
+
       # MUST run before the suite starts its servers. playwright.config.ts
       # runs `pnpm --filter @rag/api start` / `@rag/web start` — `next start`
       # (and the built api) serve whatever is already in dist/.next and never

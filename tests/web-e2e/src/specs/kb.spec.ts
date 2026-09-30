@@ -28,81 +28,93 @@ async function ask(page: Page, question: string): Promise<void> {
   await expect(input).toBeEnabled({ timeout: 90_000 });
 }
 
-test("citations resolve to real documents", async ({ page }) => {
-  await ask(page, `What does the ${NONCE_A} checklist gate?`);
+test(
+  "citations resolve to real documents",
+  { tag: "@needs-8b-model" },
+  async ({ page }) => {
+    await ask(page, `What does the ${NONCE_A} checklist gate?`);
 
-  const chips = page.getByTestId("citation-chip");
-  // Non-empty precondition: without this, the loop below is `[].every(...)`
-  // — vacuously true if the model emitted no [N] markers and citations is [].
-  await expect(chips).not.toHaveCount(0);
+    const chips = page.getByTestId("citation-chip");
+    // Non-empty precondition: without this, the loop below is `[].every(...)`
+    // — vacuously true if the model emitted no [N] markers and citations is [].
+    await expect(chips).not.toHaveCount(0);
 
-  for (const chip of await chips.all()) {
-    const text = await chip.textContent();
-    const title = (text ?? "").replace(/^\[\d+\]\s*/, "");
+    for (const chip of await chips.all()) {
+      const text = await chip.textContent();
+      const title = (text ?? "").replace(/^\[\d+\]\s*/, "");
 
-    const docId = await chip.getAttribute("data-doc-id");
-    if (docId === null) {
-      throw new Error("citation chip is missing data-doc-id");
+      const docId = await chip.getAttribute("data-doc-id");
+      if (docId === null) {
+        throw new Error("citation chip is missing data-doc-id");
+      }
+
+      // page.request (not the standalone `request` fixture) shares the
+      // browser context's cookies, so it carries the session the auth
+      // fixture minted — the BFF route requires it.
+      const res = await page.request.get(`/api/documents/${docId}`);
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.title).toBe(title);
     }
+  },
+);
 
-    // page.request (not the standalone `request` fixture) shares the
-    // browser context's cookies, so it carries the session the auth
-    // fixture minted — the BFF route requires it.
-    const res = await page.request.get(`/api/documents/${docId}`);
-    expect(res.status()).toBe(200);
-    const body = await res.json();
-    expect(body.title).toBe(title);
-  }
-});
+test(
+  "self-retrieval: the nonce document is cited",
+  { tag: "@needs-8b-model" },
+  async ({ page }) => {
+    await ask(page, `What does the ${NONCE_A} checklist gate?`);
 
-test("self-retrieval: the nonce document is cited", async ({ page }) => {
-  await ask(page, `What does the ${NONCE_A} checklist gate?`);
+    const chips = page.getByTestId("citation-chip");
+    await expect(chips).not.toHaveCount(0);
+    await expect(chips.first()).toContainText("New Client Onboarding");
+  },
+);
 
-  const chips = page.getByTestId("citation-chip");
-  await expect(chips).not.toHaveCount(0);
-  await expect(chips.first()).toContainText("New Client Onboarding");
-});
-
-test("an out-of-corpus question is refused, not confabulated", async ({
-  page,
-}) => {
-  await ask(
-    page,
-    "What is our policy on controlled foreign corporation transfer pricing?",
-  );
-
-  await expect(page.getByTestId("refusal")).toBeVisible();
-  // Citations ARE expected here — do not assert zero. The generation prompt
-  // appends "Closest related material: <title> [N]" when a document is
-  // plausibly adjacent, so a *correct* refusal on this fixture corpus
-  // carries a citation. What must NOT happen is a stream error rendering
-  // alongside the refusal text.
-  await expect(page.getByTestId("stream-error")).toHaveCount(0);
-});
-
-test("rendered chips equal the citations the BFF returned", async ({
-  page,
-}) => {
-  await captureSse(page);
-  await ask(page, `What does the ${NONCE_A} checklist gate?`);
-
-  const chips = page.getByTestId("citation-chip");
-  // Non-empty precondition — see "citations resolve to real documents".
-  await expect(chips).not.toHaveCount(0);
-  const chipCount = await chips.count();
-
-  // Safe to read now: `ask()` only returns once the input has re-enabled,
-  // which happens after the "done" SSE frame has been processed and
-  // rendered — readSse() below reflects the complete stream, not a partial
-  // one.
-  const payload = findDoneEventPayload(await readSse(page));
-  if (payload === undefined) {
-    throw new Error(
-      "no captured SSE frame carried a 'done' event with a citations array — was the 'done' event ever sent?",
+test(
+  "an out-of-corpus question is refused, not confabulated",
+  { tag: "@needs-8b-model" },
+  async ({ page }) => {
+    await ask(
+      page,
+      "What is our policy on controlled foreign corporation transfer pricing?",
     );
-  }
-  expect(chipCount).toBe(payload.citations.length);
-});
+
+    await expect(page.getByTestId("refusal")).toBeVisible();
+    // Citations ARE expected here — do not assert zero. The generation prompt
+    // appends "Closest related material: <title> [N]" when a document is
+    // plausibly adjacent, so a *correct* refusal on this fixture corpus
+    // carries a citation. What must NOT happen is a stream error rendering
+    // alongside the refusal text.
+    await expect(page.getByTestId("stream-error")).toHaveCount(0);
+  },
+);
+
+test(
+  "rendered chips equal the citations the BFF returned",
+  { tag: "@needs-8b-model" },
+  async ({ page }) => {
+    await captureSse(page);
+    await ask(page, `What does the ${NONCE_A} checklist gate?`);
+
+    const chips = page.getByTestId("citation-chip");
+    // Non-empty precondition — see "citations resolve to real documents".
+    await expect(chips).not.toHaveCount(0);
+    const chipCount = await chips.count();
+
+    // Safe to read now: `ask()` only returns once the input has re-enabled,
+    // which happens after the "done" SSE frame has been processed and
+    // rendered — readSse() below reflects the complete stream, not a partial
+    // one.
+    const payload = findDoneEventPayload(await readSse(page));
+    if (payload === undefined) {
+      throw new Error(
+        "no captured SSE frame carried a 'done' event with a citations array — was the 'done' event ever sent?",
+      );
+    }
+    expect(chipCount).toBe(payload.citations.length);
+  },
+);
 
 /**
  * Parses raw SSE bytes into frames (blank-line delimited, per the
