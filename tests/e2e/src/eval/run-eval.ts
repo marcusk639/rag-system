@@ -223,11 +223,19 @@ export async function sweepWeights(
   weightConfigs: RrfWeights[],
   ks: number[] = [...DEFAULT_KS],
   embedder?: EmbeddingProvider,
+  // Without this the sweep silently scores whatever corpus was seeded against
+  // the DEFAULT questions, which is wrong for any corpus but the starter set.
+  questions?: EvalQuestion[],
 ): Promise<EvalReport[]> {
   const reports: EvalReport[] = [];
   for (const weights of weightConfigs) {
     reports.push(
-      await runRetrievalEval(db, externalIdByDocId, { weights, ks, embedder }),
+      await runRetrievalEval(db, externalIdByDocId, {
+        weights,
+        ks,
+        embedder,
+        questions,
+      }),
     );
   }
   return reports;
