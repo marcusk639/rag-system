@@ -93,3 +93,10 @@ corpus-analysis/
 
 # eval:gold reports contain real knowledge-base answers
 gold-*.json
+
+# P0 gate #1 content-audit worksheets contain document titles and SharePoint
+# paths. The TRI scanner screens document bodies, not titles or folder names —
+# whether those carry client-identifying material is the human judgment gate #1
+# exists to make. Same reasoning as gold-*.json above. Generator:
+# scripts/gate1-content-audit.mjs (it refuses to write to a tracked path).
+gate1-audit-*.md

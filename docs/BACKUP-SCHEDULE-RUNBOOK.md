@@ -56,7 +56,56 @@ daily copies is roughly 1 GB. Cost is not a factor in any of the decisions below
 | Restore FROM pgBackRest             | The PITR claim itself                        | ✅ **PROVEN 2026-09-02** — manual/root only |
 | Monitoring (dead-man's switch)      | Silent failure of all the above              | ⬜ `HEARTBEAT_URL` unset                    |
 | Retention decision                  | §7216 / Circular 230                         | ⬜ Counsel, with P2 #8                      |
-| Restore from a scheduled artifact   | The claim itself                             | ⬜ Not yet done                             |
+| Restore from a scheduled artifact   | The claim itself                             | ✅ **PROVEN 2026-10-02** — see below        |
+
+### ✅ Restore from a scheduled artifact — done 2026-10-02
+
+This is the row the runbook meant by _"a restore has been watched succeed from an
+artifact **nobody took by hand**."_ It is now done, and it was never blocked on
+Chris — only the off-Railway **destination** is.
+
+**The artifact.** `backups/kb-2026-10-01T080156Z.sql.gz`, 1.2 MiB, written by the
+`rag-backup` cron (`0 8 * * *` UTC) with no human involvement. 31 artifacts are
+present, daily and unbroken from 2026-09-01 to 2026-10-01.
+
+**Procedure.** Downloaded with the service's own credentials, restored into a
+throwaway `pgvector/pgvector:pg16` container on port 55433 under
+`psql -v ON_ERROR_STOP=1`, verified, then container and artifact destroyed.
+Production was never written to.
+
+| Check                                   | Result                                                           |
+| --------------------------------------- | ---------------------------------------------------------------- |
+| gzip stream intact                      | ✅ `gzip -t` clean                                               |
+| Dump contains `CREATE EXTENSION vector` | ✅                                                               |
+| Restore under `ON_ERROR_STOP=1`         | ✅ **exit 0, zero ERROR/FATAL lines**                            |
+| Public base tables                      | ✅ **13**                                                        |
+| Row counts                              | ✅ sources 1 · documents **47** · chunks **210** · audit_log 132 |
+| pgvector extension                      | ✅ `0.8.6`                                                       |
+| `chunks.embedding` still a real vector  | ✅ **`vector(768)`** — not degraded to text/array                |
+| Indexes restored                        | ✅ **39**, incl. 1 HNSW + 4 GIN                                  |
+| Distinct embedding models               | ✅ **1** (`gemini-embedding-001`) — no mixed-model contamination |
+| Vector ANN query executes               | ✅ 3 rows, self-distance `0.000000`                              |
+
+`documents 47 / chunks 210 / 39 indexes / 13 tables` match the production index
+state recorded elsewhere in this runbook and in `PILOT-LAUNCH-STATUS.md`.
+`audit_log` has grown 28 → 132 since the 2026-09-02 pgBackRest restore, which is
+expected.
+
+⚠ **What this does NOT prove.** Parity against _live_ production was not checked:
+`DATABASE_URL` resolves `rag-postgres.railway.internal`, and `rag-postgres`
+exposes no `DATABASE_PUBLIC_URL`, so the live database is unreachable from a
+workstation — correct posture, but it means the comparison is against the
+documented index state rather than a live count taken at the same moment. The
+artifact is also **unencrypted firm data**: it existed on a workstation only for
+the duration of the drill and was deleted immediately after.
+
+⚠ **Two rows above this one are still genuinely open, and neither is the restore.**
+`HEARTBEAT_URL` is unset, so every layer here can fail silently — a cron that
+never fires produces no error because there is no run. And the off-Railway
+destination still needs Chris's admin consent; `S3_BUCKET` /`S3_ENDPOINT` /
+`BACKUP_DEST=s3` are all set and working, but they point at the Railway-hosted
+bucket, which does not survive the project-loss scenario the second layer exists
+for.
 
 🟡 **What "stopgap" means concretely.** Backups now run nightly and land in
 Railway's own `rag-documents` bucket under `backups/`. That bucket lives in the
