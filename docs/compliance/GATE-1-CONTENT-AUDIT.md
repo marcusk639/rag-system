@@ -1,7 +1,7 @@
 # P0 gate #1 — content audit: how to actually close it
 
-**Written:** 2026-10-02 · **Status:** procedure defined, audit not yet run, **one
-code change still required** (§3)
+**Written:** 2026-10-02 · **Status:** procedure defined, **enforcement shipped**
+(§3), audit not yet run — it is now a review task with no code blocking it
 
 **Gate #1 asks:** is every document in the staff-wide knowledge base one the firm
 is willing to expose to every member of staff who can query it?
@@ -20,13 +20,13 @@ once an 858-document slog against a corpus known to contain TRI. That corpus was
 deliberately destroyed on 2026-08-03 (`PURGE-RECORD-2026-08-03.md`). What remains
 is a 47-document, TRI-screened rebuild. Reviewing 47 rows is an afternoon.
 
-**0.2 A recorded verdict is NOT currently enforced.** There is no per-document
+**0.2 A recorded verdict IS now enforced** (changed 2026-10-02; this read "is NOT" when written hours earlier). There is no per-document
 approval column anywhere in the schema, and no retrieval path reads one. If Chris
 marks a document `WITHDRAW`, nothing in the running system acts on that. §3 is
 therefore a blocker on _closing_ the gate, not a nice-to-have — it is the
 "closing gate #1 needs code" note in `PILOT-LAUNCH-STATUS.md` made specific.
 
-**0.3 A re-sync silently undoes the audit.** Delta cursors are intact and the
+**0.3 A re-sync no longer undoes a withdrawal** (changed 2026-10-02), though it still re-imports purged _other_ material. Delta cursors are intact and the
 ingest-time content-boundary gates are unbuilt, so one `POST /sources/:id/sync`
 re-imports the purged material. Nothing triggers this automatically — the only
 pg-boss schedules are the weekly digest and the hourly audit shipper — but
@@ -118,64 +118,91 @@ worksheet has a Reviewer column per row for that reason.
 
 ---
 
-## 3. ⛔ The blocker — a verdict has nowhere to live
+## 3. ✅ Enforcement — shipped 2026-10-02
 
-This is the part that needs code before the gate can close.
+When this document was first written hours earlier, §3 was a blocker: a verdict
+had nowhere to live and nothing would honour it. That is now built.
 
-**What exists:**
+**What was true then.** `sources.data_class` gates whole sources at ingest;
+`ingest_log.doc_class` is a log written after the fact; `documents.content_type`
+is NULL on all 47; and `documents.lifecycle_status` — declared at
+`packages/db/src/schema.ts:164` with `.default("active")` — was referenced
+nowhere else in `packages/` or `apps/`. An inert column.
 
-| Surface                      | Granularity      | Honoured by retrieval?                                      |
-| ---------------------------- | ---------------- | ----------------------------------------------------------- |
-| `sources.data_class`         | **whole source** | Yes — ingest-time gate (`pipeline.ts`, `ClassBlockedError`) |
-| `ingest_log.doc_class`       | per document     | **No** — it is a log, written after the fact                |
-| `documents.lifecycle_status` | per document     | **No** — see below                                          |
-| `documents.content_type`     | per document     | **No** — NULL on all 47                                     |
+**3.1 Retrieval now filters it.** `hybridSearch` carries a mandatory, non
+caller-overridable `AND doc.lifecycle_status = 'active'`
+(`packages/db/src/hybrid-search.ts`). There is deliberately no option to disable
+it.
 
-`lifecycle_status` is declared at `packages/db/src/schema.ts:164`
-(`.notNull().default("active")`) and is referenced **nowhere else in the
-codebase** — a grep across `packages/` and `apps/`, excluding tests and `dist/`,
-returns that single schema line. It is an inert column.
+> **Correction to what this section said earlier.** It claimed the filter had to
+> be applied to "both arms, or the sparse arm silently keeps serving withdrawn
+> documents." That was wrong, and reading the query is what corrected it: the
+> filter sits in the **final SELECT, after the RRF merge**, where the dense and
+> sparse CTEs have already been fused and `documents` is joined — so one
+> fragment covers both arms. Putting it inside the CTEs would instead defeat the
+> HNSW index, which is why every other filter here is a post-filter too. The
+> spec asserts the sparse path explicitly rather than trusting this reasoning.
 
-So today, applying a `WITHDRAW` means deleting the document's rows by hand, and
-the next sync brings it back (§4).
+**3.2 A re-sync cannot resurrect a withdrawal — by construction.** The
+`upsertDocument` ON CONFLICT ... DO UPDATE SET list (`packages/db/src/queries.ts`)
+is explicit and omits `lifecycle_status`, so neither an unchanged re-ingest nor an
+edited document resets it. No new code was needed; what was needed was making the
+invariant deliberate instead of incidental, so it now carries a comment saying
+why the column must stay out of that list.
 
-**Minimal change that makes the gate closable.** `lifecycle_status` is the right
-home precisely because it already exists, already defaults to `active`, and is
-read by nothing — so filtering on it is additive and cannot change behaviour for
-any existing row:
+**3.3 Tests.** `tests/e2e/src/specs/lifecycle-withdrawn.spec.ts`, 5 specs against
+a real Postgres. They live in e2e, not `packages/db`, because that package's unit
+tests have no database — as `queries.access-control.test.ts` says of the sibling
+source-id filter, the SQL enforcement "needs Postgres" and was otherwise
+"verified by reading + typecheck". For a compliance gate, a unit test asserting a
+SQL fragment is _present_ would pass whether or not it works.
 
-1. Filter `documents.lifecycle_status = 'active'` in the retrieval join —
-   `hybridSearch` in `packages/db/src/hybrid-search.ts`, both the dense and the
-   sparse arm, or the sparse arm silently keeps serving withdrawn documents.
-2. Give the ingestion pipeline a rule that an existing document already marked
-   non-`active` is not resurrected by a re-sync — otherwise §4 defeats §3.
-3. Regression test first, per `.claude/rules/tdd.md`: a withdrawn document must
-   be absent from both retrieval arms, and must stay absent across a re-ingest of
-   unchanged content.
+Every spec asserts in both directions, so none can pass by retrieving nothing:
 
-This is deliberately _not_ a new approval table, a review workflow, or a
-per-document ACL. Gate #1 needs "this document is not served any more" to be
-expressible and enforced. Anything beyond that is a different project.
+| Spec                                  | Guards                             |
+| ------------------------------------- | ---------------------------------- |
+| both retrievable while active         | the harness itself — the control   |
+| withdrawn omitted, active kept        | §3.1                               |
+| withdrawn omitted from the sparse arm | the one-fragment-covers-both claim |
+| re-sync of **unchanged** content      | §3.2, no-op path                   |
+| re-sync of **changed** content        | §3.2, ON CONFLICT UPDATE path      |
+
+Verified by mutation, not just by passing: adding `lifecycle_status` to the
+upsert SET list turns both re-sync specs red, and reverting turns them green
+again. The tests are load-bearing.
+
+**Eval:** `pnpm eval` after the change — recall@5 100%, MRR 1.000, nDCG@5 99.1%,
+unchanged from baseline. Expected, since the eval corpus withdraws nothing; it
+confirms the filter is a no-op when it should be, rather than quietly excluding
+everything.
+
+**Known tradeoff, deliberately taken.** The filter is NOT counted in the
+`filtered` flag that triggers a retry at maximum candidate pool. Counting it
+would make that flag always true, so every query returning fewer than `topK`
+rows would retry — including the ordinary case of a corpus with fewer than
+`topK` matches, which is exactly what the "unfiltered queries never retry" rule
+exists to avoid. The cost: if a **large fraction** of a source is ever withdrawn,
+withdrawn chunks can crowd the candidate pool and quietly reduce recall with no
+retry. Acceptable while withdrawals are a handful of documents out of 47. If
+withdrawals ever become bulk, count it and accept the retry cost.
 
 ---
 
-## 4. ⛔ The re-sync landmine
+## 4. The remaining re-sync exposure — narrower, not gone
+
+§3.2 means a **withdrawn** document stays withdrawn. It does **not** mean a
+re-sync is safe in general: the ingest-time content-boundary gates are still
+unbuilt, so a sync can still re-import material from the 2026-08-03 purge that
+was never in the index to be withdrawn in the first place.
 
 > Cursors are intact and the ingest-time gates are unbuilt, so one
 > `POST /sources/:id/sync` undoes the purge.
 > — `PILOT-LAUNCH-STATUS.md`
 
-Until §3.2 lands, the audit is only as durable as everyone's memory not to press
-sync. That is not a control. Two options, in preference order:
-
-- **Preferred:** implement §3.2, so a withdrawn document stays withdrawn through
-  a sync. The audit then survives the thing most likely to undo it.
-- **Interim, if the pilot must proceed first:** make the sync route refuse for
-  this source unless an explicit override is passed, and say why in the refusal.
-  A guard that names its own reason is worth more than a comment in a runbook.
-
-Either way this is a **precondition of the audit being meaningful**, not
-follow-up work. An audit whose result one API call erases has not closed a gate.
+So the standing instruction is unchanged — **do not re-sync until the
+content-boundary phases land** — but the reason has narrowed. The audit's own
+verdicts now survive a sync; what does not survive is the purge of everything
+that was deliberately never re-ingested.
 
 ---
 
@@ -185,9 +212,9 @@ Gate #1 is closed when all of:
 
 - [ ] Every one of the 47 rows carries a Decision and a named Reviewer
 - [ ] Every `ASK` has been resolved to `OK` or `WITHDRAW`
-- [ ] §3.1 shipped — retrieval filters on `lifecycle_status`, with tests
-- [ ] §3.2 (or §4's interim guard) shipped — a re-sync cannot resurrect a
-      withdrawn document
+- [x] §3.1 shipped — retrieval filters on `lifecycle_status`, with tests
+- [x] §3.2 — a re-sync cannot resurrect a withdrawn document (held by
+      construction + two specs + a mutation check)
 - [ ] Every `WITHDRAW` applied **and** confirmed absent from a fresh query
       against the deployed system, not just from the database
 - [ ] The sign-off block in the worksheet is complete, and the worksheet is
