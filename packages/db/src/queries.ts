@@ -926,11 +926,13 @@ export async function getAuditLogRowsSince(
  *
  * Never hard-deletes grants — soft-delete only (revoked_at IS NULL = active),
  * preserving §7216 reconstructibility.
- */
-/**
- * NOTE: `resolveSharedSourceIdsForUsers` below reuses this same grant UNION. If
- * you add a condition here (an expiry column, a data_class filter, a tenant
- * check), add it there too or the two will disagree silently.
+ *
+ * SYNC WARNING: the client-routed branch below is duplicated in two other
+ * functions in this file — `resolveSharedSourceIdsForUsers` and
+ * `clientRoutedGrantsForSource`. If you add a condition here (an expiry column,
+ * a data_class filter, a tenant check), add it to both or they will disagree
+ * silently. `tests/e2e/src/specs/client-routed-grants.spec.ts` pairs the third
+ * against this one specifically to catch that.
  */
 export async function resolveSourceIdsForUser(
   db: Db,
@@ -1021,34 +1023,6 @@ export interface GrantClientAccessInput {
  * grants for the same pair could both pass the existence check and both
  * insert, producing duplicate rows.
  */
-/**
- * Which client assignments, if any, route `userId` to `sourceId`.
- *
- * Exists because `revokeSourceAccess` can only remove a DIRECT grant, while
- * `resolveSourceIdsForUser` also honours the client-routed path. Without this, a
- * caller that revokes a direct grant cannot tell whether the user still reaches
- * the source — and reporting "revoked" when access survives is the failure mode
- * the soft-revoke audit trail exists to make visible.
- *
- * Returns the `client_id`s responsible, so a caller can name what to revoke
- * instead. Empty means no client-routed access to that source.
- */
-export async function clientRoutedGrantsForSource(
-  db: Db,
-  userId: string,
-  sourceId: string,
-): Promise<string[]> {
-  const rows = await db.execute<{ client_id: string }>(sql`
-    SELECT sta.client_id
-    FROM staff_client_assignments sta
-    JOIN source_client_assignments sca ON sca.client_id = sta.client_id
-    WHERE sta.user_id = ${userId}
-      AND sta.revoked_at IS NULL
-      AND sca.source_id = ${sourceId}
-  `);
-  return rows.rows.map((r) => r.client_id);
-}
-
 export async function grantClientAccess(
   db: Db,
   { userId, clientId, grantedBy }: GrantClientAccessInput,
@@ -1062,6 +1036,39 @@ export async function grantClientAccess(
       granted_by = ${grantedBy},
       granted_at = now()
   `);
+}
+
+/**
+ * Which client assignments, if any, route `userId` to `sourceId`.
+ *
+ * Exists because `revokeSourceAccess` can only remove a DIRECT grant, while
+ * `resolveSourceIdsForUser` also honours the client-routed path. Without this, a
+ * caller that revokes a direct grant cannot tell whether the user still reaches
+ * the source — and reporting "revoked" when access survives is the failure mode
+ * the soft-revoke audit trail exists to make visible.
+ *
+ * Returns the `client_id`s responsible, so a caller can name what to revoke
+ * instead. Empty means no client-routed access to that source.
+ *
+ * DISTINCT is required, not tidiness: `source_client_assignments` has no
+ * unique index on (source_id, client_id), and two clients can route the same
+ * user to one source. `resolveSourceIdsForUser` dedupes via UNION; this has
+ * no UNION to hide behind.
+ */
+export async function clientRoutedGrantsForSource(
+  db: Db,
+  userId: string,
+  sourceId: string,
+): Promise<string[]> {
+  const rows = await db.execute<{ client_id: string }>(sql`
+    SELECT DISTINCT sta.client_id
+    FROM staff_client_assignments sta
+    JOIN source_client_assignments sca ON sca.client_id = sta.client_id
+    WHERE sta.user_id = ${userId}
+      AND sta.revoked_at IS NULL
+      AND sca.source_id = ${sourceId}
+  `);
+  return rows.rows.map((r) => r.client_id);
 }
 
 /**
