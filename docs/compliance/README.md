@@ -2,6 +2,20 @@
 
 Compliance artifacts required by the §7216 / CPA deployment gate.
 
+## Conformance records
+
+Point-in-time checks of the running system against the scope contract in
+`~/dev/cpa-consulting/docs/rag/compliance-scope.md`. These are engineering
+evidence for counsel, not self-certifications — each row carries a file/line or a
+measured value, and gaps are recorded as gaps.
+
+- `scope-conformance-2026-09-30.md` — for P0 gate #2 (counsel + carrier sign-off).
+  Naming: `scope-conformance-<YYYY-MM-DD>.md`. Supersede by adding a newer dated
+  file; do not edit an old one, so a reader can see what moved.
+
+**These do NOT satisfy the boot-time DPA check below** — that matches
+`vendor-dpa-<vendor>.md` only (`packages/core/src/config.ts:778-782`).
+
 ## DPA files
 
 When `COMPLIANCE_MODE=client-data` is set, the service refuses to boot
