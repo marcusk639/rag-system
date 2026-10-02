@@ -927,6 +927,15 @@ export async function getAuditLogRowsSince(
  * Never hard-deletes grants — soft-delete only (revoked_at IS NULL = active),
  * preserving §7216 reconstructibility.
  */
+/**
+ * NOTE: this grant UNION is duplicated in two other places. If you add a
+ * condition here (an expiry column, a data_class filter, a tenant check), add it
+ * to both or they will disagree silently:
+ *  - `resolveSharedSourceIdsForUsers` below, which reuses the same UNION.
+ *  - `scripts/manage-access.mjs` (`check`), which hand-copies this SQL so an
+ *    admin can see what the BFF will resolve for a user. A stale copy there
+ *    reports the old answer with full confidence.
+ */
 export async function resolveSourceIdsForUser(
   db: Db,
   userId: string,
