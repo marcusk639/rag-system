@@ -38,7 +38,20 @@
  * EXIT CODES
  *   0 success · 1 no-op · 2 usage · 3 operational · 4 needs attention
  *
- * Usage (from the repo root):
+ * HOW TO RUN IT -- the two forms are not interchangeable
+ *
+ * Inside a deployed container, as COMPILED JS:
+ *   node node_modules/@rag/db/dist/manage-access.js check --user <id>
+ *
+ * The runtime stage is plain `node:22-slim` with no pnpm, and
+ * `pnpm deploy --prod` prunes the `tsx` that the package script shells out to.
+ * So `pnpm --filter @rag/db access` CANNOT work there -- the same trap
+ * `apps/worker/Dockerfile` records for the migrate command, which "could never
+ * have worked against this image" and went unnoticed for ~7 weeks. Migrations
+ * run as `node node_modules/@rag/db/dist/migrate.js` for this reason
+ * (apps/worker/railway.json), and this follows that precedent.
+ *
+ * Locally, where devDependencies exist, the package script is the convenience:
  *   pnpm --filter @rag/db access -- sources
  *   pnpm --filter @rag/db access -- check  --user <idp-user-id>
  *   pnpm --filter @rag/db access -- list   --user <id> [--revoked]
@@ -64,12 +77,17 @@ const EXIT = {
   ATTENTION: 4,
 } as const;
 
-const HELP = `Usage:
-  access -- sources
-  access -- check  --user <id>
-  access -- list   --user <id> [--revoked]
-  access -- grant  --user <id> --source <uuid> --by <admin>
-  access -- revoke --user <id> --source <uuid>
+const HELP = `Usage (in a container, compiled):
+  node node_modules/@rag/db/dist/manage-access.js <command> [flags]
+Usage (locally, via the package script):
+  pnpm --filter @rag/db access -- <command> [flags]
+
+Commands:
+  sources
+  check  --user <id>
+  list   --user <id> [--revoked]
+  grant  --user <id> --source <uuid> --by <admin>
+  revoke --user <id> --source <uuid>
 
 Connection: --url <conn> or DATABASE_URL.
 Exit: 0 ok · 1 no-op · 2 usage · 3 operational · 4 needs attention`;
