@@ -37,6 +37,35 @@ import {
   type RrfWeights,
 } from "./run-eval.js";
 import { EVAL_DOCS, EVAL_QUESTIONS } from "./corpus.js";
+import { EVAL_DOCS_CPA, EVAL_QUESTIONS_CPA } from "./corpus-cpa.js";
+
+/**
+ * Both corpora, measured with the SAME real embedder.
+ *
+ * `corpus.ts` is vocabulary-distinctive by design, so a keyword arm alone
+ * saturates it — a `dense=0` sweep row scores the same as `dense=1`, which
+ * means it cannot discriminate between embedding models at all. Running only
+ * that corpus is how a real-embedder comparison can look conclusive while
+ * measuring nothing about the embedder. `corpus-cpa.ts` removes the cushion:
+ * its documents share CPA vocabulary heavily ("client", "engagement",
+ * "Karbon", "time entry").
+ */
+const CORPORA = [
+  {
+    key: "starter",
+    file: "corpus.ts",
+    note: 'the "STARTER set" — vocabulary-distinctive, treat as a floor',
+    docs: EVAL_DOCS,
+    questions: EVAL_QUESTIONS,
+  },
+  {
+    key: "cpa",
+    file: "corpus-cpa.ts",
+    note: "CPA-representative, shared vocabulary — the discriminating corpus",
+    docs: EVAL_DOCS_CPA,
+    questions: EVAL_QUESTIONS_CPA,
+  },
+] as const;
 
 const DEFAULT_WEIGHTS: RrfWeights = { dense: 0.7, sparse: 0.3 };
 const SWEEP: RrfWeights[] = [
@@ -53,6 +82,7 @@ function markdownReport(
   dimensions: number,
   baseline: EvalReport,
   sweep: EvalReport[],
+  corpus: (typeof CORPORA)[number],
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -60,7 +90,7 @@ function markdownReport(
   );
   lines.push("");
   lines.push(
-    `Corpus: ${EVAL_DOCS.length} documents / ${EVAL_QUESTIONS.length} questions (see \`corpus.ts\` — this is the "STARTER set," vocabulary-distinctive, no semantic-similarity difficulty; treat these numbers as a floor, not a ceiling).`,
+    `Corpus: ${corpus.docs.length} documents / ${corpus.questions.length} questions (see \`${corpus.file}\` — ${corpus.note}).`,
   );
   lines.push("");
   lines.push(
@@ -105,35 +135,58 @@ async function main(): Promise<void> {
 
   const { db, close } = openTestDb();
   try {
-    await truncateAll(db);
-    const sourceId = await createCustomSource(db, "eval-corpus-real");
-    const externalIdByDocId = await seedEvalCorpus(db, sourceId, embedder);
+    const sections: string[] = [];
 
-    const baseline = await runRetrievalEval(db, externalIdByDocId, {
-      weights: DEFAULT_WEIGHTS,
-      ks: [...DEFAULT_KS],
-      embedder,
-    });
-    console.log(formatReport(baseline));
-    console.log(formatMisses(baseline, 5));
+    // Each corpus is seeded into a FRESH source after a truncate, so the two
+    // never share a vector space or leak documents into each other's recall.
+    for (const corpus of CORPORA) {
+      console.log(
+        `\n=== corpus: ${corpus.key} (${corpus.docs.length} docs / ${corpus.questions.length} questions) ===`,
+      );
+      await truncateAll(db);
+      const sourceId = await createCustomSource(
+        db,
+        `eval-corpus-real-${corpus.key}`,
+      );
+      const externalIdByDocId = await seedEvalCorpus(
+        db,
+        sourceId,
+        embedder,
+        corpus.docs,
+      );
 
-    console.log("\nRunning weight sweep...");
-    const sweep = await sweepWeights(
-      db,
-      externalIdByDocId,
-      SWEEP,
-      [...DEFAULT_KS],
-      embedder,
-    );
-    for (const r of sweep) console.log(formatReport(r));
+      const baseline = await runRetrievalEval(db, externalIdByDocId, {
+        weights: DEFAULT_WEIGHTS,
+        ks: [...DEFAULT_KS],
+        embedder,
+        questions: corpus.questions,
+      });
+      console.log(formatReport(baseline));
+      console.log(formatMisses(baseline, 5));
 
-    const md = markdownReport(
-      config.embedding.provider,
-      config.embedding.model,
-      config.embedding.dimensions,
-      baseline,
-      sweep,
-    );
+      const sweep = await sweepWeights(
+        db,
+        externalIdByDocId,
+        SWEEP,
+        [...DEFAULT_KS],
+        embedder,
+        corpus.questions,
+      );
+      for (const r of sweep) console.log(formatReport(r));
+
+      sections.push(
+        markdownReport(
+          config.embedding.provider,
+          config.embedding.model,
+          config.embedding.dimensions,
+          baseline,
+          sweep,
+          corpus,
+        ),
+      );
+    }
+
+    const md = sections.join("\n\n---\n\n");
     const outPath = new URL("./real-eval-result.md", import.meta.url);
     await writeFile(outPath, md + "\n", "utf8");
     console.log(`\nMarkdown report written to ${outPath.pathname}`);
