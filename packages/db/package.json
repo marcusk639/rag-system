@@ -22,7 +22,8 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "studio": "drizzle-kit studio",
-    "test": "vitest run"
+    "test": "vitest run",
+    "access": "tsx src/manage-access.ts"
   },
   "dependencies": {
     "@rag/core": "workspace:*",
