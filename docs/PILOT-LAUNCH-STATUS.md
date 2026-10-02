@@ -40,6 +40,17 @@
 - SharePoint permissions are not enforced per document — the pilot assumes only all-staff libraries are synced (review finding S-5, decision pending).
 - Deploying branch `fix/rag-review-findings` requires a full re-sync afterwards: `CONTENT_PROCESSING_VERSION=2` makes every document re-chunk and re-embed once. See `RAG-REVIEW-2026-09-16.md` §11.4.
 
+**Updated:** 2026-10-02 — **gate #1 now has a written procedure**
+([`compliance/GATE-1-CONTENT-AUDIT.md`](./compliance/GATE-1-CONTENT-AUDIT.md)):
+47 rows to review, plus one required code change, because a `WITHDRAW` verdict
+currently has nowhere in the schema to live and no retrieval path reads one.
+**Gate #3's "restore from a scheduled artifact" row is closed** — an untouched
+nightly artifact restored clean, 47/210 with HNSW and `vector(768)` intact
+([`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md)). Still open on #3:
+the off-Railway destination (Chris's admin consent) and `HEARTBEAT_URL`.
+Access control at the API, listed below as unenforced, was **remediated
+2026-10-02** — see `compliance/scope-conformance-2026-09-30.md` §0.4.
+
 **Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
 material confirmed in the index); gate #3 is **partially closed**, not closed.
 Engineering table last verified 2026-07-16.
