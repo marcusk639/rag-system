@@ -103,7 +103,36 @@ export function buildAuthProvider(
         provider: "oidc",
         oidc: config.auth.oidc,
       });
-    case "composite":
+    case "composite": {
+      // `composite` silently drops the verifiers it has no config for: OIDC when
+      // OIDC_* is absent, and the BFF scope verifier when
+      // INTERNAL_SCOPE_JWT_SECRETS is empty. A deployment can therefore believe
+      // it enforces per-user scoping while running static-token-only, with
+      // nothing in the log to say so. Say so.
+      const hasOidc = Boolean(config.auth.oidc);
+      const hasInternalScope =
+        (config.auth.internalScopeSecrets?.length ?? 0) > 0;
+      logger.info(
+        {
+          provider: "composite",
+          verifiers: [
+            "static-token",
+            ...(hasOidc ? ["oidc"] : []),
+            ...(hasInternalScope ? ["internal-scope"] : []),
+          ],
+          enforceScoping: config.api.enforceScoping ?? false,
+        },
+        "auth chain built",
+      );
+      if (!hasOidc && !hasInternalScope) {
+        logger.warn(
+          "AUTH_PROVIDER=composite resolved to static-token ONLY — no OIDC_* and " +
+            "no INTERNAL_SCOPE_JWT_SECRETS. Per-user scope assertions from the web " +
+            "BFF cannot be verified and will be rejected. If that is not intended, " +
+            "note the name: the API reads INTERNAL_SCOPE_JWT_SECRETS (plural); the " +
+            "singular INTERNAL_SCOPE_JWT_SECRET is read only by apps/web.",
+        );
+      }
       return createAuthProvider({
         provider: "composite",
         ...base,
@@ -112,6 +141,7 @@ export function buildAuthProvider(
         onError: (err) =>
           logger.warn({ err }, "auth provider error (isolated)"),
       });
+    }
   }
 }
 
