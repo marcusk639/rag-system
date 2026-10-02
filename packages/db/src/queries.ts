@@ -178,6 +178,12 @@ export async function upsertDocument(
         ${row.sizeBytes ?? null}, ${JSON.stringify(row.metadata)}::jsonb,
         ${row.markdown}
       )
+      -- NOTE: this SET list is deliberately explicit, and lifecycle_status is
+      -- deliberately absent from it. A document withdrawn by the P0 gate #1
+      -- content audit must stay withdrawn across a re-sync; adding
+      -- lifecycle_status here (or switching to a set-every-column pattern)
+      -- would silently resurrect it the next time its source file is edited.
+      -- Covered by tests/e2e/src/specs/lifecycle-withdrawn.spec.ts.
       ON CONFLICT (source_id, external_id) DO UPDATE SET
         title              = EXCLUDED.title,
         mime_type          = EXCLUDED.mime_type,

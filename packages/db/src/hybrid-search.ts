@@ -334,6 +334,17 @@ export async function hybridSearch(
       JOIN documents doc ON doc.id = c.document_id
       JOIN sources src ON src.id = doc.source_id
       WHERE TRUE
+      -- P0 gate #1 (content audit): a document the firm withdrew is never
+      -- served. This is mandatory and not caller-overridable, like the
+      -- enforced source filter below -- there is deliberately no way to
+      -- disable it. It sits in the final SELECT, after the RRF merge, so
+      -- this one fragment covers BOTH the dense and sparse arms. Putting it
+      -- in the CTEs would defeat the HNSW index, for the same reason the
+      -- other filters are post-filters. It is a literal, so there is
+      -- nothing to parameterise and nothing to inject. Keep backticks out
+      -- of this comment: it is inside a JS template literal and one would
+      -- terminate the sql tag (that mistake cost a red test run).
+      AND doc.lifecycle_status = 'active'
       ${enforcedSourceFilter}
       ${sourceFilter}
       ${sql.join(metadataConditions, sql` `)}
@@ -348,6 +359,15 @@ export async function hybridSearch(
   // matching chunk crowded out of the pool by chunks it cannot read, and get
   // fewer than topK rows back — or none — with no error. Retry once at the
   // largest pool the HNSW index can serve. Unfiltered queries never retry.
+  // NOTE: the mandatory `lifecycle_status = 'active'` filter is deliberately
+  // NOT counted here. Counting it would make `filtered` always true, so every
+  // query returning fewer than topK rows would retry at the maximum pool —
+  // including the ordinary case of a corpus that simply has fewer than topK
+  // matches, which is the cost the "unfiltered queries never retry" rule exists
+  // to avoid. The tradeoff: if a LARGE fraction of a source is ever withdrawn,
+  // withdrawn chunks can crowd the pool and quietly reduce recall with no
+  // retry. That is acceptable while withdrawals are a handful of documents; if
+  // withdrawals ever become bulk, add it here and accept the retry cost.
   const filtered =
     opts.enforcedSourceIds !== null ||
     (opts.sourceIds?.length ?? 0) > 0 ||
