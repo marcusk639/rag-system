@@ -33,11 +33,14 @@
  * It does NOT manage `API_PRINCIPALS`, the env-var list behind direct API/MCP
  * token access. That list has no foreign key, so it can name a source id that
  * no longer exists; `parsePrincipalsConfig` validates JSON shape only. These
- * tables cannot hold a dead id under the current FKs: `source_id` carries ON
- * DELETE CASCADE, so deleting a source takes its grant rows with it. That is
- * why `check`'s `<NO SUCH SOURCE>` branch is belt-and-braces, not a path
- * reached today -- it would matter only if a future table joined into the
- * resolve UNION without that FK. The cascade is not a safety net either:
+ * tables cannot hold a LASTING dead id under the current FKs: `source_id`
+ * carries ON DELETE CASCADE, so deleting a source takes its grant rows with
+ * it. `check`'s `<NO SUCH SOURCE>` branch is reachable TODAY despite that: it
+ * calls `resolveSourceIdsForUser` and then `listSources` as two separate,
+ * un-transacted statements, so a source deleted in that window resolves an id
+ * `listSources` no longer has. It would also matter if a future table joined
+ * into the resolve UNION without that FK. The cascade is not a safety net
+ * either:
  * deleting and recreating a source under a new uuid removes the grants, which
  * from outside looks the same as never having had access.
  *
@@ -66,6 +69,7 @@
  */
 
 import { createDb } from "./client.js";
+import { isMainModule } from "./migrate.js";
 import {
   clientRoutedGrantsForSource,
   grantSourceAccess,
@@ -135,10 +139,18 @@ const UUID_RE =
  */
 export function parseArgs(argv: string[]) {
   const cmd = argv[0];
-  if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
-    console.log(HELP);
-    process.exit(EXIT.OK);
+  // Help is a normal result, not a usage error and not a process exit: the
+  // exit belongs to the caller (`main`), so this stays testable without
+  // stubbing `process.exit` -- the same reason `die` throws instead of
+  // exiting. An absent command, by contrast, IS a usage error.
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+    return {
+      cmd: "help" as const,
+      values: new Map<string, string>(),
+      bools: new Set<string>(),
+    };
   }
+  if (!cmd) die(`no command given.\n${HELP}`);
   const valueFlags = VALUE_FLAGS[cmd];
   const boolFlags = BOOL_FLAGS[cmd];
   if (!valueFlags || !boolFlags) die(`unknown command '${cmd}'.\n${HELP}`);
@@ -194,6 +206,10 @@ const stamp = (v: Date | string | null): string =>
 
 async function main() {
   const { cmd, values, bools } = parseArgs(process.argv.slice(2));
+  if (cmd === "help") {
+    console.log(HELP);
+    return;
+  }
   const url = values.get("url") ?? process.env.DATABASE_URL;
   if (!url) die("no connection string. Pass --url or set DATABASE_URL.");
 
@@ -225,10 +241,10 @@ async function main() {
         console.log(`user:   ${user}`);
         console.log(`target: ${target}`);
         if (ids.length === 0) {
-          console.log(
+          console.error(
             "resolves to: [] -- DENY-ALL. This user retrieves nothing.",
           );
-          console.log(
+          console.error(
             "(an empty scope is the fail-closed case, not unrestricted access)",
           );
           process.exit(EXIT.ATTENTION);
@@ -331,7 +347,7 @@ async function main() {
           );
         }
         if (stillVia.length > 0) {
-          console.log(
+          console.error(
             `WARNING: ${user} STILL has access to ${sourceId} via client ` +
               `assignment(s) ${stillVia.map((c) => `'${c}'`).join(", ")}. ` +
               "This tool manages direct grants only.",
@@ -343,7 +359,18 @@ async function main() {
       }
     }
   } finally {
-    await close();
+    try {
+      await close();
+    } catch (err) {
+      // Logged, not re-thrown: a close() failure here must not override
+      // whatever the try block already threw (a UsageError, in particular) --
+      // throwing from `finally` replaces that exception per JS semantics.
+      console.error(
+        `WARNING: failed to close the database connection cleanly: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 }
 
@@ -352,10 +379,17 @@ async function main() {
  * — as `manage-access.test.ts` does to reach `parseArgs` — runs the whole CLI
  * as an import side effect, which prints help and then calls `process.exit`,
  * failing the package's test run. The unit test is what surfaced it.
+ *
+ * Delegates to `isMainModule` (`migrate.ts`) rather than the naive
+ * `import.meta.url === file://${argv[1]}` comparison: pnpm symlinks workspace
+ * packages, so under the documented container invocation (`node
+ * node_modules/@rag/db/dist/manage-access.js ...`, see the header above) that
+ * comparison is always false, `main()` never runs, and every command exits 0
+ * having done nothing. `migrate.ts`'s docblock records the measured
+ * production argv-vs-realpath values; this is the same trap, already fixed
+ * once in this package.
  */
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+const invokedDirectly = isMainModule(import.meta.url, process.argv[1]);
 
 if (invokedDirectly) {
   main().catch((err: unknown) => {

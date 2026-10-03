@@ -931,8 +931,12 @@ export async function getAuditLogRowsSince(
  * functions in this file — `resolveSharedSourceIdsForUsers` and
  * `clientRoutedGrantsForSource`. If you add a condition here (an expiry column,
  * a data_class filter, a tenant check), add it to both or they will disagree
- * silently. `tests/e2e/src/specs/client-routed-grants.spec.ts` pairs the third
- * against this one specifically to catch that.
+ * silently. `tests/e2e/src/specs/client-routed-grants.spec.ts` pairs
+ * `clientRoutedGrantsForSource` against this one specifically to catch that --
+ * but `resolveSharedSourceIdsForUsers`, the one `apps/teams-bot/src/scope.ts`
+ * uses for Teams channel scope, has NO equivalent client-routed test today. A
+ * condition added here and to `clientRoutedGrantsForSource` but missed there
+ * would ship green and silently diverge for Teams.
  */
 export async function resolveSourceIdsForUser(
   db: Db,
@@ -1051,9 +1055,13 @@ export async function grantClientAccess(
  * instead. Empty means no client-routed access to that source.
  *
  * DISTINCT is required, not tidiness: `source_client_assignments` has no
- * unique index on (source_id, client_id), and two clients can route the same
- * user to one source. `resolveSourceIdsForUser` dedupes via UNION; this has
- * no UNION to hide behind.
+ * unique index on (source_id, client_id), so that pair can be inserted more
+ * than once and this query would otherwise return the same client_id twice.
+ * (Two DIFFERENT clients routing the same user to one source is NOT a
+ * duplicate -- it is the multi-row result this function exists to return,
+ * one id per responsible client; DISTINCT does not and must not collapse
+ * that.) `resolveSourceIdsForUser` dedupes via UNION; this has no UNION to
+ * hide behind.
  */
 export async function clientRoutedGrantsForSource(
   db: Db,
