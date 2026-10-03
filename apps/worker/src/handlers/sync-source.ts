@@ -49,6 +49,7 @@ export async function handleSyncSource(
     makeConnector,
     config,
     pack,
+    scanner,
   } = deps;
   const { sourceId, ingestionId, mode } = job.data;
   const continuation = job.data.continuation ?? false;
@@ -133,6 +134,10 @@ export async function handleSyncSource(
         // Layer 1 (egress): identifier scanners the pipeline redacts against
         // before anything is embedded. Loaded once at worker startup.
         pack,
+        // Layer 1.5: semantic client-context scanner. undefined (provider
+        // "none") means ingestOne quarantines every document — see the
+        // WorkerDeps.scanner comment.
+        scanner,
       },
     );
 
