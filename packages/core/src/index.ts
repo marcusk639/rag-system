@@ -1,3 +1,4 @@
+export * from "./audit-content.js";
 export * from "./types.js";
 export * from "./metadata-policy.js";
 export * from "./relevance.js";

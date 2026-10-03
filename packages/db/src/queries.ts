@@ -643,6 +643,18 @@ export interface AskEventRow {
    * `null` — matching the nullable SQL column (pre-0018 rows also have none).
    */
   answerId: string | null;
+  /**
+   * Question/answer text, already filtered through `resolveAuditContent`
+   * (`@rag/core`). Required rather than optional, for the same reason
+   * `answerId` is: every call site has to make an explicit choice, and a site
+   * that silently omitted these would retain nothing on a deployment that
+   * asked for retention — the failure would be invisible until someone needed
+   * the record.
+   *
+   * Pass the result of `resolveAuditContent(...)`, never raw text.
+   */
+  questionText: string | null;
+  answerText: string | null;
 }
 
 /**
@@ -667,6 +679,8 @@ export async function logAskEvent(db: Db, row: AskEventRow): Promise<void> {
     endpoint: row.endpoint,
     topScore: row.topScore,
     answerId: row.answerId,
+    questionText: row.questionText,
+    answerText: row.answerText,
   };
   await db.insert(auditLog).values(values);
 }
@@ -886,16 +900,59 @@ export async function advanceAuditLogShipperWatermark(
 }
 
 /**
+ * Every `audit_log` column that may leave the primary database.
+ *
+ * Enumerated rather than `select()`-ing the row, because the shipper POSTs
+ * whatever it gets to `AUDIT_SINK_WEBHOOK_URL` — a third party. `questionText`
+ * and `answerText` are deliberately absent: retaining client content in our
+ * own database (AUDIT_LOG_CONTENT) and disclosing it to an outside log
+ * collector are different decisions, and only §7216's rules on the second one
+ * carry criminal penalties. A blanket select would have conflated them the
+ * moment those columns existed.
+ *
+ * Adding a column to `audit_log` does NOT add it here. That is the point: a
+ * new column is un-shipped until someone decides otherwise, in this list,
+ * on purpose.
+ */
+const SHIPPABLE_AUDIT_COLUMNS = {
+  id: auditLog.id,
+  principalKind: auditLog.principalKind,
+  principalSources: auditLog.principalSources,
+  principalSubject: auditLog.principalSubject,
+  questionHash: auditLog.questionHash,
+  channel: auditLog.channel,
+  model: auditLog.model,
+  embeddingProvider: auditLog.embeddingProvider,
+  embeddingModel: auditLog.embeddingModel,
+  sourceIds: auditLog.sourceIds,
+  chunkIds: auditLog.chunkIds,
+  docIds: auditLog.docIds,
+  retrievedCount: auditLog.retrievedCount,
+  endpoint: auditLog.endpoint,
+  topScore: auditLog.topScore,
+  answerId: auditLog.answerId,
+  createdAt: auditLog.createdAt,
+} as const;
+
+/** An `audit_log` row with the content columns removed. */
+export type ShippableAuditLog = {
+  [K in keyof typeof SHIPPABLE_AUDIT_COLUMNS]: AuditLog[K];
+};
+
+/**
  * `audit_log` rows created strictly after `since` (or all rows when `since`
  * is `null` — the job's first-ever tick), oldest first so the caller can
  * advance the watermark to the last row's `createdAt`.
+ *
+ * Returns `ShippableAuditLog`, NOT the full row — see
+ * `SHIPPABLE_AUDIT_COLUMNS`.
  */
 export async function getAuditLogRowsSince(
   db: Db,
   since: Date | null,
-): Promise<AuditLog[]> {
+): Promise<ShippableAuditLog[]> {
   return db
-    .select()
+    .select(SHIPPABLE_AUDIT_COLUMNS)
     .from(auditLog)
     .where(since ? gt(auditLog.createdAt, since) : undefined)
     .orderBy(auditLog.createdAt);
