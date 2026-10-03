@@ -10,10 +10,12 @@
  * serve: scripting a batch of grants, and operating when the web app is down or
  * the operator has no admin session. It is deliberately NOT a second
  * implementation -- it calls `grantSourceAccess`, `revokeSourceAccess`,
- * `resolveSourceIdsForUser` and `listSourceAssignmentHistoryForStaff`, so the
- * row semantics are the ones already proven in
- * `tests/e2e/src/specs/access-grants.spec.ts` and the parameters stay bound
- * rather than interpolated.
+ * `resolveSourceIdsForUser`, `listSourceAssignmentHistoryForStaff`,
+ * `listSources` and `clientRoutedGrantsForSource`, with bound parameters
+ * rather than interpolation. The first four carry row semantics already proven
+ * in `tests/e2e/src/specs/access-grants.spec.ts`; `clientRoutedGrantsForSource`
+ * is new here and is covered by
+ * `tests/e2e/src/specs/client-routed-grants.spec.ts` instead.
  *
  * WHAT IT ADDS over calling those functions directly
  *
@@ -31,9 +33,13 @@
  * It does NOT manage `API_PRINCIPALS`, the env-var list behind direct API/MCP
  * token access. That list has no foreign key, so it can name a source id that
  * no longer exists; `parsePrincipalsConfig` validates JSON shape only. These
- * tables cannot hold a dead id -- `source_id` is an FK with ON DELETE CASCADE --
- * but note that a purge recreating a source under a new uuid cascades the grants
- * away, which from outside looks the same as never having had access.
+ * tables cannot hold a dead id under the current FKs: `source_id` carries ON
+ * DELETE CASCADE, so deleting a source takes its grant rows with it. That is
+ * why `check`'s `<NO SUCH SOURCE>` branch is belt-and-braces, not a path
+ * reached today -- it would matter only if a future table joined into the
+ * resolve UNION without that FK. The cascade is not a safety net either:
+ * deleting and recreating a source under a new uuid removes the grants, which
+ * from outside looks the same as never having had access.
  *
  * EXIT CODES
  *   0 success · 1 no-op · 2 usage · 3 operational · 4 needs attention
@@ -77,6 +83,14 @@ const EXIT = {
   ATTENTION: 4,
 } as const;
 
+/**
+ * Thrown rather than exiting, so `parseArgs` can be unit-tested without
+ * stubbing `process.exit`. `main` converts it to EXIT.USAGE. Everything that
+ * is genuinely a usage problem must go through here, or it lands in
+ * `main().catch` and gets reported as EXIT.OPERATIONAL instead.
+ */
+export class UsageError extends Error {}
+
 const HELP = `Usage (in a container, compiled):
   node node_modules/@rag/db/dist/manage-access.js <command> [flags]
 Usage (locally, via the package script):
@@ -92,9 +106,8 @@ Commands:
 Connection: --url <conn> or DATABASE_URL.
 Exit: 0 ok · 1 no-op · 2 usage · 3 operational · 4 needs attention`;
 
-function die(msg: string, code: number = EXIT.USAGE): never {
-  console.error(`ERROR: ${msg}`);
-  process.exit(code);
+function die(msg: string): never {
+  throw new UsageError(msg);
 }
 
 const VALUE_FLAGS: Record<string, string[]> = {
@@ -120,7 +133,7 @@ const UUID_RE =
  * flag is how a typo'd `--url` would target production instead of the intended
  * database.
  */
-function parseArgs(argv: string[]) {
+export function parseArgs(argv: string[]) {
   const cmd = argv[0];
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
     console.log(HELP);
@@ -150,8 +163,11 @@ function parseArgs(argv: string[]) {
       continue;
     }
     const val = argv[i + 1];
-    if (val === undefined || val.startsWith("--")) {
-      die(`--${name} needs a value.\n${HELP}`);
+    // An empty value is rejected here rather than downstream: `--by "$ADMIN"`
+    // with an unset variable is realistic in the scripted use this exists for,
+    // and would otherwise write granted_by = '' into the audit trail.
+    if (val === undefined || val === "" || val.startsWith("--")) {
+      die(`--${name} needs a non-empty value.\n${HELP}`);
     }
     if (values.has(name)) die(`--${name} given more than once.\n${HELP}`);
     values.set(name, val);
@@ -165,10 +181,13 @@ const requireUuid = (v: string, what: string) =>
 
 /**
  * `StaffSourceAssignmentHistoryRow` declares these as `Date`, but the driver
- * returns strings at runtime (verified). The admin UI survives this by wrapping
- * in `new Date(...)` at access-forms.tsx:229; this does the same. The declared
- * type is wrong rather than this code being paranoid -- worth fixing in
- * queries.ts separately, not in this file.
+ * returns strings at runtime. The admin UI survives it by wrapping in
+ * `new Date(...)` -- see `SourceAccessHistoryForm` in
+ * apps/web/src/app/admin/access/access-forms.tsx (the sibling
+ * `AccessHistoryForm` renders CLIENT assignments, a different row type). That
+ * wrap is why the declared type's being wrong went unnoticed; this does the
+ * same. Nothing in-tree asserts the runtime type either way, so a regression
+ * test belongs with a fix to the declaration, not here.
  */
 const stamp = (v: Date | string | null): string =>
   v === null ? "" : new Date(v).toISOString().slice(0, 16).replace("T", " ");
@@ -314,7 +333,8 @@ async function main() {
         if (stillVia.length > 0) {
           console.log(
             `WARNING: ${user} STILL has access to ${sourceId} via client ` +
-              `assignment '${stillVia[0]}'. This tool manages direct grants only.`,
+              `assignment(s) ${stillVia.map((c) => `'${c}'`).join(", ")}. ` +
+              "This tool manages direct grants only.",
           );
           process.exit(EXIT.ATTENTION);
         }
@@ -327,7 +347,21 @@ async function main() {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(EXIT.OPERATIONAL);
-});
+/**
+ * Only run when executed directly. Without this guard, importing the module
+ * — as `manage-access.test.ts` does to reach `parseArgs` — runs the whole CLI
+ * as an import side effect, which prints help and then calls `process.exit`,
+ * failing the package's test run. The unit test is what surfaced it.
+ */
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+
+if (invokedDirectly) {
+  main().catch((err: unknown) => {
+    console.error(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    // A usage problem must not be reported as operational: a caller that
+    // branches on exit 3 would retry a malformed command forever.
+    process.exit(err instanceof UsageError ? EXIT.USAGE : EXIT.OPERATIONAL);
+  });
+}
