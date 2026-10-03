@@ -5,8 +5,10 @@ import {
   filterSchema,
   MAX_ASK_TOP_K,
   RagError,
+  resolveAuditContent,
   topRelevanceScore,
 } from "@rag/core";
+import type { AuditLogContentPolicy } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import {
   askQuestion,
@@ -58,6 +60,8 @@ function auditAsk(
   retrieved: AskResult["retrieved"],
   model: string | undefined,
   answerId: string,
+  answer: string | null,
+  contentPolicy: AuditLogContentPolicy,
 ): void {
   const p = request.principal;
   void logAskEvent(deps.db, {
@@ -76,6 +80,7 @@ function auditAsk(
     endpoint: "ask",
     topScore: topRelevanceScore(retrieved),
     answerId,
+    ...resolveAuditContent(contentPolicy, question, answer),
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 
@@ -121,14 +126,20 @@ export async function pumpAskStream(
   sink: {
     write: (chunk: string) => void;
     isClosed: () => boolean;
-    onDone: (event: Extract<AskStreamEvent, { type: "done" }>) => void;
+    /** `answer` is the streamed tokens reassembled -- the `done` event does
+     * not carry the text, and the audit row may need it. */
+    onDone: (
+      event: Extract<AskStreamEvent, { type: "done" }>,
+      answer: string,
+    ) => void;
   },
 ): Promise<void> {
+  let answer = "";
   for await (const event of events) {
     if (event.type === "done") {
       // The answer was fully generated (and paid for): always audit it, even
       // if the client left in the instant before this event arrived.
-      sink.onDone(event);
+      sink.onDone(event, answer);
       if (sink.isClosed()) break;
       sink.write(
         `event: done\ndata: ${JSON.stringify({
@@ -140,6 +151,9 @@ export async function pumpAskStream(
         })}\n\n`,
       );
     } else {
+      // Accumulate before the closed-check: the tokens were generated and
+      // paid for, so a client that left mid-stream still audits what we said.
+      answer += event.text;
       if (sink.isClosed()) break;
       sink.write(`event: token\ndata: ${JSON.stringify(event.text)}\n\n`);
     }
@@ -188,6 +202,8 @@ export async function registerAskRoute(
         result.retrieved,
         config.generation?.model,
         result.answerId,
+        result.answer,
+        config.auditLogContent,
       );
       return result;
     },
@@ -247,7 +263,7 @@ export async function registerAskRoute(
           {
             isClosed: () => clientGone,
             write: (chunk) => raw.write(chunk),
-            onDone: (event) =>
+            onDone: (event, answer) =>
               auditAsk(
                 deps,
                 request,
@@ -255,6 +271,8 @@ export async function registerAskRoute(
                 event.retrieved,
                 config.generation?.model,
                 event.answerId,
+                answer,
+                config.auditLogContent,
               ),
           },
         );

@@ -380,6 +380,12 @@ export const Config = z
      * `webhookUrl`, gated by `EgressPolicy` since rows carry real per-user
      * identity (`principalSubject`).
      */
+    /**
+     * Retain question/answer TEXT in audit_log, or only question_hash.
+     * Firm POLICY decision (PILOT-MANUAL-RUNBOOK.md item 5). Governs
+     * RETENTION only -- never egress; see SHIPPABLE_AUDIT_COLUMNS.
+     */
+    auditLogContent: z.enum(["none", "full"]).default("none"),
     auditSink: z.object({
       provider: z.enum(["none", "webhook"]).default("none"),
       webhookUrl: z.string().url().optional(),
@@ -763,6 +769,9 @@ export function loadConfig(
           ? Number(env.DOCS_GAP_DIGEST_MIN_SCORE)
           : undefined,
     },
+    // Retention of question/answer text. Policy decision, not tuning --
+    // see the schema field below and env.example.
+    auditLogContent: (env.AUDIT_LOG_CONTENT ?? "none") as "none" | "full",
     auditSink: {
       provider: (env.AUDIT_SINK_PROVIDER ?? "none") as "none" | "webhook",
       webhookUrl: env.AUDIT_SINK_WEBHOOK_URL || undefined,

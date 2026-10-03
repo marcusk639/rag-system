@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@rag/core";
 import type { SanitizedRetrievalResult } from "@rag/core";
-import { filterSchema, topRelevanceScore } from "@rag/core";
+import {
+  filterSchema,
+  resolveAuditContent,
+  topRelevanceScore,
+} from "@rag/core";
+import type { AuditLogContentPolicy } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -31,6 +36,7 @@ function auditSearch(
   request: FastifyRequest,
   query: string,
   results: SanitizedRetrievalResult[],
+  contentPolicy: AuditLogContentPolicy,
 ): void {
   const p = request.principal;
   void logAskEvent(deps.db, {
@@ -48,6 +54,8 @@ function auditSearch(
     retrievedCount: results.length,
     endpoint: "search",
     topScore: topRelevanceScore(results),
+    // /search generates no answer, so only the query can be retained.
+    ...resolveAuditContent(contentPolicy, query, null),
     // /search has no generated answer — no answerId to record.
     answerId: null,
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
@@ -71,7 +79,13 @@ export async function registerSearchRoute(
       config.retrieval.defaultTopK,
       scopeFromRequest(request),
     );
-    auditSearch(deps, request, request.body.query, results);
+    auditSearch(
+      deps,
+      request,
+      request.body.query,
+      results,
+      config.auditLogContent,
+    );
     return { results };
   });
 }

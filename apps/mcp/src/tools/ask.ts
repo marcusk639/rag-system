@@ -6,6 +6,7 @@ import {
   conversationHistorySchema,
   filterSchema,
   MAX_ASK_TOP_K,
+  resolveAuditContent,
   topRelevanceScore,
 } from "@rag/core";
 import { logAskEvent } from "@rag/db";
@@ -89,6 +90,7 @@ function auditAsk(
   retrieved: AskResult["retrieved"],
   model: string | undefined,
   answerId: string,
+  answer: string | null,
 ): void {
   void logAskEvent(deps.db, {
     principalKind: scope.enforcedSourceIds === null ? "admin" : "scoped",
@@ -106,6 +108,7 @@ function auditAsk(
     endpoint: "ask",
     topScore: topRelevanceScore(retrieved),
     answerId,
+    ...resolveAuditContent(deps.config.auditLogContent, question, answer),
   }).catch((err: unknown) => deps.logger.error({ err }, "audit log failed"));
 }
 
@@ -171,6 +174,7 @@ export function registerAsk(
         retrieved,
         deps.config.generation?.model,
         answerId,
+        answer,
       );
       return {
         // Lead with the practitioner-review disclaimer so a consuming agent
