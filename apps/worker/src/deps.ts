@@ -3,6 +3,7 @@ import {
   type AuditLogSink,
   type Config,
   type Connector,
+  type ContentScanner,
   type LoadedPack,
   type ObjectStore,
 } from "@rag/core";
@@ -12,7 +13,11 @@ import {
   type Db,
   type PendingUpload,
 } from "@rag/db";
-import { HttpParserClient, CompositeChunker } from "@rag/rag";
+import {
+  HttpParserClient,
+  CompositeChunker,
+  createContentScanner,
+} from "@rag/rag";
 import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 // NOTE: The connector factory signature is:
 //   createConnector(
@@ -58,6 +63,16 @@ export interface WorkerDeps {
    */
   pack: LoadedPack;
   /**
+   * Layer 1.5 semantic content scanner. Unlike `pack`, this is optional at
+   * the WorkerDeps level — `undefined` means `CONTENT_SCAN_PROVIDER=none`
+   * (or unset), and `ingestOne`'s `scanForClientContextOrThrow` already fails
+   * closed (quarantines) per-document when it's missing. Deliberately NOT a
+   * startup-crashing dependency like `pack`: a transient outage of a
+   * self-hosted scanner would otherwise take down every unrelated sync and
+   * upload job on the worker, not just the content-safety check.
+   */
+  scanner?: ContentScanner;
+  /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
    * bound to specific credentials/folders).
@@ -84,6 +99,11 @@ export async function buildDeps(
   // version-incompatible pack. Better to refuse to start than to boot a worker
   // whose every ingestion job dies at the redaction gate.
   const pack = loadPack(config.worker.scannerPackDir);
+
+  // Unlike `loadPack`, this does not throw on "none" — see the WorkerDeps
+  // comment on `scanner` for why a missing/unconfigured scanner degrades to
+  // per-document quarantine rather than refusing to boot.
+  const scanner = createContentScanner(config.contentScan);
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -157,6 +177,7 @@ export async function buildDeps(
     objectStore,
     auditLogSink,
     pack,
+    scanner,
     makeConnector,
     close,
   };

@@ -48,6 +48,19 @@ describe("classifyDocument — source class is a ceiling, not a verdict", () => 
     expect(r.reasons).toContain("client-context-path");
   });
 
+  it("escalates a semantic client-context finding to at least C", () => {
+    // Layer 1.5's finding carries the same weight as Layer 2's path signal:
+    // neither is a structured identifier, both imply a specific client
+    // relationship patterns alone cannot establish.
+    const r = classifyDocument({
+      sourceClass: "A",
+      semanticContextDetected: true,
+    });
+    expect(r.docClass).toBe("C");
+    expect(r.quarantine).toBe(true);
+    expect(r.reasons).toContain("semantic-context-detected");
+  });
+
   it("never downgrades a stricter source class", () => {
     // Absence of evidence must not relax a declared classification.
     const r = classifyDocument({ sourceClass: "D", redactionFindings: [] });
@@ -71,6 +84,15 @@ describe("classifyDocument — does not escalate on weak signals", () => {
       redactionFindings: [{ kind: "ssn", count: 0 }],
     });
     expect(r.docClass).toBe("A");
+  });
+
+  it("does not escalate when semantic detection is explicitly false", () => {
+    const r = classifyDocument({
+      sourceClass: "A",
+      semanticContextDetected: false,
+    });
+    expect(r.docClass).toBe("A");
+    expect(r.quarantine).toBe(false);
   });
 
   it("does not escalate on the weak account heuristic alone", () => {

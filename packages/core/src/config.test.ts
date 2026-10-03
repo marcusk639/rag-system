@@ -483,3 +483,27 @@ describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
     ).toThrow();
   });
 });
+
+describe("loadConfig — contentScan (Layer 1.5)", () => {
+  it("defaults to provider 'none'", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.contentScan.provider).toBe("none");
+    expect(cfg.contentScan.baseUrl).toBeUndefined();
+  });
+
+  it("reads an ollama provider configuration from env", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      CONTENT_SCAN_PROVIDER: "ollama",
+      CONTENT_SCAN_BASE_URL: "http://ollama.railway.internal:11434/v1",
+      CONTENT_SCAN_MODEL: "llama3.2:3b",
+      CONTENT_SCAN_TIMEOUT_MS: "45000",
+    });
+    expect(cfg.contentScan).toEqual({
+      provider: "ollama",
+      baseUrl: "http://ollama.railway.internal:11434/v1",
+      model: "llama3.2:3b",
+      timeoutMs: 45000,
+    });
+  });
+});

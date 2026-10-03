@@ -24,7 +24,9 @@ import {
 import {
   isExcludedPath,
   redactParsedDocument,
+  scanForClientContextOrThrow,
   ContentSafetyError,
+  type ContentScanner,
 } from "@rag/core";
 import {
   type Db,
@@ -111,6 +113,15 @@ export interface PipelineDeps {
    * when this is missing; `ingestOne` also fails CLOSED per-document as
    * defence-in-depth for direct callers.
    */
+  /**
+   * Layer 1.5 semantic content scanner — detects client-identifying context
+   * (a name in prose) that `pack`'s pattern redaction cannot see. Same
+   * optionality contract as `pack`: typed optional, but `ingestOne` fails
+   * CLOSED (quarantines) per-document when it's missing, via
+   * `scanForClientContextOrThrow`. MUST be self-hosted — see the egress note
+   * on that function.
+   */
+  scanner?: ContentScanner;
   pack?: LoadedPack;
 }
 
@@ -491,7 +502,44 @@ export async function ingestOne(
   parsed.tables = redacted.tables;
   parsed.title = redacted.title;
 
-  // 1c. Layer 3 — per-document classification gate. The source's declared class
+  // 1d. Layer 1.5 — semantic scan for client-identifying context (a name in
+  //     prose) that Layer 1's pattern redaction cannot see. Runs on the
+  //     REDACTED text, so a structured identifier Layer 1 already masked is
+  //     never re-sent to the scanner. Detection drives classification below
+  //     rather than attempting to surgically redact prose — see the
+  //     docstring on `scanForClientContextOrThrow`.
+  let semanticScan;
+  try {
+    semanticScan = await scanForClientContextOrThrow(
+      parsed.markdown,
+      deps.scanner,
+    );
+  } catch (err) {
+    log.error(
+      { err, marker: "ingest.semantic_scan_failed" },
+      "semantic content scan failed; quarantining document rather than indexing it",
+    );
+    await logIngestEvent(deps.db, {
+      sourceId,
+      docId: null,
+      externalId: source.externalId,
+      docClass,
+      action: "blocked",
+      rejectionReason:
+        err instanceof ContentSafetyError
+          ? err.message
+          : `semantic scan failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return { chunksCreated: 0 };
+  }
+  if (semanticScan.flagged) {
+    log.warn(
+      { findings: semanticScan.findings, marker: "ingest.semantic_flagged" },
+      "semantic scan flagged client-identifying context",
+    );
+  }
+
+  // 1e. Layer 3 — per-document classification gate. The source's declared class
   //     is a CEILING, not a verdict: evidence from this document can only make
   //     the classification stricter. A "general" source does not make a
   //     document containing an SSN general, which is precisely the failure that
@@ -500,6 +548,7 @@ export async function ingestOne(
     sourceClass: docClass,
     redactionFindings: redacted.findings,
     clientContextPath: isExcludedPath(source.metadata?.path).excluded,
+    semanticContextDetected: semanticScan.flagged,
   });
   if (classification.quarantine) {
     // Redaction is damage limitation, not absolution — a document that

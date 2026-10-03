@@ -4,6 +4,7 @@ import type {
   Chunk,
   Connector,
   ConnectorListResult,
+  ContentScanner,
   LoadedPack,
   Parser,
 } from "@rag/core";
@@ -37,6 +38,13 @@ export const TEST_PACK: LoadedPack = {
       contextWindow: 60,
     },
   ],
+};
+
+/** Layer 1.5 fake: reports nothing flagged. Tests that need the flagged path
+ * build their own scanner inline, same convention as `objectStore` overrides. */
+export const CLEAN_SCANNER: ContentScanner = {
+  name: "fake-clean",
+  scan: async () => ({ flagged: false, findings: [] }),
 };
 
 export const OPTS = { concurrency: 2, pageSize: 50 };
@@ -128,6 +136,7 @@ export function makeDeps(): PipelineDeps {
     embedder,
     logger,
     pack: TEST_PACK,
+    scanner: CLEAN_SCANNER,
   };
 }
 
