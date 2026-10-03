@@ -94,4 +94,17 @@ describe("parseArgs", () => {
       /unexpected argument/,
     );
   });
+
+  // Regression: this guard previously called `process.exit(EXIT.OK)` from
+  // inside parseArgs, which is why neither case below existed yet — either
+  // one would have killed the vitest worker before this fix.
+  it("treats an explicit help request as a normal result, not a process exit", () => {
+    expect(ok(["help"]).cmd).toBe("help");
+    expect(ok(["--help"]).cmd).toBe("help");
+    expect(ok(["-h"]).cmd).toBe("help");
+  });
+
+  it("rejects an empty command list as a usage error, not a silent exit", () => {
+    expect(() => ok([])).toThrow(UsageError);
+  });
 });

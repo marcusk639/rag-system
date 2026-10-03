@@ -1,7 +1,10 @@
 # P0 gate #1 — content audit: how to actually close it
 
 **Written:** 2026-10-02 · **Status:** procedure defined, **enforcement shipped**
-(§3), audit not yet run — it is now a review task with no code blocking it
+(§3). **Verbal sign-off received from Chris, 2026-10-02** — he reviewed the
+worksheet and approved it for staff use. Written sign-off (reviewer name +
+decision per row, stored in the worksheet) is tracked separately; see the
+tracking issue linked at the end of §5.
 
 **Gate #1 asks:** is every document in the staff-wide knowledge base one the firm
 is willing to expose to every member of staff who can query it?
@@ -219,6 +222,12 @@ Gate #1 is closed when all of:
       against the deployed system, not just from the database
 - [ ] The sign-off block in the worksheet is complete, and the worksheet is
       stored wherever the firm keeps compliance records — **not in this repo**
+
+**Verbal sign-off received from Chris, 2026-10-02.** Gate 1 is being treated as
+satisfied on that basis. The four unchecked boxes above — row-by-row written
+decisions, resolved `ASK`s, confirmed withdrawal application, and archived
+worksheet — are tracked in
+[issue #82](https://github.com/marcusk639/rag-system/issues/82), not waived.
 
 The last two matter most. A verdict recorded but not applied, or applied but not
 verified against the deployed system, is the failure mode this project has

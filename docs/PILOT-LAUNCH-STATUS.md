@@ -222,8 +222,24 @@ human/infra/legal; **gate #1 is not** — see its entry.
   `GENERATION_TRI_POLICY=block` (or unset it). `COMPLIANCE_MODE=client-data`
   overrides it to `block` upstream regardless.
 
-- [ ] **1. Content audit** — ⚠ **IN PROGRESS WITH A FINDING (2026-08-03), not unstarted.** The deterministic client-identifier screen has now run against all 858 documents and found client-identifying material in the index (full correction **below**, under _Fastest defensible path_). ⛔ **Remediation has not started:** Phase 1 Task 1.1 — removing the flagged roster from the index — is an unchecked box, so assume it is still retrievable through the live deployment. Beyond that, closing this gate is **not** purely human work despite this file's "none of it is code" framing: it needs connector exclude-paths, a metadata/citation fix, and an ingest-time gate. The human half is a firm reviewer ruling on the residual. `superpowers/plans/2026-08-03-kb-content-boundary.md` sizes this at ~97 documents needing genuine review once structural folder exclusion removes the rest, and supplies the review instrument. Still firm domain judgment, still Chris/Doug, still not an attorney.
-- [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA; the Google DPA is still "PROVISIONAL — NOT COUNSEL-CONFIRMED." (Attorney required.)
+- [x] **1. Content audit — VERBAL SIGN-OFF 2026-10-02.** Superseded by
+      `compliance/GATE-1-CONTENT-AUDIT.md`: the 858-document corpus this line
+      originally described was destroyed on 2026-08-03
+      (`PURGE-RECORD-2026-08-03.md`); the rebuilt, TRI-screened corpus is 47
+      documents. Chris reviewed the audit worksheet and gave verbal approval.
+      Written sign-off (decision + reviewer per row, archived outside this
+      repo) is tracked in
+      [issue #82](https://github.com/marcusk639/rag-system/issues/82) —
+      treated as satisfied, not waived.
+- [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA. **Not
+      satisfied by Chris's sign-off above** — this gate names an attorney and
+      the firm's carrier specifically, neither of whom has reviewed anything
+      yet. Status per `compliance/vendor-dpa-google-gemini.md` (2026-08-04):
+      billing tier verified (Cloud DPA applies, no-train/zero-retention in
+      force), but counsel's adequacy review of that DPA for this practice's
+      §7216/GLBA risk profile, and CR-3 data residency, are both still
+      outstanding. Tracked in
+      [issue #83](https://github.com/marcusk639/rag-system/issues/83).
 - [ ] 🟡 **3. Backup/restore drill — HALF-OPEN.** The _restore_ leg is proven; the _backup schedule_ is a stopgap and the off-Railway destination is blocked. `BACKUP-SCHEDULE-RUNBOOK.md` states it plainly: _"a restore has been watched succeed from an artifact **nobody took by hand**… Until then P0 gate #3 is half-open, whatever the checkbox says."_ Marking this `[x]` was exactly the stale-resolved-claim pattern this file exists to prevent. Open items are enumerated once, at the end of this entry. What **is** done, 2026-07-31, both legs: Local:
       fresh-instance restore + **88/88 e2e against restored data**. Production: real
       data (858 docs / 6,175 chunks) dumped and restored **entirely inside Railway**
