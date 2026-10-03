@@ -165,4 +165,21 @@ describe("E2E: clientRoutedGrantsForSource — access that survives a direct rev
     // reaches the assigned source and not the unassigned one.
     expect(await resolveSourceIdsForUser(db, "u-scoped")).toEqual([sourceId]);
   });
+
+  // Regression: `source_client_assignments` has no unique index on
+  // (source_id, client_id), so this pair can be inserted twice. Without
+  // DISTINCT, clientRoutedGrantsForSource would return the client twice,
+  // which revoke's WARNING line then prints as a duplicate name.
+  it("reports a client once even if the (source, client) pair is assigned twice", async () => {
+    await assignSourceToClient(db, sourceId, CLIENT);
+    await assignSourceToClient(db, sourceId, CLIENT);
+    await grantClientAccess(db, {
+      userId: "u-dup",
+      clientId: CLIENT,
+      grantedBy: "adm",
+    });
+    expect(await clientRoutedGrantsForSource(db, "u-dup", sourceId)).toEqual([
+      CLIENT,
+    ]);
+  });
 });

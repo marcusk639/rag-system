@@ -135,9 +135,13 @@ const UUID_RE =
  */
 export function parseArgs(argv: string[]) {
   const cmd = argv[0];
-  if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
-    console.log(HELP);
-    process.exit(EXIT.OK);
+  if (!cmd) die(`no command given.\n${HELP}`);
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+    return {
+      cmd: "help",
+      values: new Map<string, string>(),
+      bools: new Set<string>(),
+    };
   }
   const valueFlags = VALUE_FLAGS[cmd];
   const boolFlags = BOOL_FLAGS[cmd];
@@ -194,6 +198,12 @@ const stamp = (v: Date | string | null): string =>
 
 async function main() {
   const { cmd, values, bools } = parseArgs(process.argv.slice(2));
+  // Help must answer before the connection check, or `help` would fail with a
+  // usage error on any machine that has no DATABASE_URL set.
+  if (cmd === "help") {
+    console.log(HELP);
+    return;
+  }
   const url = values.get("url") ?? process.env.DATABASE_URL;
   if (!url) die("no connection string. Pass --url or set DATABASE_URL.");
 
@@ -350,8 +360,9 @@ async function main() {
 /**
  * Only run when executed directly. Without this guard, importing the module
  * — as `manage-access.test.ts` does to reach `parseArgs` — runs the whole CLI
- * as an import side effect, which prints help and then calls `process.exit`,
- * failing the package's test run. The unit test is what surfaced it.
+ * as an import side effect — parsing the test runner's own argv, failing on it,
+ * and calling `process.exit`, which kills the package's test run. The unit test
+ * is what surfaced it.
  */
 const invokedDirectly =
   process.argv[1] !== undefined &&
