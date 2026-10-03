@@ -6,11 +6,18 @@ import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 import { runOneIngestion } from "../helpers/ingestion.js";
 
 /**
- * Scope and metadata filters run AFTER each retrieval arm has been truncated
- * to its candidate pool (`topK × multiplier`), so the HNSW and GIN indexes can
- * serve the arms unfiltered. A principal scoped to a small source can then see
- * its relevant chunks crowded out of the pool by chunks from sources it cannot
- * read — getting fewer than topK results, or none, with no error.
+ * A principal scoped to a small source must not have its relevant chunks
+ * crowded out of the candidate pool (`topK × multiplier`) by chunks from
+ * sources it cannot read — which would return fewer than topK results, or
+ * none, with no error.
+ *
+ * The mandatory ACL filter runs INSIDE both retrieval arms, before each is
+ * truncated to its pool, so an unreadable chunk never occupies a slot. This
+ * spec is what holds that: it passed under the previous post-filter design
+ * only because of the adaptive retry at the maximum pool, which rescued the
+ * query at the cost of a second round trip and stopped working once a corpus
+ * outgrew that pool. The OPTIONAL caller filters are still post-filters, and
+ * still rely on the retry.
  *
  * Setup: 30 out-of-scope documents that match the query better than the one
  * in-scope document, and a topK of 1 so the default pool (8) cannot reach it.
