@@ -5,6 +5,7 @@ import { Retriever } from "@rag/rag";
 import { FakeConnector, FakeEmbedder, plainTextDoc } from "@rag/test-fixtures";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 import { runOneIngestion } from "../helpers/ingestion.js";
+import { hybridSearch } from "@rag/db";
 import type { Db } from "@rag/db";
 
 /**
@@ -127,6 +128,52 @@ describe("E2E: withdrawn documents are not retrievable (P0 gate #1)", () => {
     // Same connector, same content hashes — the idempotent re-ingest path.
     await seedTwo();
     expect(await titles("engagement letter procedure")).toEqual([
+      "Engagement Letter Procedure",
+    ]);
+  });
+
+  /**
+   * A withdrawn document must not consume a candidate-pool slot.
+   *
+   * The mandatory filters used to sit in the final SELECT, after each arm had
+   * already been truncated to its pool. A withdrawn document outranking an
+   * active one therefore took the slot, and the active document never reached
+   * the result. The adaptive retry does not rescue this case: an admin query
+   * with no caller filter leaves `filtered` false, by design, so no retry
+   * fires. Forcing the pool to 1 reproduces at two documents what would
+   * otherwise need a corpus larger than the pool.
+   */
+  it("does not let a withdrawn document consume the candidate pool", async () => {
+    const connector = new FakeConnector([
+      plainTextDoc({
+        externalId: "withdraw-1",
+        title: "Withdrawn Procedure",
+        // Denser term overlap, so it outranks the active document on BOTH arms
+        // and wins the single pool slot on each.
+        text: "Engagement letter engagement letter engagement letter scope fees.",
+      }),
+      plainTextDoc({
+        externalId: "keep-1",
+        title: "Engagement Letter Procedure",
+        text: "The engagement letter procedure covers scope and fees for every new client file.",
+      }),
+    ]);
+    await runOneIngestion(db, sourceId, connector);
+    await withdraw("withdraw-1");
+
+    const embedder = new FakeEmbedder();
+    const { vector } = await embedder.embed("engagement letter");
+    const results = await hybridSearch(db, {
+      query: "engagement letter",
+      queryEmbedding: vector,
+      topK: 1,
+      candidatePoolMultiplier: 1,
+      embeddingProvider: embedder.name,
+      embeddingModel: embedder.model,
+      enforcedSourceIds: null,
+    });
+
+    expect(results.map((r) => r.document.title)).toEqual([
       "Engagement Letter Procedure",
     ]);
   });

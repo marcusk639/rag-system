@@ -30,10 +30,13 @@ export interface HybridSearchOptions {
   embeddingProvider: string;
   embeddingModel: string;
   /**
-   * Each retriever fetches this multiple of topK as candidates. Bumped from
-   * the historical default of 4 because the dense CTE no longer joins
-   * documents — filters now run as a post-filter, so we need a larger
-   * unfiltered pool to absorb selectivity. 8× is safe for topK ≤ 50.
+   * Each retriever fetches this multiple of topK as candidates. Raised from
+   * the historical default of 4 when the mandatory filters ran after pool
+   * truncation and the pool had to absorb their selectivity. Those two now
+   * run inside the CTEs, so the headroom is only needed for the OPTIONAL
+   * caller filters, reranking, and per-document cap over-fetch. 8× is safe
+   * for topK ≤ 50; lowering it is a retrieval-quality change and needs the
+   * eval harness, not a guess.
    */
   candidatePoolMultiplier?: number;
   /**
@@ -137,6 +140,35 @@ export async function hybridSearch(
           sql`, `,
         )})`
       : sql``;
+
+  // The two MANDATORY filters -- the ACL and the withdrawal gate -- applied
+  // INSIDE each candidate CTE, before its `LIMIT pool` truncation.
+  //
+  // They used to sit only in the final SELECT, which made them post-filters:
+  // a chunk the principal cannot read, or one belonging to a withdrawn
+  // document, still consumed a pool slot and pushed a servable chunk out of
+  // the candidate set entirely. The result was a silently short result list,
+  // never an error. The adaptive retry below covers some of that, but not an
+  // admin query with no caller filter, and not a corpus larger than the
+  // maximum pool -- so the pool slots themselves have to be clean.
+  //
+  // EXISTS rather than a JOIN so neither CTE's SELECT list or row count
+  // changes. `doc` is bound per-subquery, so the `enforcedSourceFilter`
+  // fragment -- which qualifies `doc.source_id` -- is reused verbatim here and
+  // in the final SELECT.
+  //
+  // Cost: a filtered ORDER BY on the dense arm can no longer be served purely
+  // by the HNSW index, so the planner may seq-scan. At this corpus size that is
+  // the faster plan anyway. pgvector 0.8 added `hnsw.iterative_scan` for
+  // exactly this tradeoff; adopting it is a follow-up gated on confirming the
+  // pgvector version in production, which is NOT the one used locally.
+  const mandatoryPreFilter = sql`
+          AND EXISTS (
+            SELECT 1 FROM documents doc
+            WHERE doc.id = c.document_id
+              AND doc.lifecycle_status = 'active'
+              ${enforcedSourceFilter}
+          )`;
 
   const metadataConditions = Object.entries(opts.metadataFilter ?? {}).map(
     ([key, value]) => {
@@ -286,6 +318,7 @@ export async function hybridSearch(
         WHERE c.embedding IS NOT NULL
           AND c.embedding_provider = ${opts.embeddingProvider}
           AND c.embedding_model = ${opts.embeddingModel}
+          ${mandatoryPreFilter}
         ORDER BY c.embedding <=> (SELECT q_embedding FROM params) ASC
         LIMIT ${pool}
       ),
@@ -299,6 +332,7 @@ export async function hybridSearch(
           ) AS rank
         FROM chunks c
         WHERE c.tsv @@ (SELECT q_tsquery FROM params)
+          ${mandatoryPreFilter}
         ORDER BY score DESC
         LIMIT ${pool}
       ),
@@ -312,8 +346,10 @@ export async function hybridSearch(
         FROM dense_hits d
         FULL OUTER JOIN sparse_hits s ON d.chunk_id = s.chunk_id
       )
-      -- Post-filter + final join. Filters are applied HERE so the HNSW and
-      -- GIN indexes can serve the inner CTEs without restriction.
+      -- Final join, plus the OPTIONAL caller filters. The two mandatory
+      -- filters already ran inside the CTEs; they are repeated below rather
+      -- than moved, so this SELECT stays correct on its own and a future
+      -- change to a CTE cannot quietly widen what is served.
       SELECT
         f.chunk_id,
         c.document_id,
@@ -337,11 +373,11 @@ export async function hybridSearch(
       -- P0 gate #1 (content audit): a document the firm withdrew is never
       -- served. This is mandatory and not caller-overridable, like the
       -- enforced source filter below -- there is deliberately no way to
-      -- disable it. It sits in the final SELECT, after the RRF merge, so
-      -- this one fragment covers BOTH the dense and sparse arms. Putting it
-      -- in the CTEs would defeat the HNSW index, for the same reason the
-      -- other filters are post-filters. It is a literal, so there is
-      -- nothing to parameterise and nothing to inject. Keep backticks out
+      -- disable it. It also runs inside both CTEs, before their LIMIT, so a
+      -- withdrawn chunk cannot occupy a candidate slot; this copy is the
+      -- backstop that keeps the final SELECT correct on its own. It is a
+      -- literal, so there is nothing to parameterise and nothing to inject.
+      -- Keep backticks out
       -- of this comment: it is inside a JS template literal and one would
       -- terminate the sql tag (that mistake cost a red test run).
       AND doc.lifecycle_status = 'active'
@@ -354,24 +390,20 @@ export async function hybridSearch(
     });
 
   let rows = await runAt(defaultPool);
-  // Filters apply AFTER each arm is truncated to its pool, so a principal
-  // scoped to a small source (or a selective metadata filter) can have every
-  // matching chunk crowded out of the pool by chunks it cannot read, and get
-  // fewer than topK rows back — or none — with no error. Retry once at the
-  // largest pool the HNSW index can serve. Unfiltered queries never retry.
-  // NOTE: the mandatory `lifecycle_status = 'active'` filter is deliberately
-  // NOT counted here. Counting it would make `filtered` always true, so every
-  // query returning fewer than topK rows would retry at the maximum pool —
-  // including the ordinary case of a corpus that simply has fewer than topK
-  // matches, which is the cost the "unfiltered queries never retry" rule exists
-  // to avoid. The tradeoff: if a LARGE fraction of a source is ever withdrawn,
-  // withdrawn chunks can crowd the pool and quietly reduce recall with no
-  // retry. That is acceptable while withdrawals are a handful of documents; if
-  // withdrawals ever become bulk, add it here and accept the retry cost.
+  // Both MANDATORY filters now run inside the CTEs, so neither an unreadable
+  // chunk nor a withdrawn one can cost a pool slot. What is still applied
+  // after truncation is the OPTIONAL caller narrowing -- `sourceIds` and the
+  // metadata filter -- which can crowd a selective query out of the pool and
+  // return fewer than topK rows with no error. Retry once at the largest pool
+  // the HNSW index can serve. A query with no caller filter has nothing left
+  // to be crowded out by, so it never retries.
+  //
+  // `enforcedSourceIds` is deliberately NOT counted any more. As a pre-filter
+  // it cannot truncate the pool, and counting it charged every scoped query
+  // that legitimately matched fewer than topK chunks a second full round trip
+  // -- which, on a corpus this size, was most of them.
   const filtered =
-    opts.enforcedSourceIds !== null ||
-    (opts.sourceIds?.length ?? 0) > 0 ||
-    metadataConditions.length > 0;
+    (opts.sourceIds?.length ?? 0) > 0 || metadataConditions.length > 0;
   const maxPool = resolveCandidatePool(topK, Number.POSITIVE_INFINITY);
   if (filtered && rows.rows.length < topK && defaultPool < maxPool) {
     rows = await runAt(maxPool);
