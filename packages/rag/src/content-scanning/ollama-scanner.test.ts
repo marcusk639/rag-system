@@ -35,11 +35,21 @@ function scanner(
   });
 }
 
+/** `scanWindow` reads the body with `text()` and parses it itself, so that
+ * V8's SyntaxError — which quotes the offending input — never reaches a log
+ * or the quarantine reason. These mocks therefore supply `text()`. */
 function mockChatResponse(content: string, ok = true) {
+  return mockRawResponse(
+    JSON.stringify({ choices: [{ message: { content } }] }),
+    ok,
+  );
+}
+
+function mockRawResponse(body: string, ok = true) {
   return vi.fn().mockResolvedValue({
     ok,
     status: ok ? 200 : 500,
-    json: async () => ({ choices: [{ message: { content } }] }),
+    text: async () => body,
   });
 }
 
@@ -104,9 +114,11 @@ describe("OllamaContentScanner — scan()", () => {
   ])("throws when the reply has %s", async (_label, body) => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue({ ok: true, status: 200, json: async () => body }),
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(body),
+      }),
     );
     await expect(scanner().scan("text")).rejects.toThrow();
   });
@@ -183,33 +195,36 @@ describe("OllamaContentScanner — scan()", () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          choices: [
-            { message: { content: '{"flagged": false, "findings": []}' } },
-          ],
-        }),
+        text: async () =>
+          JSON.stringify({
+            choices: [
+              { message: { content: '{"flagged": false, "findings": []}' } },
+            ],
+          }),
       })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          choices: [
-            { message: { content: '{"flagged": false, "findings": []}' } },
-          ],
-        }),
+        text: async () =>
+          JSON.stringify({
+            choices: [
+              { message: { content: '{"flagged": false, "findings": []}' } },
+            ],
+          }),
       })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          choices: [
-            {
-              message: {
-                content: '{"flagged": true, "findings": ["client name"]}',
+        text: async () =>
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: '{"flagged": true, "findings": ["client name"]}',
+                },
               },
-            },
-          ],
-        }),
+            ],
+          }),
       });
     vi.stubGlobal("fetch", fetchMock);
 

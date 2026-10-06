@@ -427,10 +427,11 @@ export async function ingestOne(
   }
 
   const { db, parser, chunker, embedder, objectStore, logger } = deps;
-  const log = logger.child({
-    externalId: source.externalId,
-    title: source.title,
-  });
+  // ⚠ `externalId` ONLY: the title is the raw, unredacted filename, which in
+  // this corpus is routinely the client's name. Child bindings are stamped on
+  // every later record -- including the Layer 1.5 warning that this document
+  // names a client -- so binding it makes that warning disclose WHO.
+  const log = logger.child({ externalId: source.externalId });
 
   // 0. Layer 2 — structural exclusion. Cheapest and most reliable guard:
   //    a document that is never parsed cannot be chunked, embedded, or stored.

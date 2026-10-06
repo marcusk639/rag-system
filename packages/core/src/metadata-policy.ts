@@ -1,4 +1,8 @@
-import type { DocumentMetadata, RetrievalResult } from "./types.js";
+import type {
+  DocumentClass,
+  DocumentMetadata,
+  RetrievalResult,
+} from "./types.js";
 
 /**
  * Metadata-exposure allowlist — the PII boundary for this corpus.
@@ -70,9 +74,32 @@ export type ExposedMetadata = Pick<
  * retrieval/filtering/ranking path, which still needs the full metadata (e.g.
  * `metadata->>from` filters in hybrid search).
  */
+/**
+ * Whether a document's source URL may cross the boundary.
+ *
+ * `metadata.url` is the connector's link to the document; for SharePoint it is
+ * the `webUrl`, which embeds the folder path. At this firm those folders are
+ * named for clients ("Clients/Smith Family/2024") -- which is precisely why
+ * `metadata.path` is stripped above. The URL carries the same path in a
+ * different field, is never examined by Layer 1.5 and never rewritten by
+ * Layer 1, and reaches every citation.
+ *
+ * Class A is firm-internal and non-sensitive, so a link back is useful and
+ * safe. Class B upward requires de-identification, so it is withheld. An
+ * ABSENT class is treated as stricter than A on purpose: an untagged row is
+ * not evidence that it is class A.
+ */
+export function isSourceUrlExposable(
+  docClass: DocumentClass | undefined,
+): boolean {
+  return docClass === "A";
+}
+
 export function sanitizeMetadata(metadata: DocumentMetadata): ExposedMetadata {
   const safe: Record<string, unknown> = {};
+  const urlExposable = isSourceUrlExposable(metadata.docClass);
   for (const key of EXPOSABLE_METADATA_FIELDS) {
+    if (key === "url" && !urlExposable) continue;
     const value = metadata[key];
     if (value !== undefined) {
       safe[key] = value;
@@ -96,10 +123,18 @@ export type SanitizedRetrievalResult = Omit<RetrievalResult, "document"> & {
 export function sanitizeRetrievalResult(
   result: RetrievalResult,
 ): SanitizedRetrievalResult {
+  // `document.url` is a SECOND carrier of `metadata.url` -- assembled in
+  // `hybridSearch` straight from it -- and is not an entry in
+  // EXPOSABLE_METADATA_FIELDS, so the allowlist never reached it. Gating only
+  // the metadata copy would withhold the field nobody reads and keep exposing
+  // the one every citation renders.
+  const { url: _sourceUrl, ...documentWithoutUrl } = result.document;
+  const urlExposable = isSourceUrlExposable(result.document.metadata.docClass);
   return {
     ...result,
     document: {
-      ...result.document,
+      ...documentWithoutUrl,
+      ...(urlExposable && _sourceUrl !== undefined ? { url: _sourceUrl } : {}),
       metadata: sanitizeMetadata(result.document.metadata),
     },
   };

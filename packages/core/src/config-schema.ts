@@ -219,7 +219,41 @@ export const Config = z
     contentScan: z
       .object({
         provider: z.enum(["none", "ollama"]).default("none"),
-        baseUrl: z.string().optional(),
+        /**
+         * Validated as a URL, not merely as a string. `isLikelySelfHosted`
+         * parses it with `new URL()` and returns false when that throws, so an
+         * unparseable value would otherwise surface as "your host is not
+         * self-hosted" — true, but not the operator's actual mistake. Stays
+         * `.optional()`, so no hand-built `Config` literal gains a required
+         * field.
+         */
+        baseUrl: z
+          .string()
+          .url()
+          // `.url()` alone is NOT enough: it accepts anything `new URL()`
+          // parses, and `new URL("ollama.railway.internal:11434")` succeeds --
+          // reading the host as a SCHEME and leaving `hostname` empty. Require
+          // http(s) with a real authority so the value means what the gate
+          // downstream assumes it means.
+          .refine(
+            (value) => {
+              try {
+                const parsed = new URL(value);
+                return (
+                  (parsed.protocol === "http:" ||
+                    parsed.protocol === "https:") &&
+                  parsed.hostname !== ""
+                );
+              } catch {
+                return false;
+              }
+            },
+            {
+              message:
+                "CONTENT_SCAN_BASE_URL must be an http(s) URL with a hostname (e.g. http://ollama.railway.internal:11434/v1)",
+            },
+          )
+          .optional(),
         model: z.string().optional(),
         timeoutMs: z.number().int().positive().default(30_000),
       })
