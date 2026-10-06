@@ -19,6 +19,42 @@ import { ZodError } from "zod";
  * 422). MCP has no status codes, so only the fault attribution survives the
  * translation. Keep the two aligned when adding a `RagError` subclass.
  */
+/**
+ * `RagError.code`s whose MESSAGE is audited safe to show a caller. This is a
+ * different question from fault attribution above, and conflating them is what
+ * made this guard too permissive: it returned `err.message` for every
+ * RagError, including codes whose messages are built by interpolating
+ * something internal — `EmbeddingError` at packages/rag/src/embeddings/
+ * gemini.ts carries the provider's own error text, on a path every
+ * `search_documents` and `ask` call takes.
+ *
+ * The repo already had the narrower rule, on the HTTP streaming path
+ * (apps/api/src/routes/ask.ts): "Only these two codes are echoed... Anything
+ * else keeps the generic message, because an arbitrary error here can carry
+ * connection details. Adding a code to this set means auditing that error's
+ * message." That reasoning applies at least as strongly to the agent-facing
+ * surface, so this set is that one plus the three client faults whose messages
+ * are caller-authored by construction (a bad argument, a missing id, a busy
+ * source).
+ *
+ * Note this makes MCP stricter than `apps/api/src/error-handler.ts`, which
+ * still echoes every RagError message. That is deliberate: of the two policies
+ * already in the repo, the agent-facing transport takes the stricter one.
+ * Tightening the HTTP non-streaming path the same way belongs in its own
+ * change, with its own consumers considered.
+ *
+ * The CODE is always returned regardless, so an agent can still branch on it.
+ */
+const ECHOABLE_ERROR_CODES = new Set([
+  // Audited on the HTTP streaming path: a hostname, and TRI pattern labels.
+  "EGRESS_BLOCKED",
+  "COMPLIANCE_VIOLATION",
+  // Caller-authored by construction.
+  "VALIDATION_ERROR",
+  "NOT_FOUND",
+  "SYNC_ALREADY_RUNNING",
+]);
+
 const CLIENT_FAULT_CODES = new Set([
   "VALIDATION_ERROR",
   "NOT_FOUND",
@@ -47,8 +83,8 @@ function toolError(code: string, message: string): CallToolResult {
  * MCP surface had no equivalent, so the agent-facing transport was the leaky
  * one.
  *
- * The trust boundary matches the HTTP side deliberately, so the two surfaces
- * cannot diverge: a `RagError` carries an operator-authored message and is
+ * The trust boundary follows the HTTP side's stricter policy (its streaming
+ * path), so the two do not drift silently: a `RagError` carries an operator-authored message and is
  * passed through with its code, and anything else is replaced with a generic
  * message while the real error goes to the log and to Sentry.
  *
@@ -89,7 +125,15 @@ export function guardToolHandler<Args extends unknown[]>(
           );
           captureException(err, { tool, code: err.code });
         }
-        return toolError(err.code, err.message);
+        // Code always; message only if audited. A non-echoable message is
+        // replaced rather than dropped, so the agent still learns the
+        // category from the code.
+        return toolError(
+          err.code,
+          ECHOABLE_ERROR_CODES.has(err.code)
+            ? err.message
+            : "Internal server error",
+        );
       }
 
       logger.error({ err, tool }, "mcp tool unhandled error");
@@ -130,7 +174,12 @@ export function guardResourceHandler<Args extends unknown[], R>(
           { err, resource, code: err.code },
           "mcp resource client error",
         );
-        throw new McpError(ErrorCode.InvalidParams, err.message);
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          ECHOABLE_ERROR_CODES.has(err.code)
+            ? err.message
+            : "Internal server error",
+        );
       }
 
       logger.error({ err, resource }, "mcp resource unhandled error");
