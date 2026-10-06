@@ -22,7 +22,8 @@ import { EmbeddingError } from "@rag/core";
  *
  * First-startup note: the model weights are downloaded from HuggingFace Hub on
  * the first `embed()` call and cached at HF_CACHE_DIR (default:
- * ~/.cache/huggingface). Run `scripts/warm-model.ts` during image build or
+ * the transformers package's own node_modules/.cache/ -- NOT ~/.cache/huggingface).
+ * Run `scripts/warm-model.ts` during image build or
  * deployment to pre-warm the cache so the first real query doesn't time out.
  *
  * BGE asymmetric retrieval: bge models recommend a query-side instruction
@@ -139,7 +140,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
       // HF_CACHE_DIR lets the firm pin weights to a network share or a
       // known-good path on the deployment VM. Without it the default
-      // (~/.cache/huggingface) is used, which is fine for local dev.
+      // (the library's own node_modules/.cache/, per its env.js DEFAULT_CACHE_DIR)
+      // is used, which is fine for local dev but does not survive an image rebuild.
       if (process.env.HF_CACHE_DIR) {
         env.cacheDir = process.env.HF_CACHE_DIR;
       }
@@ -177,8 +179,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       const remedy =
         this.complianceMode === "client-data"
           ? `COMPLIANCE_MODE=client-data forbids downloading weights at runtime, so the cache must be ` +
-            `populated ahead of time: run scripts/warm-model.ts during image build or deployment, and ` +
-            `point HF_CACHE_DIR at the populated cache.`
+            `populated ahead of time, for THIS model id and at a path the runtime also reads: ` +
+            `HF_CACHE_DIR=<path> EMBEDDING_MODEL="${this.model}" npx tsx scripts/warm-model.ts. ` +
+            `Two traps make a pre-warmed deployment still land here: warm-model.ts defaults to ` +
+            `Xenova/bge-base-en-v1.5 while EMBEDDING_MODEL defaults to gemini-embedding-001 ` +
+            `regardless of provider, so warming without EMBEDDING_MODEL set warms a different model; ` +
+            `and with HF_CACHE_DIR unset the library caches inside its own node_modules directory, ` +
+            `which does not survive a multi-stage image copy or a production-only reinstall.`
           : `Ensure @huggingface/transformers is installed and the model is reachable ` +
             `(first run requires internet access to download weights; subsequent runs use HF_CACHE_DIR).`;
       throw new EmbeddingError(

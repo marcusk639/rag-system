@@ -10,7 +10,9 @@
  *
  * Environment variables:
  *   EMBEDDING_MODEL   — HuggingFace model id (default: Xenova/bge-base-en-v1.5)
- *   HF_CACHE_DIR      — cache directory (default: ~/.cache/huggingface)
+ *   HF_CACHE_DIR      — cache directory. Unset, @huggingface/transformers caches
+ *                       inside its own node_modules directory, which does not survive
+ *                       a multi-stage image copy or a prod-only reinstall. Set it.
  */
 import { createEmbeddingProvider } from "@rag/rag";
 
@@ -32,5 +34,5 @@ const provider = createEmbeddingProvider({
 await provider.embed("warmup");
 
 process.stdout.write(
-  `Model ready. Cache: ${cacheDir ?? "~/.cache/huggingface"}\n`,
+  `Model ready. Cache: ${cacheDir ?? "(unset -- inside node_modules/@huggingface/transformers/.cache/; set HF_CACHE_DIR)"}\n`,
 );
