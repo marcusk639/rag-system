@@ -418,8 +418,10 @@ describe("LocalEmbeddingProvider", () => {
     });
 
     it("tells the operator to pre-warm the cache when a cold load is refused", async () => {
-      // The real error the library raises once the gate is on and the weights
-      // are absent (dist/transformers.node.cjs:32956).
+      // The library's real error template once the gate is on and the weights
+      // are absent (dist/transformers.node.cjs:32956). The interpolated path is
+      // illustrative only -- the real `localPath` derives from
+      // env.localModelPath, so do not read this string as a path to look for.
       mockPipelineFactory.mockRejectedValue(
         new Error(
           "`local_files_only=true` or `env.allowRemoteModels=false` and file " +

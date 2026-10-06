@@ -6,10 +6,18 @@
  * download. Subsequent starts read from HF_CACHE_DIR (disk cache; no network).
  *
  * Usage:
- *   npx tsx scripts/warm-model.ts
+ *   HF_CACHE_DIR=<path> EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 \
+ *     npx tsx scripts/warm-model.ts
+ *
+ * Set both. Bare `npx tsx scripts/warm-model.ts` warms the wrong model into a
+ * directory the runtime does not read -- see the two notes below.
  *
  * Environment variables:
- *   EMBEDDING_MODEL   — HuggingFace model id (default: Xenova/bge-base-en-v1.5)
+ *   EMBEDDING_MODEL   — HuggingFace model id (default here: Xenova/bge-base-en-v1.5).
+ *                       NOTE this differs from the runtime default: config.ts
+ *                       defaults EMBEDDING_MODEL to gemini-embedding-001
+ *                       regardless of provider, so warming without it set
+ *                       warms a model the service never asks for.
  *   HF_CACHE_DIR      — cache directory. Unset, @huggingface/transformers caches
  *                       inside its own node_modules directory, which does not survive
  *                       a multi-stage image copy or a prod-only reinstall. Set it.
@@ -34,5 +42,5 @@ const provider = createEmbeddingProvider({
 await provider.embed("warmup");
 
 process.stdout.write(
-  `Model ready. Cache: ${cacheDir ?? "(unset -- inside node_modules/@huggingface/transformers/.cache/; set HF_CACHE_DIR)"}\n`,
+  `Model ready. Cache: ${cacheDir ?? "(unset -- a .cache/ dir inside the installed @huggingface/transformers package; set HF_CACHE_DIR)"}\n`,
 );

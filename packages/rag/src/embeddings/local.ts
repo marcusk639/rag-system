@@ -22,7 +22,8 @@ import { EmbeddingError } from "@rag/core";
  *
  * First-startup note: the model weights are downloaded from HuggingFace Hub on
  * the first `embed()` call and cached at HF_CACHE_DIR (default:
- * the transformers package's own node_modules/.cache/ -- NOT ~/.cache/huggingface).
+ * a `.cache/` directory inside the installed @huggingface/transformers package
+ * itself -- under node_modules/.pnpm/... with pnpm -- NOT ~/.cache/huggingface).
  * Run `scripts/warm-model.ts` during image build or
  * deployment to pre-warm the cache so the first real query doesn't time out.
  *
@@ -140,7 +141,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
       // HF_CACHE_DIR lets the firm pin weights to a network share or a
       // known-good path on the deployment VM. Without it the default
-      // (the library's own node_modules/.cache/, per its env.js DEFAULT_CACHE_DIR)
+      // (a `.cache/` dir inside the installed package, per its env.js
+      // DEFAULT_CACHE_DIR; under pnpm that is below node_modules/.pnpm/)
       // is used, which is fine for local dev but does not survive an image rebuild.
       if (process.env.HF_CACHE_DIR) {
         env.cacheDir = process.env.HF_CACHE_DIR;
@@ -184,7 +186,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
             `Two traps make a pre-warmed deployment still land here: warm-model.ts defaults to ` +
             `Xenova/bge-base-en-v1.5 while EMBEDDING_MODEL defaults to gemini-embedding-001 ` +
             `regardless of provider, so warming without EMBEDDING_MODEL set warms a different model; ` +
-            `and with HF_CACHE_DIR unset the library caches inside its own node_modules directory, ` +
+            `and with HF_CACHE_DIR unset the library caches inside its own installed package directory, ` +
             `which does not survive a multi-stage image copy or a production-only reinstall.`
           : `Ensure @huggingface/transformers is installed and the model is reachable ` +
             `(first run requires internet access to download weights; subsequent runs use HF_CACHE_DIR).`;
