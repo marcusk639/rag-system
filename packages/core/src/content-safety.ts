@@ -11,8 +11,13 @@
  * Postgres but embeds the raw text has protected the database and disclosed the
  * document — which is exactly how the original incident happened.
  *
- * Everything here is deterministic and offline. A redactor that needed a network
- * call would itself become an egress path.
+ * Layers 1 and 3 below (pattern redaction, classification) are deterministic
+ * and offline — a redactor that needed a network call would itself become an
+ * egress path. Layer 1.5 (`scanForClientContextOrThrow`) is the deliberate
+ * exception: it calls a `ContentScanner`, which MUST be self-hosted
+ * on-process or on the firm's own network (see `docs/LOCAL-GENERATION.md`),
+ * never a third-party API — calling an external LLM "is this sensitive?"
+ * would itself be the disclosure this file exists to prevent.
  *
  * ── Where the rules live ───────────────────────────────────────────────────
  *
@@ -26,6 +31,7 @@
 import { scanText, type ScanMatch } from "./pack/scan.js";
 import type { LoadedPack } from "./pack/load.js";
 import type { ParsedTable } from "./types.js";
+import type { ContentScanner, ContentScanResult } from "./interfaces.js";
 
 /** A single redaction, recorded so a run can be audited without the value. */
 export interface RedactionFinding {
@@ -321,6 +327,48 @@ export function redactOrThrow(
   } catch (err) {
     throw new ContentSafetyError(
       "redaction failed; document must be quarantined, not indexed",
+      err,
+    );
+  }
+}
+
+/**
+ * Layer 1.5 — semantic scan for client-identifying context that pattern
+ * redaction (Layer 1) structurally cannot see. A name in running prose has no
+ * fixed shape a regex can match, which is exactly the gap the 2026-08-03
+ * screen found: per-client files were identified by folder and by content a
+ * human recognized, not by a pattern.
+ *
+ * This layer DETECTS rather than redacts. Surgically masking a name out of
+ * prose risks under-redaction (a nickname, a second mention) and
+ * over-redaction (destroying the sentence around it) in a way a fixed-width
+ * `[REDACTED-SSN]` substitution does not. A flagged finding is handed to the
+ * Layer 3 classification gate, which quarantines for human review — the same
+ * disposition redaction findings already get, and the one this corpus's own
+ * audit (Gate 1) exists to perform.
+ *
+ * Fail-closed on a scanner that THROWS: the document is quarantined rather
+ * than indexed with the check silently skipped.
+ *
+ * This is deliberately NOT the same contract as `redactOrThrow`, which runs
+ * unconditionally. Layer 1.5 is opt-in (`CONTENT_SCAN_PROVIDER`, default
+ * `none`), and "the operator did not turn it on" cannot justify quarantining
+ * every document — that is the shipped default, and it has to behave as it
+ * did before this layer existed. So the caller decides whether to scan at
+ * all, and this function takes a scanner that EXISTS. The two states that
+ * must never be confused are kept apart upstream instead: a provider set but
+ * unbuildable throws in `createContentScanner` at startup, and `loadConfig`
+ * refuses `none` under `COMPLIANCE_MODE=client-data`.
+ */
+export async function scanForClientContextOrThrow(
+  text: string,
+  scanner: ContentScanner,
+): Promise<ContentScanResult> {
+  try {
+    return await scanner.scan(text);
+  } catch (err) {
+    throw new ContentSafetyError(
+      "semantic content scan failed; document must be quarantined, not indexed",
       err,
     );
   }

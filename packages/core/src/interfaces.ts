@@ -74,6 +74,25 @@ export interface Generator {
   ): AsyncIterable<string>;
 }
 
+/** Result of scanning a document's text for client-identifying context that
+ * pattern redaction cannot see (a name in prose, not a formatted SSN/EIN). */
+export interface ContentScanResult {
+  /** True when the scanner found content implying a specific client relationship. */
+  flagged: boolean;
+  /** Human-readable findings for the audit log — a category/description only, never a raw identifying value lifted verbatim into logs. */
+  findings: string[];
+}
+
+/** On-process or self-hosted semantic content scanner for ingestion-time
+ * Layer 1.5. Deliberately separate from `Generator`: that interface's TRI
+ * screen/egress policy governs question-answering, not ingestion-time
+ * content safety, and conflating the two would make a change to one
+ * silently affect the other. */
+export interface ContentScanner {
+  readonly name: string;
+  scan(text: string): Promise<ContentScanResult>;
+}
+
 export interface GenerationResult {
   answer: string;
   citations: Array<{

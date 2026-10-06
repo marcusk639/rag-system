@@ -33,6 +33,13 @@ export { createObjectStore, documentStorageKey } from "./storage/factory.js";
 export { HttpWebhookAuditLogSink } from "./audit-sink/http-webhook.js";
 export { createAuditLogSink } from "./audit-sink/factory.js";
 
+// Content scanning (Layer 1.5 — semantic ingestion-time content safety)
+export {
+  OllamaContentScanner,
+  createContentScanner,
+  type ContentScanConfig,
+} from "./content-scanning/ollama-scanner.js";
+
 // Retrieval
 export { Retriever } from "./retrieval/retriever.js";
 export {
