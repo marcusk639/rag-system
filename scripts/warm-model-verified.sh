@@ -7,11 +7,22 @@
 # copies that had to be kept in step, and a gate whose copies can drift is a
 # gate you cannot reason about.
 #
-# Why a build-time warm at all: COMPLIANCE_MODE=client-data forbids runtime
-# egress from the production container, and it FORCES EMBEDDING_PROVIDER=local
-# (packages/rag/src/embeddings/factory.ts). A startup warm would perform the
-# exact outbound huggingface.co call that mode exists to prevent, so the cache
-# has to be baked into the image instead.
+# Why a build-time warm at all:
+#
+# `createEmbeddingProvider` (packages/rag/src/embeddings/factory.ts) REFUSES to
+# build any non-local provider under COMPLIANCE_MODE=client-data -- it throws
+# ComplianceError("requires EMBEDDING_PROVIDER=local"). Note it refuses rather
+# than switches: client-data without EMBEDDING_PROVIDER=local does not quietly
+# fall back to the local embedder, it fails to boot. So a client-data cutover is
+# two deliberate env changes, and the second is compulsory -- which is what
+# makes the local embedder, and therefore this cache, unavoidably part of it.
+#
+# That mode's purpose is that no client text leaves the process, so a
+# startup/entrypoint warm is not an option: it would fetch ~430MB from
+# huggingface.co from inside the running production container. It would even
+# SUCCEED -- warm-model.ts omits complianceMode, so allowRemoteModels stays
+# true -- which is worse than failing. Baking the cache into the image moves
+# that download into the build, where egress is expected.
 #
 # Run from the workspace root (the Dockerfile `builder` stage's WORKDIR), after
 # `pnpm -r build`: warm-model.ts imports @rag/rag, which resolves to its built
@@ -42,7 +53,8 @@ MIN_CACHE_KB=51200
 mkdir -p "$HF_CACHE_DIR"
 
 # Never `npx tsx`: npx would fetch tsx over the network mid-build, and the
-# runtime stage prunes tsx entirely via `pnpm deploy --prod`. This is the copy
+# `pruner` stage (FROM builder AS pruner) prunes tsx via `pnpm deploy --prod`,
+# and `runtime` only COPYs from it. This is the copy
 # pnpm already installed from the lockfile.
 node_modules/.bin/tsx scripts/warm-model.ts > /tmp/warm-model.log 2>&1
 status=$?

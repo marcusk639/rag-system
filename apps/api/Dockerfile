@@ -28,33 +28,10 @@ FROM installer AS builder
 RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
 
 # ── warmer: pre-populate the local ONNX embedding model cache at BUILD time.
-#    Why build-time, not a startup/entrypoint warm: COMPLIANCE_MODE=client-data
-#    forbids runtime egress from the production container (see
-#    packages/core/src/config.ts and the egress policy in @rag/core) — a
-#    startup warm would perform exactly the outbound huggingface.co call that
-#    mode exists to prevent. Baking the cache into the image means the
-#    `client-data` cutover (which forces EMBEDDING_PROVIDER=local — see
-#    packages/rag/src/embeddings/factory.ts) never hits a cold cache. The API
-#    embeds query text on every search/ask call, so it needs this warm cache
-#    just as much as the worker does ingestion-side.
-#
-#    Runs from `builder`, not `installer`: scripts/warm-model.ts imports
-#    "@rag/rag", which resolves to packages/rag/dist/index.js (see its
-#    package.json `main`) — only `builder` has run the workspace build.
-#
-#    Never `npx tsx`: npx would fetch tsx from the network during the build,
-#    and the `runtime` stage below (via `pnpm deploy --prod`) PRUNES tsx
-#    entirely. `node_modules/.bin/tsx` is the copy pnpm already installed
-#    from the lockfile in the `installer` stage — no extra network call.
-#
-#    EMBEDDING_MODEL is deliberately NOT inherited here. Railway sets
-#    EMBEDDING_MODEL=gemini-embedding-001 (today's real provider is gemini,
-#    not local — this stage is inert in that deployment and that is
-#    intentional); docker/compose.prod.yml's `environment:` block injects the
-#    same var into containers. Neither reaches a Docker build by default, but
-#    the ENV below pins the local warm-up model explicitly anyway so this
-#    stage can never accidentally try to download a HuggingFace repo named
-#    "gemini-embedding-001".
+#    All of the reasoning, and every failure branch, lives in one place:
+#    scripts/warm-model-verified.sh. Keep it there — this block was previously
+#    ~20 lines duplicated into three Dockerfiles, which is the same drift risk
+#    the shared script was written to remove, one layer up in the comments.
 FROM builder AS warmer
 ENV HF_CACHE_DIR=/app/.hf-cache
 # Gate on verified on-disk state rather than the exit code: onnxruntime-node
@@ -81,12 +58,10 @@ COPY --from=pruner --chown=node:node /deploy .
 # docs/compliance/vendor-dpa-*.md relative to cwd at runtime — pnpm deploy's
 # pruned output doesn't include it, so copy it separately from installer.
 COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compliance
-# Pre-warmed local ONNX embedding model cache (see the `warmer` stage above).
-# HF_CACHE_DIR must point at the SAME absolute path the warm step wrote to —
-# a bare `~/.cache/huggingface` default would silently miss this copy, since
-# $HOME for the `node` user here need not match the warm stage's $HOME.
-# Inert today (EMBEDDING_PROVIDER=gemini on Railway); becomes load-bearing
-# the moment COMPLIANCE_MODE=client-data forces EMBEDDING_PROVIDER=local.
+# Pre-warmed local ONNX embedding model cache (see the `warmer` stage above and
+# scripts/warm-model-verified.sh). HF_CACHE_DIR must name the SAME absolute
+# path the warm wrote to: a `~/.cache/huggingface` default would silently miss
+# this COPY, since $HOME here need not match the warm stage's.
 ENV HF_CACHE_DIR=/app/.hf-cache
 COPY --from=warmer --chown=node:node /app/.hf-cache ./.hf-cache
 
