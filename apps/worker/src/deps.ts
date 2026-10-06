@@ -1,5 +1,6 @@
 import {
   loadPack,
+  EgressPolicy,
   type AuditLogSink,
   type Config,
   type Connector,
@@ -103,7 +104,15 @@ export async function buildDeps(
   // Unlike `loadPack`, this does not throw on "none" — see the WorkerDeps
   // comment on `scanner` for why a missing/unconfigured scanner degrades to
   // per-document quarantine rather than refusing to boot.
-  const scanner = createContentScanner(config.contentScan);
+  const scanner = createContentScanner(config.contentScan, {
+    // Own instance rather than one shared with buildCoreDeps's internal
+    // embedder/reranker policy (it doesn't expose that instance) — reads the
+    // same EGRESS_ALLOWED_HOSTS env var, so functionally equivalent, just not
+    // the literal same object. Threading it at all (vs. the scanner building
+    // its own fallback internally) is what lets this compliance gate apply.
+    egressPolicy: EgressPolicy.fromEnv(),
+    complianceMode: config.complianceMode,
+  });
 
   const parser = new HttpParserClient(
     config.parser.url,

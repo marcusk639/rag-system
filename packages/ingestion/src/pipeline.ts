@@ -27,6 +27,7 @@ import {
   scanForClientContextOrThrow,
   ContentSafetyError,
   type ContentScanner,
+  type ContentScanResult,
 } from "@rag/core";
 import {
   type Db,
@@ -508,12 +509,28 @@ export async function ingestOne(
   //     never re-sent to the scanner. Detection drives classification below
   //     rather than attempting to surgically redact prose — see the
   //     docstring on `scanForClientContextOrThrow`.
-  let semanticScan;
+  // `deps.scanner` absent means the operator did not turn Layer 1.5 on, which
+  // is the default and must behave exactly as it did before this layer
+  // existed. It does NOT mean "configured but broken": a provider that is set
+  // and cannot be built has to fail loud at startup, the way this repo's auth
+  // and parser-secret config already do, so a misconfiguration can never
+  // reach here looking like "disabled".
+  //
+  // Conflating the two is what quarantined every document: the scanner is
+  // typed optional but absent in every existing deployment and every test, so
+  // ingestion reported documentsProcessed: 1, documentsFailed: 0,
+  // chunksCreated: 0 -- succeeding and indexing nothing.
+  //
+  // Fail-closed still applies wherever it can discriminate: a scanner that IS
+  // present and throws quarantines the document, below.
+  let semanticScan: ContentScanResult = { flagged: false, findings: [] };
   try {
-    semanticScan = await scanForClientContextOrThrow(
-      parsed.markdown,
-      deps.scanner,
-    );
+    if (deps.scanner) {
+      semanticScan = await scanForClientContextOrThrow(
+        parsed.markdown,
+        deps.scanner,
+      );
+    }
   } catch (err) {
     log.error(
       { err, marker: "ingest.semantic_scan_failed" },

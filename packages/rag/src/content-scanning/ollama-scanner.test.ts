@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EgressPolicy } from "@rag/core";
+import { EgressPolicy, ComplianceError } from "@rag/core";
 import {
   OllamaContentScanner,
   createContentScanner,
@@ -118,5 +118,75 @@ describe("createContentScanner", () => {
     expect(() =>
       createContentScanner({ provider: "ollama", baseUrl: "http://x:1/v1" }),
     ).toThrow();
+  });
+
+  describe("COMPLIANCE_MODE=client-data", () => {
+    // Content-scan's "ollama" provider is ambiguous in a way embeddings/
+    // reranker providers are not: it's an OpenAI-compatible shim that can
+    // point at genuinely self-hosted infrastructure OR a misconfigured real
+    // third-party API, so the gate must distinguish those, not just block
+    // the provider name outright the way createReranker/createEmbeddingProvider
+    // do for providers that are always third-party.
+    it("allows a self-hosted baseUrl (Railway private network)", () => {
+      expect(() =>
+        createContentScanner(
+          {
+            provider: "ollama",
+            baseUrl: "http://ollama.railway.internal:11434/v1",
+            model: "llama3.2:3b",
+          },
+          { complianceMode: "client-data" },
+        ),
+      ).not.toThrow();
+    });
+
+    it("allows a self-hosted baseUrl (loopback / private IP ranges)", () => {
+      for (const baseUrl of [
+        "http://127.0.0.1:11434/v1",
+        "http://localhost:11434/v1",
+        "http://10.0.0.5:11434/v1",
+        "http://192.168.1.5:11434/v1",
+        "http://172.16.0.5:11434/v1",
+      ]) {
+        expect(() =>
+          createContentScanner(
+            { provider: "ollama", baseUrl, model: "llama3.2:3b" },
+            { complianceMode: "client-data" },
+          ),
+        ).not.toThrow();
+      }
+    });
+
+    it("refuses a baseUrl that is not recognizably self-hosted", () => {
+      expect(() =>
+        createContentScanner(
+          {
+            provider: "ollama",
+            baseUrl: "https://api.openai.com/v1",
+            model: "llama3.2:3b",
+          },
+          { complianceMode: "client-data" },
+        ),
+      ).toThrow(ComplianceError);
+    });
+
+    it("allows provider 'none' regardless of complianceMode", () => {
+      expect(
+        createContentScanner(
+          { provider: "none" },
+          { complianceMode: "client-data" },
+        ),
+      ).toBeUndefined();
+    });
+
+    it("does not restrict baseUrl when complianceMode is not client-data", () => {
+      expect(() =>
+        createContentScanner({
+          provider: "ollama",
+          baseUrl: "https://api.openai.com/v1",
+          model: "llama3.2:3b",
+        }),
+      ).not.toThrow();
+    });
   });
 });

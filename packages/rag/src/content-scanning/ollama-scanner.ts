@@ -1,5 +1,10 @@
-import type { ContentScanner, ContentScanResult } from "@rag/core";
-import { EgressPolicy, egressSafeFetch } from "@rag/core";
+import type { ContentScanner, ContentScanResult, Config } from "@rag/core";
+import {
+  EgressPolicy,
+  egressSafeFetch,
+  ComplianceError,
+  ValidationError,
+} from "@rag/core";
 
 /**
  * Layer 1.5 content scanner backed by a self-hosted, OpenAI-compatible server
@@ -125,14 +130,51 @@ function parseVerdict(content: string): ContentScanResult {
   return { flagged: (parsed as { flagged: boolean }).flagged, findings };
 }
 
-export interface ContentScanConfig {
-  provider: "ollama" | "none";
-  baseUrl?: string;
-  model?: string;
-  timeoutMs?: number;
+/** Sourced from the shared config schema rather than hand-duplicated, so a
+ * schema change can't silently drift from what this factory accepts — the
+ * same reasoning `createReranker(cfg: Config["rerank"])` already follows. */
+export type ContentScanConfig = Config["contentScan"];
+
+/**
+ * Recognizes hosts that are plausibly self-hosted infrastructure (loopback,
+ * RFC1918 private ranges, or an internal-DNS suffix like Railway's
+ * `*.railway.internal` / the common `*.internal`), as opposed to a public
+ * API host. Used only to gate `COMPLIANCE_MODE=client-data` below.
+ *
+ * This is a heuristic, not a security boundary on its own — `EgressPolicy`'s
+ * explicit allow-list is still the enforced gate for every actual request.
+ * It exists because, unlike embeddings/reranker (where any non-local/non-none
+ * provider is *always* a third-party vendor), content-scan's "ollama"
+ * provider is an OpenAI-compatible shim that can equally point at a real
+ * third party — "none" isn't the only safe value, so the gate can't just
+ * block every non-none provider the way the sibling factories do.
+ */
+function isLikelySelfHosted(baseUrl: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(baseUrl).hostname;
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1") return true;
+  if (/\.(internal)$/i.test(hostname)) return true;
+  const octets = hostname.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (octets) {
+    const a = Number(octets[1]);
+    const b = Number(octets[2]);
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+  }
+  return false;
 }
 
-/** Factory mirroring `createEmbeddingProvider`/`createReranker`'s shape.
+/** Factory mirroring `createEmbeddingProvider`/`createReranker`'s shape,
+ * including the `opts.egressPolicy`/`complianceMode` injection point those
+ * use — content-scan is at least as security-sensitive as either, so it
+ * gets the same shared-policy threading rather than building its own
+ * `EgressPolicy.fromEnv()` in isolation.
+ *
  * `provider: "none"` returns `undefined` rather than a no-op scanner — unlike
  * the reranker, this is not an optional quality knob: `ingestOne`'s
  * `scanForClientContextOrThrow` fails closed (quarantines) per-document when
@@ -140,18 +182,36 @@ export interface ContentScanConfig {
  * quarantine everything until one is configured, not a silent bypass. */
 export function createContentScanner(
   cfg: ContentScanConfig,
+  opts?: {
+    egressPolicy?: EgressPolicy;
+    complianceMode?: "none" | "client-data";
+  },
 ): ContentScanner | undefined {
+  if (
+    opts?.complianceMode === "client-data" &&
+    cfg.provider === "ollama" &&
+    !isLikelySelfHosted(cfg.baseUrl ?? "")
+  ) {
+    throw new ComplianceError(
+      `COMPLIANCE_MODE=client-data requires CONTENT_SCAN_BASE_URL to be ` +
+        `self-hosted infrastructure (got "${cfg.baseUrl}"). Sending ` +
+        `document text to a public API to ask "is this sensitive?" would ` +
+        `itself be the disclosure this layer exists to prevent. Point it ` +
+        `at a loopback/private-network/*.internal host, or set ` +
+        `CONTENT_SCAN_PROVIDER=none.`,
+    );
+  }
   switch (cfg.provider) {
     case "none":
       return undefined;
     case "ollama": {
       if (!cfg.baseUrl) {
-        throw new Error(
+        throw new ValidationError(
           "CONTENT_SCAN_BASE_URL is required for CONTENT_SCAN_PROVIDER=ollama",
         );
       }
       if (!cfg.model) {
-        throw new Error(
+        throw new ValidationError(
           "CONTENT_SCAN_MODEL is required for CONTENT_SCAN_PROVIDER=ollama",
         );
       }
@@ -159,6 +219,7 @@ export function createContentScanner(
         baseUrl: cfg.baseUrl,
         model: cfg.model,
         timeoutMs: cfg.timeoutMs,
+        egressPolicy: opts?.egressPolicy,
       });
     }
   }

@@ -60,14 +60,23 @@ function testConnector() {
   return connector;
 }
 
-describe("PipelineDeps.scanner — Layer 1.5 fails closed", () => {
-  it("quarantines every document when no scanner is configured", async () => {
+describe("PipelineDeps.scanner — Layer 1.5 gating", () => {
+  // An absent scanner means Layer 1.5 was never turned on -- the default, and
+  // the state of every deployment and test that predates it. It must index
+  // normally. The original contract quarantined here instead, which made
+  // ingestion silently index nothing everywhere: documentsProcessed: 1,
+  // documentsFailed: 0, chunksCreated: 0.
+  //
+  // Fail-closed is preserved where it can actually tell misconfiguration from
+  // "off" -- the throwing-scanner case below -- and a provider that is set but
+  // cannot be built must fail loud at startup, never arrive here as undefined.
+  it("indexes normally when Layer 1.5 was never enabled", async () => {
     const deps = { ...makeDeps(), scanner: undefined } as PipelineDeps;
     await runIngestion("src", testConnector(), null, OPTS, deps);
 
-    expect(upsertDocumentMock).not.toHaveBeenCalled();
-    expect(replaceChunksMock).not.toHaveBeenCalled();
-    expect(logIngestEventMock).toHaveBeenCalledWith(
+    expect(upsertDocumentMock).toHaveBeenCalled();
+    expect(replaceChunksMock).toHaveBeenCalled();
+    expect(logIngestEventMock).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "blocked" }),
     );
