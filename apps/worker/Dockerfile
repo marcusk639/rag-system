@@ -56,41 +56,12 @@ RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
 #    "gemini-embedding-001".
 FROM builder AS warmer
 ENV HF_CACHE_DIR=/app/.hf-cache
-ENV EMBEDDING_MODEL=Xenova/bge-base-en-v1.5
-# onnxruntime-node v1.21.0 SIGABRTs (exit 134, "libc++abi: mutex lock failed:
-# Invalid argument") during process teardown AFTER the warm-up has already
-# completed successfully. A plain `RUN node_modules/.bin/tsx
-# scripts/warm-model.ts` would therefore fail this Docker build on a
-# correctly-warmed cache. Gate on verified state instead of the exit code:
-# the script must have printed its own "Model ready" success line, the exit
-# code must be 0 or the known benign 134, AND the cache directory must
-# actually contain a non-trivial amount of data (>=50MB; ~430MB is expected
-# for Xenova/bge-base-en-v1.5). Any other outcome is a genuine failure and
-# must fail the build — this intentionally does NOT swallow errors with
-# `|| true`.
-RUN <<'EOF'
-set +e
-mkdir -p "$HF_CACHE_DIR"
-node_modules/.bin/tsx scripts/warm-model.ts > /tmp/warm-model.log 2>&1
-status=$?
-cat /tmp/warm-model.log
-if ! grep -q "Model ready" /tmp/warm-model.log; then
-  echo "FATAL: warm-model.ts did not report success (exit $status) - this is a genuine failure, not the known onnxruntime-node teardown abort" >&2
-  exit 1
-fi
-if [ "$status" -ne 0 ] && [ "$status" -ne 134 ]; then
-  echo "FATAL: warm-model.ts exited $status, which is neither 0 nor the known onnxruntime-node SIGABRT-on-teardown code 134" >&2
-  exit 1
-fi
-cache_kb=$(du -sk "$HF_CACHE_DIR" 2>/dev/null | cut -f1)
-cache_kb=${cache_kb:-0}
-echo "HF cache size: ${cache_kb} KB at $HF_CACHE_DIR"
-if [ "$cache_kb" -lt 51200 ]; then
-  echo "FATAL: HF cache at $HF_CACHE_DIR is only ${cache_kb} KB (expected >=50MB of model weights) - the warm did not actually populate the cache" >&2
-  exit 1
-fi
-echo "Local embedding model cache warmed and verified (${cache_kb} KB)."
-EOF
+# Gate on verified on-disk state rather than the exit code: onnxruntime-node
+# v1.21.0 SIGABRTs (exit 134) during teardown AFTER a successful warm. The
+# script requires warm-model.ts's own success line before tolerating 134, so
+# that tolerance cannot mask a real failure, and it fails the build on an
+# unpopulated cache. Shared by worker/api/mcp so the three cannot drift.
+RUN sh scripts/warm-model-verified.sh
 
 # ── pruner: extract a self-contained production bundle for this app only.
 #    pnpm deploy resolves all prod deps (including workspace packages with their
