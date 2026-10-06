@@ -36,21 +36,20 @@ RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
 FROM builder AS pruner
 RUN pnpm --filter "@rag/mcp" deploy --prod /deploy
 
-# ── runtime: minimal final image — only /deploy content lands here
 # ── warmcache: the shared pre-warmed model cache, pinned BY DIGEST.
-#    `--platform=linux/amd64` is required, not incidental: the base is built by
-#    .github/workflows/warm-base.yml on ubuntu-latest, so its manifest is
-#    amd64-only, and a bare `COPY --from=<ref>` fails on an arm64 host with
-#    "no match for platform in manifest". Railway builds amd64 and would not
-#    have noticed; every Apple Silicon developer would have been unable to
-#    build this image at all.
+#    `--platform=linux/amd64` is required, not incidental: the base is built on
+#    ubuntu-latest (.github/workflows/warm-base.yml), so its manifest is
+#    amd64-only and a bare `COPY --from=<ref>` fails on an arm64 host with "no
+#    match for platform in manifest" — which would have blocked every Apple
+#    Silicon developer from building this image at all.
 #
-#    Forcing the platform is safe because this image is FROM scratch and holds
-#    nothing but the model weights — inert data, never executed, and identical
-#    on every architecture. Only the manifest's declared platform is being
-#    overridden, not any code.
+#    Forcing the platform is safe here and nowhere else: the base is FROM
+#    scratch and holds only model weights — inert data, never executed, byte-
+#    identical on every architecture. See docker/Dockerfile.warm-base for why
+#    it is pinned by digest rather than tag.
 FROM --platform=linux/amd64 ghcr.io/marcusk639/rag-warm-base@sha256:6c518bd041a895f9f6fcf7427e452ce2f02aaff2ef0c175c4be9fb613acccb48 AS warmcache
 
+# ── runtime: minimal final image — only /deploy content lands here
 FROM node:22-slim AS runtime
 
 WORKDIR /app
