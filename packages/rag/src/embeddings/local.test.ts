@@ -12,7 +12,7 @@ const { mockPipeFn, mockPipelineFactory, mockHFEnv, mockTokenizerFn } =
     const mockPipeFn = vi.fn() as ReturnType<typeof vi.fn> & {
       tokenizer?: ReturnType<typeof vi.fn>;
     };
-    const mockHFEnv: Record<string, string | undefined> = {};
+    const mockHFEnv: Record<string, string | boolean | undefined> = {};
     const mockPipelineFactory = vi.fn().mockResolvedValue(mockPipeFn);
     // Real @huggingface/transformers pipeline instances expose their
     // tokenizer as a public `.tokenizer` property (see Pipeline base class in
@@ -74,8 +74,11 @@ describe("LocalEmbeddingProvider", () => {
   });
 
   afterEach(() => {
-    // Clean up env side-effects between tests
+    // Clean up env side-effects between tests. mockHFEnv is a single shared
+    // object, so anything a test writes to it leaks forward otherwise — the
+    // same trap the tokenizer's model_max_length hit above.
     delete mockHFEnv["cacheDir"];
+    delete mockHFEnv["allowRemoteModels"];
     delete process.env["HF_CACHE_DIR"];
   });
 
@@ -367,6 +370,72 @@ describe("LocalEmbeddingProvider", () => {
       const p = new LocalEmbeddingProvider();
       await p.embed("warmup");
       expect(mockHFEnv["cacheDir"]).toBe("/opt/models/hf");
+    });
+  });
+
+  /**
+   * COMPLIANCE_MODE=client-data makes `local` the only permitted embedding
+   * provider (createEmbeddingProvider throws for gemini/openai), on the
+   * grounds that it is the one provider with no egress. That was only true
+   * after the weights were already on disk: the first `embed()` call downloads
+   * ~430 MB from huggingface.co, and nothing gated it — `_loadPipeline` set
+   * `env.cacheDir` and nothing else, while the library defaults
+   * `allowRemoteModels` to `true`.
+   *
+   * `EgressPolicy` cannot be the gate here. @huggingface/transformers calls the
+   * global `fetch` itself and exposes no injection point for a custom one (its
+   * `env` has no fetch/agent/proxy option in 3.8.1), so the only enforceable
+   * control is the library's own switch. Setting it is a stronger guarantee
+   * than an allow-list anyway: the request is never attempted.
+   */
+  describe("compliance mode — offline weight loading", () => {
+    it("disables remote model fetches under client-data", async () => {
+      const p = new LocalEmbeddingProvider({ complianceMode: "client-data" });
+      await p.embed("warmup");
+      expect(mockHFEnv["allowRemoteModels"]).toBe(false);
+    });
+
+    it("leaves remote fetches enabled when no compliance mode is set", async () => {
+      // Default deployments legitimately download on first run; the gate must
+      // not become an accidental air-gap for everyone.
+      const p = new LocalEmbeddingProvider();
+      await p.embed("warmup");
+      expect(mockHFEnv["allowRemoteModels"]).toBeUndefined();
+    });
+
+    it("leaves remote fetches enabled under complianceMode none", async () => {
+      const p = new LocalEmbeddingProvider({ complianceMode: "none" });
+      await p.embed("warmup");
+      expect(mockHFEnv["allowRemoteModels"]).toBeUndefined();
+    });
+
+    it("does not touch allowLocalModels, so a warm cache still loads", async () => {
+      // The library tries its cache before consulting either flag, and setting
+      // both to false is a hard "Invalid configuration" error.
+      const p = new LocalEmbeddingProvider({ complianceMode: "client-data" });
+      await p.embed("warmup");
+      expect(mockHFEnv["allowLocalModels"]).toBeUndefined();
+    });
+
+    it("tells the operator to pre-warm the cache when a cold load is refused", async () => {
+      // The library's real error template once the gate is on and the weights
+      // are absent (dist/transformers.node.cjs:32956). The interpolated path is
+      // illustrative only -- the real `localPath` derives from
+      // env.localModelPath, so do not read this string as a path to look for.
+      mockPipelineFactory.mockRejectedValue(
+        new Error(
+          "`local_files_only=true` or `env.allowRemoteModels=false` and file " +
+            'was not found locally at "/root/.cache/huggingface/Xenova/bge-base-en-v1.5".',
+        ),
+      );
+      const p = new LocalEmbeddingProvider({ complianceMode: "client-data" });
+
+      const err = (await p.embed("x").catch((e: unknown) => e)) as Error;
+
+      expect(err.message).toMatch(/warm-model/);
+      // The old message sent the operator looking for internet access, which
+      // under client-data is the one thing they must not arrange.
+      expect(err.message).not.toMatch(/requires internet access/);
     });
   });
 

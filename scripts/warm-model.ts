@@ -14,8 +14,14 @@
  * cache-populated check the build gates on.
  *
  * Environment variables:
- *   EMBEDDING_MODEL   — HuggingFace model id (default: Xenova/bge-base-en-v1.5)
- *   HF_CACHE_DIR      — cache directory (default: ~/.cache/huggingface)
+ *   EMBEDDING_MODEL   — HuggingFace model id (default here: Xenova/bge-base-en-v1.5).
+ *                       NOTE this differs from the runtime default: config.ts
+ *                       defaults EMBEDDING_MODEL to gemini-embedding-001
+ *                       regardless of provider, so warming without it set
+ *                       warms a model the service never asks for.
+ *   HF_CACHE_DIR      — cache directory. Unset, @huggingface/transformers caches
+ *                       inside its own node_modules directory, which does not survive
+ *                       a multi-stage image copy or a prod-only reinstall. Set it.
  */
 import { createEmbeddingProvider } from "@rag/rag";
 
@@ -37,5 +43,5 @@ const provider = createEmbeddingProvider({
 await provider.embed("warmup");
 
 process.stdout.write(
-  `Model ready. Cache: ${cacheDir ?? "~/.cache/huggingface"}\n`,
+  `Model ready. Cache: ${cacheDir ?? "(unset -- a .cache/ dir inside the installed @huggingface/transformers package; set HF_CACHE_DIR)"}\n`,
 );

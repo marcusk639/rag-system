@@ -15,8 +15,27 @@ import { createEmbeddingProvider } from "./factory.js";
 import { GeminiEmbeddingProvider } from "./gemini.js";
 import { OpenAIEmbeddingProvider } from "./openai.js";
 
+// Needed by the finding-5 block below, which drives a real `embed()` through
+// the factory to observe the offline switch the provider sets.
+const { mockHFEnv, mockPipelineFactory } = vi.hoisted(() => {
+  const mockHFEnv: Record<string, string | boolean | undefined> = {};
+  const mockPipeFn = vi.fn(() =>
+    Promise.resolve({ dims: [1, 768], data: new Float32Array(768).fill(0.1) }),
+  );
+  return {
+    mockHFEnv,
+    mockPipelineFactory: vi.fn().mockResolvedValue(mockPipeFn),
+  };
+});
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: mockPipelineFactory,
+  env: mockHFEnv,
+}));
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  delete mockHFEnv["allowRemoteModels"];
 });
 
 // ── Finding 1: per-provider egress gate ─────────────────────────────────────
@@ -147,6 +166,35 @@ describe("createEmbeddingProvider — compliance mode gate (finding 3)", () => {
         { complianceMode: "client-data" },
       ),
     ).not.toThrow();
+  });
+
+  /**
+   * Finding 5: permitting `local` under client-data is only sound if `local`
+   * actually stays offline. The factory passed `egressPolicy` to gemini and
+   * openai but handed the local case nothing at all, so the provider the
+   * compliance gate *mandates* was the one provider with no egress control —
+   * its first `embed()` downloads weights from huggingface.co.
+   *
+   * This asserts the whole chain, factory through to the library's switch,
+   * rather than just that the option is accepted.
+   */
+  it("threads client-data through to the local provider's offline switch", async () => {
+    const provider = createEmbeddingProvider(
+      { ...baseCfg, provider: "local" },
+      { complianceMode: "client-data" },
+    );
+
+    await provider.embed("warmup");
+
+    expect(mockHFEnv["allowRemoteModels"]).toBe(false);
+  });
+
+  it("leaves the local provider online when compliance mode is not set", async () => {
+    const provider = createEmbeddingProvider({ ...baseCfg, provider: "local" });
+
+    await provider.embed("warmup");
+
+    expect(mockHFEnv["allowRemoteModels"]).toBeUndefined();
   });
 
   it("allows gemini when complianceMode=none (default)", () => {

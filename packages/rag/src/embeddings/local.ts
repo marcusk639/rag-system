@@ -8,6 +8,13 @@ import { EmbeddingError } from "@rag/core";
  * egress for embedding. This satisfies CR-1 (IRC §7216: TRI never reaches an
  * external embedding API) and CR-3 (US-located computation).
  *
+ * "No egress" covers inference, not model loading: the weights themselves are
+ * fetched from huggingface.co on first use (see the first-startup note below).
+ * No document text is ever part of that request — only the public model id —
+ * but it is still an outbound call, so under `COMPLIANCE_MODE=client-data`
+ * `_loadPipeline` sets `env.allowRemoteModels = false` and the cache must be
+ * pre-warmed instead.
+ *
  * Default model: Xenova/bge-base-en-v1.5 (768-d).
  *   - Matches the `chunks.embedding` pgvector column dimension (no migration).
  *   - Strong general retrieval quality for English firm documents.
@@ -15,7 +22,9 @@ import { EmbeddingError } from "@rag/core";
  *
  * First-startup note: the model weights are downloaded from HuggingFace Hub on
  * the first `embed()` call and cached at HF_CACHE_DIR (default:
- * ~/.cache/huggingface). Run `scripts/warm-model.ts` during image build or
+ * a `.cache/` directory inside the installed @huggingface/transformers package
+ * itself -- under node_modules/.pnpm/... with pnpm -- NOT ~/.cache/huggingface).
+ * Run `scripts/warm-model.ts` during image build or
  * deployment to pre-warm the cache so the first real query doesn't time out.
  *
  * BGE asymmetric retrieval: bge models recommend a query-side instruction
@@ -95,6 +104,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private _pipelinePromise: Promise<HFPipeline> | null = null;
   private readonly logger: EmbeddingLogger;
   private readonly maxTokens: number;
+  private readonly complianceMode: "none" | "client-data";
 
   constructor(
     opts: {
@@ -102,12 +112,14 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       dimensions?: number;
       logger?: EmbeddingLogger;
       maxTokens?: number;
+      complianceMode?: "none" | "client-data";
     } = {},
   ) {
     this.model = opts.model ?? "Xenova/bge-base-en-v1.5";
     this.dimensions = opts.dimensions ?? 768;
     this.logger = opts.logger ?? defaultLogger;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.complianceMode = opts.complianceMode ?? "none";
   }
 
   /** Return the cached pipeline, loading it on first access. */
@@ -129,9 +141,32 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
       // HF_CACHE_DIR lets the firm pin weights to a network share or a
       // known-good path on the deployment VM. Without it the default
-      // (~/.cache/huggingface) is used, which is fine for local dev.
+      // (a `.cache/` dir inside the installed package, per its env.js
+      // DEFAULT_CACHE_DIR; under pnpm that is below node_modules/.pnpm/)
+      // is used, which is fine for local dev but does not survive an image rebuild.
       if (process.env.HF_CACHE_DIR) {
         env.cacheDir = process.env.HF_CACHE_DIR;
+      }
+
+      // Under COMPLIANCE_MODE=client-data this provider is the ONLY permitted
+      // embedder (createEmbeddingProvider rejects gemini/openai) precisely
+      // because it is the one with no egress. Loading weights is the exception
+      // to that: the first call fetches ~430 MB from huggingface.co, and the
+      // library defaults `allowRemoteModels` to true, so the claim only held
+      // once the cache was already warm.
+      //
+      // The library calls the global `fetch` itself and offers no hook for a
+      // custom one, so `EgressPolicy` cannot intercept this — its own switch is
+      // the only enforceable control, and a refused request is a better
+      // guarantee than an allow-listed one. Its cache is consulted before the
+      // switch is read (dist/transformers.node.cjs:32920 vs :32942), so a
+      // pre-warmed deployment is unaffected; a cold one now fails loudly
+      // instead of silently reaching the internet.
+      //
+      // `allowLocalModels` is deliberately left alone: setting both to false is
+      // a hard "Invalid configuration" error in the library.
+      if (this.complianceMode === "client-data") {
+        env.allowRemoteModels = false;
       }
 
       const pipe = await pipeline("feature-extraction", this.model);
@@ -140,10 +175,23 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       // Reset so a transient failure (e.g. network blip during first download)
       // can be retried by the caller rather than being permanently cached.
       this._pipelinePromise = null;
+      // The remedy differs by mode, and pointing a client-data operator at
+      // "make the model reachable" would be telling them to arrange the one
+      // thing the mode forbids.
+      const remedy =
+        this.complianceMode === "client-data"
+          ? `COMPLIANCE_MODE=client-data forbids downloading weights at runtime, so the cache must be ` +
+            `populated ahead of time, for THIS model id and at a path the runtime also reads: ` +
+            `HF_CACHE_DIR=<path> EMBEDDING_MODEL="${this.model}" npx tsx scripts/warm-model.ts. ` +
+            `Two traps make a pre-warmed deployment still land here: warm-model.ts defaults to ` +
+            `Xenova/bge-base-en-v1.5 while EMBEDDING_MODEL defaults to gemini-embedding-001 ` +
+            `regardless of provider, so warming without EMBEDDING_MODEL set warms a different model; ` +
+            `and with HF_CACHE_DIR unset the library caches inside its own installed package directory, ` +
+            `which does not survive a multi-stage image copy or a production-only reinstall.`
+          : `Ensure @huggingface/transformers is installed and the model is reachable ` +
+            `(first run requires internet access to download weights; subsequent runs use HF_CACHE_DIR).`;
       throw new EmbeddingError(
-        `Failed to load local embedding model "${this.model}": ${(err as Error).message}. ` +
-          `Ensure @huggingface/transformers is installed and the model is reachable ` +
-          `(first run requires internet access to download weights; subsequent runs use HF_CACHE_DIR).`,
+        `Failed to load local embedding model "${this.model}": ${(err as Error).message}. ${remedy}`,
         err,
       );
     }

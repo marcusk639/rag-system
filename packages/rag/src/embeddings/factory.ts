@@ -60,9 +60,17 @@ export function createEmbeddingProvider(
     case "local":
       // No API key required — all inference runs on-process via ONNX.
       // Satisfies CR-1/CR-3: no TRI egress for embeddings (§7216 compliance).
+      //
+      // `complianceMode` is threaded even though this is the provider the gate
+      // above permits: it is inference that has no egress, while loading the
+      // weights is an outbound fetch to huggingface.co that nothing gated.
+      // The provider turns it into the library's own offline switch — there is
+      // no `egressPolicy` here because @huggingface/transformers calls the
+      // global `fetch` and accepts no custom one.
       return new LocalEmbeddingProvider({
         model: cfg.model,
         dimensions: cfg.dimensions,
+        complianceMode: opts?.complianceMode,
       });
   }
 }
