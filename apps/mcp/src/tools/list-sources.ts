@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthorizationScope } from "@rag/core";
 import { listPublicSources } from "@rag/services";
 import type { Deps } from "../deps.js";
+import { guardToolHandler } from "../tool-error.js";
 
 export function registerListSources(
   server: McpServer,
@@ -16,7 +17,7 @@ export function registerListSources(
         "List every registered ingestion source (the systems documents were pulled from: SharePoint sites, Google Drives, mailboxes, etc.). Use this to discover which sources exist and obtain their ids — those ids can be passed to `search_documents`/`ask` as `sourceIds` to restrict the search, or to `trigger_sync` to refresh a source. Returns id, kind (sharepoint|gdrive|gmail|outlook|custom), human-friendly name, and the last successful sync timestamp (null if never synced).",
       inputSchema: {},
     },
-    async () => {
+    guardToolHandler("list_sources", deps.logger, async () => {
       // listPublicSources strips the `config` blob and now also enforces the
       // MANDATORY confidentiality scope — a scoped session must only see
       // sources within its `allowedSourceIds`, mirroring the HTTP API fix.
@@ -40,6 +41,6 @@ export function registerListSources(
         content: [{ type: "text", text }],
         structuredContent: { sources },
       };
-    },
+    }),
   );
 }

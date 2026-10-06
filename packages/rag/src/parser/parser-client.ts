@@ -43,16 +43,50 @@ export class HttpParserClient implements Parser {
         headersTimeout: this.timeoutMs,
       });
     } catch (err) {
-      throw new ParserError(
-        `Parser request failed: ${(err as Error).message}`,
-        err,
-      );
+      // The message carries the failure *category* only — undici's own text
+      // names the sidecar's internal host and port. The full error stays on
+      // `cause`, where the logger and Sentry still see it.
+      const code = (err as { code?: string }).code ?? "unknown";
+      throw new ParserError(`Parser request failed (${code})`, err);
     }
 
     if (response.statusCode >= 400) {
       const text = await response.body.text();
+      // The body is not content-free. The sidecar interpolates the underlying
+      // library exception into its `detail` (services/parser-py/app/parsing.py
+      // :203 and :207, tabular.py:39 and :73) and those exceptions can quote
+      // the offending cell or line — so a 4xx *or* 5xx body may carry document
+      // text.
+      //
+      // Why that matters for a `RagError` specifically: both transports treat a
+      // RagError's `message` as the text they may show a caller —
+      // `apps/api/src/error-handler.ts` sends `payload(error.code,
+      // error.message)` and `apps/mcp/src/tool-error.ts` returns
+      // `toolError(err.code, err.message)`, while an unrecognized error gets a
+      // generic string. A RagError whose message carries document text breaks
+      // that contract. No route reaches a ParserError today (the parser client
+      // is constructed only in apps/worker, and PARSER_ERROR's 502 mapping is
+      // defensive), so this is keeping the contract true rather than closing a
+      // live hole.
+      //
+      // What this does NOT do is keep the body out of the logs, and it is not
+      // meant to: pino's serializer folds the cause chain back into the
+      // serialized `message` via `messageWithCauses`, so the log line still
+      // carries the body. That is where the detail belongs. The change moves it
+      // off the `.message` property, which is what a transport would read.
+      //
+      // `cause` must therefore be an Error, not the raw string: the serializer
+      // only walks a cause it considers error-like, so a string cause is
+      // dropped from the log entirely instead of relocated there.
+      //
+      // The nearest in-repo principle is `RedactionFinding`
+      // (packages/core/src/content-safety.ts:30-35), which carries `kind` +
+      // `count` and never the matched value. That governs the finding object,
+      // so applying it to a message is an extension of the idea, not a rule
+      // this repo already states.
       throw new ParserError(
-        `Parser returned ${response.statusCode}: ${text.slice(0, 500)}`,
+        `Parser returned ${response.statusCode}`,
+        new Error(text.slice(0, 500)),
       );
     }
 

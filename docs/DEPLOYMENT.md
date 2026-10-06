@@ -166,15 +166,21 @@ HF_CACHE_DIR=/opt/hf-cache               # shared across redeploys; avoids re-do
 
 On first boot the ONNX runtime downloads `bge-base-en-v1.5` from HuggingFace Hub to `HF_CACHE_DIR`. In production, pre-warm the cache during the Docker image build so the first live query doesn't time out:
 
+Set both variables explicitly. `HF_CACHE_DIR` unset means the weights land inside the installed `@huggingface/transformers` package, which the multi-stage `COPY --from=pruner` in `apps/worker/Dockerfile` discards; and `EMBEDDING_MODEL` defaults to `gemini-embedding-001` regardless of provider, so warming without it warms a model the runtime never asks for. Under `COMPLIANCE_MODE=client-data` either mistake is a hard boot failure rather than a slow first query, because `allowRemoteModels` is off.
+
 ```dockerfile
 # In Dockerfile (worker and api), after `pnpm install`:
-RUN npx tsx scripts/warm-model.ts
+RUN HF_CACHE_DIR=/opt/hf-cache \
+    EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 \
+    npx tsx scripts/warm-model.ts
 ```
+
+The build-stage path must be the same one the runtime reads, so keep `HF_CACHE_DIR=/opt/hf-cache` in the service's own environment too.
 
 Or run it manually before the first deploy:
 
 ```sh
-HF_CACHE_DIR=/opt/hf-cache npx tsx scripts/warm-model.ts
+HF_CACHE_DIR=/opt/hf-cache EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 npx tsx scripts/warm-model.ts
 ```
 
 Subsequent container restarts read from the cache volume — no network egress, no download delay. Mount `HF_CACHE_DIR` as a persistent volume so it survives redeploys.
