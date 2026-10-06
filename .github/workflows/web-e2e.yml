@@ -122,10 +122,21 @@ jobs:
       # globalSetup seeds the fixture corpus with the local ONNX embedder on
       # EVERY run, whichever specs are selected, so this ~430MB model is still
       # needed here even though the Ollama pull is gone. Cache it.
+      # The path here and HF_CACHE_DIR on the suite step below MUST match, and
+      # neither may use `~`. actions/cache expands a tilde itself, but an `env:`
+      # value is passed through literally, so HF_CACHE_DIR=~/... would make the
+      # library create a directory actually named "~" and the cache key could
+      # never hit — which is what happened here: nothing was ever written to the
+      # cached path, so every run re-downloaded the model.
+      #
+      # `runner.temp` rather than `github.workspace` so the cache never lands
+      # inside the checkout, where `pnpm lint` / `format:check` globs would see
+      # it. `runner` is not available in a job-level `env:`, hence the per-step
+      # env below rather than hoisting it.
       - name: Cache Hugging Face models (ONNX embedder, ~430MB)
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface
+          path: ${{ runner.temp }}/hf-cache
           key: hf-${{ runner.os }}-bge-base-en-v1.5
 
       # MUST run before the suite starts its servers. playwright.config.ts
@@ -151,6 +162,10 @@ jobs:
         run: pnpm --filter @rag/web-e2e exec playwright install --with-deps chromium
 
       - name: Run web E2E suite
+        # globalSetup seeds the fixture corpus with the local ONNX embedder, so
+        # this is the step that reads (and on a cache miss, writes) the model.
+        env:
+          HF_CACHE_DIR: ${{ runner.temp }}/hf-cache
         run: pnpm --filter @rag/web-e2e run test:browser:ci
 
       - name: Upload Playwright artifacts on failure
