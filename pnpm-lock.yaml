@@ -575,6 +575,12 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
 
+  scripts:
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
   tests/e2e:
     dependencies:
       '@rag/core':

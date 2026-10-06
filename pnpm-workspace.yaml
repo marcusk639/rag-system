@@ -3,3 +3,6 @@ packages:
   - "apps/*"
   - "tests/*"
   - "examples/*"
+  # scripts/ is a workspace package only so `pnpm -r run test` picks up the
+  # Docker build-gate tests in warm-model-verified.test.ts. It ships no code.
+  - "scripts"
