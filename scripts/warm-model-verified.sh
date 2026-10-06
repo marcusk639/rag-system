@@ -54,6 +54,11 @@ cat /tmp/warm-model.log
 # a plain `RUN` would fail the build on a correctly warmed cache. Requiring the
 # script's own success line before tolerating 134 is what keeps that tolerance
 # from masking a genuine failure. Deliberately no `|| true` anywhere.
+# ⚠ This literal must stay in step with the success line warm-model.ts prints
+# (its only producer, reached only after `await provider.embed(...)` resolves).
+# If that text changes without this grep changing, the build fails ALWAYS
+# rather than passing wrongly -- the safe direction -- but it fails for a
+# reason that looks nothing like the cause.
 if ! grep -q "Model ready" /tmp/warm-model.log; then
   echo "FATAL: warm-model.ts did not report success (exit $status) - this is a genuine failure, not the known onnxruntime-node teardown abort" >&2
   exit 1
@@ -65,7 +70,22 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 134 ]; then
 fi
 
 cache_kb=$(du -sk "$HF_CACHE_DIR" 2>/dev/null | cut -f1)
-cache_kb=${cache_kb:-0}
+
+# Refuse an UNMEASURABLE cache as loudly as an undersized one. A `${cache_kb:-0}`
+# default would only cover the empty case; on any non-numeric value (a du that
+# warns onto stdout, a BusyBox/Alpine du with different output, a locale that
+# formats numbers) the `-lt` below errors with "integer expression expected",
+# and because this script runs under `set +e` the failed test is read by `if`
+# as simply false -- skipping the FATAL branch and falling through to the
+# success line with exit 0. That is the one outcome this gate exists to make
+# impossible: a green build certifying a cache nobody measured.
+case "$cache_kb" in
+  '' | *[!0-9]*)
+    echo "FATAL: could not determine the size of $HF_CACHE_DIR (du produced '${cache_kb}') - refusing to certify a cache that cannot be measured" >&2
+    exit 1
+    ;;
+esac
+
 echo "HF cache size: ${cache_kb} KB at $HF_CACHE_DIR"
 
 if [ "$cache_kb" -lt "$MIN_CACHE_KB" ]; then
