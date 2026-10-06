@@ -8,10 +8,12 @@ import {
   isExcludedPath,
   ContentSafetyError,
   DEFAULT_EXCLUDED_PATH_FRAGMENTS,
+  scanForClientContextOrThrow,
 } from "./content-safety.js";
 import type { ScanMatch } from "./pack/scan.js";
 import type { LoadedPack } from "./pack/load.js";
 import { loadPack } from "./pack/load.js";
+import type { ContentScanner } from "./interfaces.js";
 
 /**
  * `packs/cpa/pack.yaml` exists (Task 6 authored it) and is the real shipped
@@ -442,5 +444,62 @@ describe("tabular identifier columns", () => {
       "| C | 100200302 | 30 |",
     ].join("\n");
     expect(redactText(invoices, TEST_PACK).findings.length).toBe(0);
+  });
+});
+
+describe("scanForClientContextOrThrow — fails closed", () => {
+  // Layer 1.5: semantic detection of client-identifying context that pattern
+  // redaction structurally cannot see (a name in prose, not a formatted SSN).
+  // Same fail-closed contract as redactOrThrow: no scanner, or a scanner that
+  // throws, must quarantine the document rather than let it through unchecked.
+  const cleanScanner: ContentScanner = {
+    name: "fake-clean",
+    scan: async () => ({ flagged: false, findings: [] }),
+  };
+  const flaggingScanner: ContentScanner = {
+    name: "fake-flagging",
+    scan: async () => ({
+      flagged: true,
+      findings: ["possible client name: John Smith"],
+    }),
+  };
+  const throwingScanner: ContentScanner = {
+    name: "fake-throwing",
+    scan: async () => {
+      throw new Error("model unreachable");
+    },
+  };
+
+  it("returns a clean result when the scanner reports nothing", async () => {
+    const result = await scanForClientContextOrThrow(
+      "Standard filing checklist, no client mentioned.",
+      cleanScanner,
+    );
+    expect(result.flagged).toBe(false);
+    expect(result.findings).toEqual([]);
+  });
+
+  it("returns the scanner's findings when it flags content", async () => {
+    const result = await scanForClientContextOrThrow(
+      "Please see the attached letter for John Smith.",
+      flaggingScanner,
+    );
+    expect(result.flagged).toBe(true);
+    expect(result.findings).toContain("possible client name: John Smith");
+  });
+
+  // There is deliberately no "throws when no scanner is configured" case.
+  // Layer 1.5 is opt-in and `none` is the default, so an absent scanner means
+  // the layer is off and ingestion proceeds as it did before the layer
+  // existed — asserted end-to-end in
+  // `packages/ingestion/src/pipeline-semantic-scan.test.ts`. The states that
+  // must not be confused with "off" are rejected upstream: an unbuildable
+  // provider throws in `createContentScanner`, and `loadConfig` refuses
+  // `none` under `COMPLIANCE_MODE=client-data`.
+
+  it("throws ContentSafetyError when the scanner itself throws", async () => {
+    await expect(
+      scanForClientContextOrThrow("some text", throwingScanner),
+    ).rejects.toThrow(ContentSafetyError);
   });
 });

@@ -25,7 +25,16 @@ import {
   isExcludedPath,
   redactParsedDocument,
   ContentSafetyError,
+  type ContentScanner,
 } from "@rag/core";
+import {
+  type IngestOutcome,
+  runSemanticScan,
+  purgeQuarantined,
+} from "./ingest-gates.js";
+// Re-exported: it is `ingestOne`'s return type, so it belongs to this
+// module's public surface regardless of which file declares it.
+export type { IngestOutcome } from "./ingest-gates.js";
 import {
   type Db,
   clearDocumentStorage,
@@ -112,6 +121,22 @@ export interface PipelineDeps {
    * defence-in-depth for direct callers.
    */
   pack?: LoadedPack;
+  /**
+   * Layer 1.5 semantic content scanner — detects client-identifying context
+   * (a name in prose) that `pack`'s pattern redaction cannot see.
+   *
+   * ⚠ NOT the same contract as `pack`. `undefined` means Layer 1.5 is OFF
+   * (`CONTENT_SCAN_PROVIDER=none`, the default) and ingestion behaves exactly
+   * as it did before this layer existed. Fail-closed applies to a scanner
+   * that is present and THROWS, which quarantines the document. The states
+   * that must never be confused with "off" are rejected upstream instead: a
+   * provider set but unbuildable throws in `createContentScanner` at
+   * startup, and `loadConfig` refuses `none` under
+   * `COMPLIANCE_MODE=client-data`.
+   *
+   * MUST be self-hosted — see the egress note on `scanForClientContextOrThrow`.
+   */
+  scanner?: ContentScanner;
 }
 
 export interface PipelineRunResult {
@@ -122,6 +147,14 @@ export interface PipelineRunResult {
   documentsDeleted: number;
   /** Items the connector skipped for exceeding its size cap (observability only). */
   documentsSkippedOversize: number;
+  /**
+   * Documents a safety gate refused this run (redaction, Layer 1.5, or the
+   * classification gate). Counted in `documentsProcessed` too, because they
+   * were processed — this says how many of those produced no index content on
+   * purpose, which `chunksCreated` alone cannot distinguish from a broken
+   * embedder or an unreachable scanner.
+   */
+  documentsQuarantined: number;
   /** Previously failed documents successfully re-ingested this run. */
   documentsRetried: number;
   /**
@@ -183,6 +216,7 @@ export async function runIngestion(
   let chunksCreated = 0;
   let documentsDeleted = 0;
   let documentsSkippedOversize = 0;
+  let documentsQuarantined = 0;
   let pageDone = false;
   let pagesProcessed = 0;
   // Layer 3: no longer defaults to "A". An undeclared source class is the
@@ -231,6 +265,12 @@ export async function runIngestion(
       if (r.status === "fulfilled") {
         documentsProcessed++;
         chunksCreated += r.value.chunksCreated;
+        // Counted separately from both success and failure. A quarantine is
+        // neither: the document was handled correctly and deliberately not
+        // indexed. Folding it into documentsProcessed alone is what let a
+        // whole-source scanner outage report a green sync that indexed
+        // nothing.
+        if (r.value.outcome === "quarantined") documentsQuarantined++;
       } else {
         documentsFailed++;
         log.error({ err: r.reason }, "document failed");
@@ -304,12 +344,28 @@ export async function runIngestion(
       documentsFailed,
       documentsDeleted,
       documentsSkippedOversize,
+      documentsQuarantined,
       chunksCreated,
       done: pageDone,
       pagesProcessed,
     },
     "ingestion run complete",
   );
+  // A run whose every document was refused is the signature of a broken
+  // safety gate (scanner unreachable, egress gap, misconfigured pack), not of
+  // a corpus that is entirely sensitive. Say so at error level: the caller
+  // also refuses to mark such a run "completed".
+  if (documentsQuarantined > 0 && chunksCreated === 0) {
+    log.error(
+      {
+        marker: "ingest.all_quarantined",
+        documentsQuarantined,
+        documentsProcessed,
+      },
+      "every document this run was quarantined and nothing was indexed; " +
+        "treat this as a failed run and check the content-safety gates",
+    );
+  }
   // `done: pageDone` tells the caller whether the source is fully enumerated.
   // `false` here means the page budget was hit before the feed ended → the
   // caller should re-enqueue a continuation resuming from `cursor`.
@@ -319,6 +375,7 @@ export async function runIngestion(
     chunksCreated,
     documentsDeleted,
     documentsSkippedOversize,
+    documentsQuarantined,
     documentsRetried,
     done: pageDone,
     nextCursor: cursor,
@@ -352,7 +409,7 @@ export async function ingestOne(
   source: SourceDocument,
   deps: PipelineDeps,
   docClass: DocumentClass,
-): Promise<{ chunksCreated: number }> {
+): Promise<IngestOutcome> {
   // Phase 1 hard block — C and D require compliance workflows that do not yet
   // exist. This is a programming error if reached (the source should not have
   // been created with a C/D class in Phase 1), so we throw rather than skip.
@@ -370,10 +427,11 @@ export async function ingestOne(
   }
 
   const { db, parser, chunker, embedder, objectStore, logger } = deps;
-  const log = logger.child({
-    externalId: source.externalId,
-    title: source.title,
-  });
+  // ⚠ `externalId` ONLY: the title is the raw, unredacted filename, which in
+  // this corpus is routinely the client's name. Child bindings are stamped on
+  // every later record -- including the Layer 1.5 warning that this document
+  // names a client -- so binding it makes that warning disclose WHO.
+  const log = logger.child({ externalId: source.externalId });
 
   // 0. Layer 2 — structural exclusion. Cheapest and most reliable guard:
   //    a document that is never parsed cannot be chunked, embedded, or stored.
@@ -398,7 +456,7 @@ export async function ingestOne(
       { reason: exclusion.reason, marker: "ingest.excluded_path" },
       "skipping document: path is on the client-content denylist",
     );
-    return { chunksCreated: 0 };
+    return { outcome: "skipped", chunksCreated: 0 };
   }
 
   // 1. Parse to clean markdown.
@@ -477,7 +535,8 @@ export async function ingestOne(
         action: "blocked",
         rejectionReason,
       });
-      return { chunksCreated: 0 };
+      await purgeQuarantined(deps.db, sourceId, source.externalId, log);
+      return { outcome: "quarantined", chunksCreated: 0 };
     }
     throw err;
   }
@@ -491,7 +550,24 @@ export async function ingestOne(
   parsed.tables = redacted.tables;
   parsed.title = redacted.title;
 
-  // 1c. Layer 3 — per-document classification gate. The source's declared class
+  // 1d. Layer 1.5 -- semantic scan for client-identifying context (a name in
+  //     prose) that Layer 1 pattern redaction cannot see. Runs on the
+  //     REDACTED text and covers the title and tables too, not markdown
+  //     alone. See ./ingest-gates.ts for the scope and the off-vs-broken
+  //     contract.
+  const scanStage = await runSemanticScan({
+    parsed,
+    scanner: deps.scanner,
+    db: deps.db,
+    sourceId,
+    externalId: source.externalId,
+    docClass,
+    log,
+  });
+  if (!scanStage.ok) return scanStage.outcome;
+  const semanticScan = scanStage.scan;
+
+  // 1e. Layer 3 — per-document classification gate. The source's declared class
   //     is a CEILING, not a verdict: evidence from this document can only make
   //     the classification stricter. A "general" source does not make a
   //     document containing an SSN general, which is precisely the failure that
@@ -500,6 +576,7 @@ export async function ingestOne(
     sourceClass: docClass,
     redactionFindings: redacted.findings,
     clientContextPath: isExcludedPath(source.metadata?.path).excluded,
+    semanticContextDetected: semanticScan.flagged,
   });
   if (classification.quarantine) {
     // Redaction is damage limitation, not absolution — a document that
@@ -510,7 +587,17 @@ export async function ingestOne(
     // would prevent the disclosure but destroy the evidence that the pipeline
     // saw sensitive content — which is the half that matters under §7216 /
     // Circular 230. A logger warning is not an audit trail.
-    const reason = `per-document classification escalated to ${classification.docClass} (${classification.reasons.join(", ")})`;
+    // Carry the scanner CATEGORIES into the durable record. The reasons list
+    // says "semantic-context-detected" but not of what kind, and the findings
+    // only reached a pino warning -- so the audit row, which is the artefact
+    // a Gate 1 reviewer actually works from, recorded less than the log did.
+    // The prompt forbids values in findings precisely so the categories are
+    // safe to persist here.
+    const semanticDetail =
+      semanticScan.findings.length > 0
+        ? ` [${semanticScan.findings.join("; ")}]`
+        : "";
+    const reason = `per-document classification escalated to ${classification.docClass} (${classification.reasons.join(", ")})${semanticDetail}`;
     await logIngestEvent(deps.db, {
       sourceId,
       docId: null,
@@ -527,7 +614,8 @@ export async function ingestOne(
       },
       "quarantining document: " + reason,
     );
-    return { chunksCreated: 0 };
+    await purgeQuarantined(deps.db, sourceId, source.externalId, log);
+    return { outcome: "quarantined", chunksCreated: 0 };
   }
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched
@@ -643,7 +731,7 @@ export async function ingestOne(
     // absent despite a matching hash.
     if (await documentHasChunks(db, documentId)) {
       log.debug("content unchanged, skipping chunk/embed");
-      return { chunksCreated: 0 };
+      return { outcome: "unchanged", chunksCreated: 0 };
     }
     log.warn("content hash unchanged but document has no chunks; re-embedding");
   }
@@ -652,7 +740,7 @@ export async function ingestOne(
   const chunks = await chunker.chunk(parsed);
   if (chunks.length === 0) {
     log.warn("parsed document produced zero chunks");
-    return { chunksCreated: 0 };
+    return { outcome: "indexed", chunksCreated: 0 };
   }
 
   // 5. Embed all chunks in one batched call.
@@ -696,7 +784,7 @@ export async function ingestOne(
   );
 
   log.info({ chunkCount: chunks.length }, "document ingested");
-  return { chunksCreated: chunks.length };
+  return { outcome: "indexed", chunksCreated: chunks.length };
 }
 
 function sha256(input: string): string {

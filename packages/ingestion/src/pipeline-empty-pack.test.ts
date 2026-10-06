@@ -133,6 +133,10 @@ beforeEach(() => {
   documentHasChunksMock.mockResolvedValue(true);
   documentHasStorageMock.mockResolvedValue(true);
   logIngestEventMock.mockResolvedValue(undefined);
+  deleteDocumentByExternalIdMock.mockResolvedValue({
+    deleted: false,
+    storageKey: null,
+  });
 });
 
 describe("PipelineDeps.pack — an empty-scanner pack is treated as unconfigured", () => {

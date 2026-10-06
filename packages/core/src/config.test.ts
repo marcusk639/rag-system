@@ -52,10 +52,38 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
 
   it("client-data WITH DPA on file loads successfully", () => {
     const cfg = loadConfig(
-      { ...BASE_ENV, COMPLIANCE_MODE: "client-data" },
+      {
+        ...BASE_ENV,
+        COMPLIANCE_MODE: "client-data",
+        // Required now: see the Layer 1.5 test below.
+        CONTENT_SCAN_PROVIDER: "ollama",
+        CONTENT_SCAN_BASE_URL: "http://ollama.railway.internal:11434/v1",
+        CONTENT_SCAN_MODEL: "llama3.2:3b",
+      },
       { checkDpa: () => true },
     );
     expect(cfg.complianceMode).toBe("client-data");
+  });
+
+  it("client-data with Layer 1.5 disabled throws loud", () => {
+    // CONTENT_SCAN_PROVIDER defaults to "none", which turns Layer 1.5 OFF.
+    // That is a defensible default for general material, but not once the
+    // operator has declared real client data is in scope: "off" would then be
+    // a silent bypass of the only layer that catches a client named in prose,
+    // which pattern redaction structurally cannot see. Before this gate, a
+    // client-data deployment could boot with the check simply absent and
+    // nothing logged.
+    expect(() =>
+      loadConfig(
+        { ...BASE_ENV, COMPLIANCE_MODE: "client-data" },
+        { checkDpa: () => true },
+      ),
+    ).toThrow(/requires CONTENT_SCAN_PROVIDER/);
+  });
+
+  it("none mode does not require a content scanner", () => {
+    const cfg = loadConfig({ ...BASE_ENV, COMPLIANCE_MODE: "none" });
+    expect(cfg.contentScan.provider).toBe("none");
   });
 
   it("none mode does not invoke checkDpa at all", () => {
@@ -480,6 +508,50 @@ describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
     ).toBe(0.55);
     expect(() =>
       loadConfig({ ...BASE_ENV, RETRIEVAL_MIN_DENSE_SIMILARITY: "2" }),
+    ).toThrow();
+  });
+});
+
+describe("loadConfig — contentScan (Layer 1.5)", () => {
+  it("defaults to provider 'none'", () => {
+    const cfg = loadConfig({ ...BASE_ENV });
+    expect(cfg.contentScan.provider).toBe("none");
+    expect(cfg.contentScan.baseUrl).toBeUndefined();
+  });
+
+  it("reads an ollama provider configuration from env", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      CONTENT_SCAN_PROVIDER: "ollama",
+      CONTENT_SCAN_BASE_URL: "http://ollama.railway.internal:11434/v1",
+      CONTENT_SCAN_MODEL: "llama3.2:3b",
+      CONTENT_SCAN_TIMEOUT_MS: "45000",
+    });
+    expect(cfg.contentScan).toEqual({
+      provider: "ollama",
+      baseUrl: "http://ollama.railway.internal:11434/v1",
+      model: "llama3.2:3b",
+      timeoutMs: 45000,
+    });
+  });
+
+  // `isLikelySelfHosted` parses this value with `new URL()` and returns false
+  // on a throw, so a non-URL reaches the compliance gate as "not self-hosted"
+  // rather than as the configuration error it is. Rejecting it at the schema
+  // means the operator is told which field is wrong instead of being told
+  // their host is not self-hosted.
+  it.each([
+    ["a bare hostname", "ollama.railway.internal:11434"],
+    ["a path with no scheme", "/v1/chat"],
+    ["an empty-ish value", "not a url"],
+  ])("refuses %s as CONTENT_SCAN_BASE_URL", (_label, baseUrl) => {
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        CONTENT_SCAN_PROVIDER: "ollama",
+        CONTENT_SCAN_BASE_URL: baseUrl,
+        CONTENT_SCAN_MODEL: "llama3.2:3b",
+      }),
     ).toThrow();
   });
 });

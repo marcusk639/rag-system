@@ -37,6 +37,11 @@ describe("sanitizeMetadata", () => {
       createdAt: "2024-01-01T00:00:00.000Z",
       modifiedAt: "2024-02-01T00:00:00.000Z",
       path: "Clients/2024/workpaper.pdf",
+      // `url` is exposed only for class A -- see
+      // `metadata-policy.url-class.test.ts` for the gate itself. Before that
+      // gate existed this fixture carried no class and still expected the url,
+      // which is the behavior being deliberately changed.
+      docClass: "A",
     };
 
     const safe = sanitizeMetadata(meta);

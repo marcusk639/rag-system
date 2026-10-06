@@ -131,6 +131,10 @@ export function makeTestConfig(): Config {
     // Retention of question/answer text: off, matching the production
     // default. The audit-log-content spec builds its own "full" Config.
     auditLogContent: "none",
+    // Layer 1.5 off in the e2e harness: the suite has no self-hosted
+    // scanner to reach. Specs that exercise the layer inject their own
+    // ContentScanner into PipelineDeps directly.
+    contentScan: { provider: "none" as const, timeoutMs: 30_000 },
     // Shipping disabled by default in the e2e harness; specs that need a
     // configured sink build their own Config/deps override.
     auditSink: { provider: "none", cron: "0 * * * *", tz: "UTC" },
