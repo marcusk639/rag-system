@@ -43,16 +43,26 @@ export class HttpParserClient implements Parser {
         headersTimeout: this.timeoutMs,
       });
     } catch (err) {
-      throw new ParserError(
-        `Parser request failed: ${(err as Error).message}`,
-        err,
-      );
+      // The message carries the failure *category* only — undici's own text
+      // names the sidecar's internal host and port. The full error stays on
+      // `cause`, where the logger and Sentry still see it.
+      const code = (err as { code?: string }).code ?? "unknown";
+      throw new ParserError(`Parser request failed (${code})`, err);
     }
 
     if (response.statusCode >= 400) {
       const text = await response.body.text();
+      // The body is not content-free: a 4xx on a malformed document can echo
+      // the document's own text back, and this message is logged through pino
+      // and recorded in the ingestion audit trail's rejection reason. This
+      // repo holds a redaction finding to "a category/description only, never
+      // a raw identifying value lifted verbatim into logs" — a parse failure
+      // is held to the same standard, so the status code identifies it and the
+      // body travels on `cause` instead of being interpolated into a message
+      // that gets copied onward.
       throw new ParserError(
-        `Parser returned ${response.statusCode}: ${text.slice(0, 500)}`,
+        `Parser returned ${response.statusCode}`,
+        text.slice(0, 500),
       );
     }
 
