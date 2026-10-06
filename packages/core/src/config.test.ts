@@ -534,4 +534,24 @@ describe("loadConfig — contentScan (Layer 1.5)", () => {
       timeoutMs: 45000,
     });
   });
+
+  // `isLikelySelfHosted` parses this value with `new URL()` and returns false
+  // on a throw, so a non-URL reaches the compliance gate as "not self-hosted"
+  // rather than as the configuration error it is. Rejecting it at the schema
+  // means the operator is told which field is wrong instead of being told
+  // their host is not self-hosted.
+  it.each([
+    ["a bare hostname", "ollama.railway.internal:11434"],
+    ["a path with no scheme", "/v1/chat"],
+    ["an empty-ish value", "not a url"],
+  ])("refuses %s as CONTENT_SCAN_BASE_URL", (_label, baseUrl) => {
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        CONTENT_SCAN_PROVIDER: "ollama",
+        CONTENT_SCAN_BASE_URL: baseUrl,
+        CONTENT_SCAN_MODEL: "llama3.2:3b",
+      }),
+    ).toThrow();
+  });
 });

@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { ParsedDocument } from "@rag/core";
 import {
-  ContentSafetyError,
+  classifyScanFailure,
   scanForClientContextOrThrow,
   type ContentScanner,
   type ContentScanResult,
@@ -115,28 +115,25 @@ export async function quarantineForScanFailure(opts: {
   log: Logger;
 }): Promise<IngestOutcome> {
   const { db, sourceId, externalId, docClass, err, log } = opts;
+  // Classify to a fixed vocabulary. The previous version unwrapped `cause` and
+  // recorded its MESSAGE, which preserved the diagnosis but also carried the
+  // scanner's reply -- the model's reading of document text -- into
+  // `ingest_log.rejection_reason`. The diagnosis is the part worth keeping.
+  const cause = classifyScanFailure(err);
+  // ⚠ `cause`, never `err`: pino serializes a bound Error's message AND its
+  // cause chain, so logging the object would leak through the worker log
+  // exactly what the audit row no longer records.
   log.error(
-    { err, marker: "ingest.semantic_scan_failed" },
+    { cause, marker: "ingest.semantic_scan_failed" },
     "semantic content scan failed; quarantining document rather than indexing it",
   );
-  // Unwrap `cause`: ContentSafetyError always carries the same fixed message
-  // and stashes the real reason underneath, so recording `err.message` alone
-  // makes "scanner unreachable", "model returned prose" and "egress blocked"
-  // indistinguishable in the durable record. The redaction path unwraps for
-  // the same reason.
-  const detail =
-    err instanceof ContentSafetyError && err.cause instanceof Error
-      ? err.cause.message
-      : err instanceof Error
-        ? err.message
-        : String(err);
   await logIngestEvent(db, {
     sourceId,
     docId: null,
     externalId,
     docClass,
     action: "blocked",
-    rejectionReason: `semantic scan failed: ${detail}`,
+    rejectionReason: `semantic scan failed: ${cause}`,
   });
   await purgeQuarantined(db, sourceId, externalId, log);
   return { outcome: "quarantined", chunksCreated: 0 };

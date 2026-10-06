@@ -292,6 +292,88 @@ export class ContentSafetyError extends Error {
 }
 
 /**
+ * Fixed vocabulary for WHY a Layer 1.5 scan could not produce a verdict.
+ *
+ * The durable record needs the diagnosis — "scanner unreachable" and "model
+ * returned prose" call for different fixes — but the scanner's own error
+ * messages are derived from the model's reading of document text, so passing
+ * one through as the reason discloses that text through the very gate meant to
+ * prevent its disclosure. A closed set keeps the diagnosis and drops the
+ * content.
+ */
+export type ScanFailureCause =
+  /** The scan request never reached a scanner (network, timeout, HTTP error). */
+  | "scanner-unreachable"
+  /** A scanner answered, but not with a usable verdict. */
+  | "malformed-reply"
+  /** A policy gate refused the request before it was sent. */
+  | "egress-blocked"
+  /** The document exceeds what can be scanned in full. */
+  | "too-large"
+  /** Genuinely unclassified — never a guess dressed up as a diagnosis. */
+  | "unknown";
+
+/**
+ * A scan failure that carries its own classification, so callers never have to
+ * recover one by matching substrings of a message. Message-sniffing is how
+ * this layer kept growing defects: a message is the thing being untrusted
+ * here, so it must not also be the thing that decides the category.
+ */
+export class ContentScanFailure extends Error {
+  readonly code = "CONTENT_SCAN_FAILED";
+  constructor(
+    readonly scanFailureCause: ScanFailureCause,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ContentScanFailure";
+  }
+}
+
+/** True when `value` carries a `ScanFailureCause` discriminant. */
+function hasScanFailureCause(
+  value: unknown,
+): value is { scanFailureCause: ScanFailureCause } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { scanFailureCause?: unknown }).scanFailureCause ===
+      "string"
+  );
+}
+
+/**
+ * Reduce an arbitrary thrown value to one `ScanFailureCause`, walking the
+ * `cause` chain (Layer 1.5 failures arrive wrapped in a `ContentSafetyError`).
+ *
+ * Classification is by TYPE and by the explicit discriminant — never by
+ * reading a message. Anything unrecognized is `"unknown"`, which is honest;
+ * inferring a category from message text would reintroduce the coupling this
+ * exists to remove.
+ */
+export function classifyScanFailure(err: unknown): ScanFailureCause {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (hasScanFailureCause(current)) return current.scanFailureCause;
+    if (current instanceof Error) {
+      const name = current.name;
+      if (name === "EgressError" || name === "ComplianceError") {
+        return "egress-blocked";
+      }
+      if (name === "TimeoutError" || name === "AbortError") {
+        return "scanner-unreachable";
+      }
+      current = (current as { cause?: unknown }).cause;
+      continue;
+    }
+    break;
+  }
+  return "unknown";
+}
+
+/**
  * Apply redaction, failing CLOSED.
  *
  * If redaction throws, the caller must quarantine the document rather than

@@ -2,7 +2,9 @@ import type { ContentScanner, ContentScanResult, Config } from "@rag/core";
 import {
   EgressPolicy,
   egressSafeFetch,
+  classifyScanFailure,
   ComplianceError,
+  ContentScanFailure,
   ValidationError,
 } from "@rag/core";
 
@@ -98,7 +100,8 @@ export class OllamaContentScanner implements ContentScanner {
   async scan(text: string): Promise<ContentScanResult> {
     const windowCount = Math.max(1, Math.ceil(text.length / MAX_SCAN_CHARS));
     if (windowCount > MAX_SCAN_WINDOWS) {
-      throw new Error(
+      throw new ContentScanFailure(
+        "too-large",
         `document is ${text.length} characters, which exceeds the ` +
           `${MAX_SCAN_WINDOWS * MAX_SCAN_CHARS}-character scan ceiling; ` +
           `it cannot be scanned in full, and a partial scan would report a ` +
@@ -119,7 +122,7 @@ export class OllamaContentScanner implements ContentScanner {
   private async scanWindow(window: string): Promise<ContentScanResult> {
     this.egressPolicy.assertAllowed(this.endpoint);
     const fetchImpl = egressSafeFetch();
-    const response = await fetchImpl(this.endpoint, {
+    const request = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(this.timeoutMs),
@@ -131,22 +134,85 @@ export class OllamaContentScanner implements ContentScanner {
         ],
         temperature: 0,
       }),
-    });
+    };
+    // A connection refusal arrives as a bare `TypeError: fetch failed`, and a
+    // timeout as a `TimeoutError` -- neither carries a classification, so
+    // without this the single most likely real failure (the scanner is down)
+    // would be recorded as "unknown" and the taxonomy would preserve no
+    // diagnosis at all. An egress/compliance refusal keeps its own category.
+    let response: Awaited<ReturnType<typeof fetchImpl>>;
+    try {
+      response = await fetchImpl(this.endpoint, request);
+    } catch (err) {
+      const cause = classifyScanFailure(err);
+      throw new ContentScanFailure(
+        cause === "unknown" ? "scanner-unreachable" : cause,
+        "content scanner request did not complete",
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(
+      throw new ContentScanFailure(
+        "scanner-unreachable",
         `content scanner request failed: HTTP ${response.status}`,
       );
     }
 
-    const body = (await response.json()) as OllamaChatResponse;
+    // ⚠ Not `response.json()`. V8's SyntaxError quotes the offending input
+    // (truncated to its first ten characters) and this reply is the model's
+    // reading of document text, so an unguarded parse carries that text into
+    // worker logs and `ingest_log.rejection_reason` — the disclosure this
+    // layer exists to prevent, performed by the layer itself. Only the shape
+    // and size of the reply are reportable.
+    const raw = await response.text();
+    let body: OllamaChatResponse;
+    try {
+      body = JSON.parse(raw) as OllamaChatResponse;
+    } catch {
+      throw new ContentScanFailure(
+        "malformed-reply",
+        `content scanner reply was not JSON (${Buffer.byteLength(raw)} bytes)`,
+      );
+    }
     const content = body.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error("content scanner returned no message content to parse");
+      throw new ContentScanFailure(
+        "malformed-reply",
+        "content scanner returned no message content to parse",
+      );
     }
 
     return parseVerdict(content);
   }
+}
+
+/**
+ * The only finding categories that may be recorded.
+ *
+ * `SYSTEM_PROMPT` asks for exactly these three and forbids copying any value
+ * out of the document into a finding — but a prompt is not an enforcement
+ * boundary. Findings are persisted to the audit table and written to worker
+ * logs, and they are unvalidated model output: a small model that ignores the
+ * instruction and answers `["Acme Trust FY24 return"]` would disclose, via the
+ * audit trail, exactly what this layer exists to detect.
+ *
+ * An off-list string is REPLACED rather than dropped, so the detection still
+ * counts as one — dropping it would turn a flagged verdict with one unusable
+ * finding into a flagged verdict with no findings, which `parseVerdict` then
+ * (correctly) treats as a scan failure.
+ */
+const SCAN_CATEGORIES: ReadonlySet<string> = new Set([
+  "client name",
+  "client organization",
+  "identifying fact pattern",
+]);
+
+/** Stand-in recorded for any finding not on `SCAN_CATEGORIES`. */
+const UNRECOGNIZED_CATEGORY = "unrecognized-category";
+
+function toScanCategory(finding: string): string {
+  const normalized = finding.trim().toLowerCase();
+  return SCAN_CATEGORIES.has(normalized) ? normalized : UNRECOGNIZED_CATEGORY;
 }
 
 /** Extracts the `{"flagged": ..., "findings": [...]}` object from the
@@ -162,7 +228,8 @@ function parseVerdict(content: string): ContentScanResult {
   // reportable. The reply's length is enough to tell "empty" from "prose".
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) {
-    throw new Error(
+    throw new ContentScanFailure(
+      "malformed-reply",
       `content scanner reply had no JSON object to parse (${content.length} characters)`,
     );
   }
@@ -170,7 +237,8 @@ function parseVerdict(content: string): ContentScanResult {
   try {
     parsed = JSON.parse(match[0]);
   } catch {
-    throw new Error(
+    throw new ContentScanFailure(
+      "malformed-reply",
       `content scanner reply's JSON object did not parse (${match[0].length} characters)`,
     );
   }
@@ -179,13 +247,36 @@ function parseVerdict(content: string): ContentScanResult {
     parsed === null ||
     typeof (parsed as { flagged?: unknown }).flagged !== "boolean"
   ) {
-    throw new Error(
+    throw new ContentScanFailure(
+      "malformed-reply",
       "content scanner reply's JSON object is missing a boolean 'flagged' field",
     );
   }
   const findingsRaw = (parsed as { findings?: unknown }).findings;
+
+  // Reconcile against the RAW value, not a filtered copy of it. A present-
+  // but-malformed `findings` — a bare string (`"findings": "client name"`) or
+  // an array of objects (`[{"category": "..."}]`) — filters to [] under a
+  // `typeof f === "string"` guard, and [] with `flagged: false` reads as a
+  // clean document: a detection the model DID make, recorded as "nothing
+  // found". ABSENT is different and stays legal — the model answered the
+  // question and found nothing.
+  if (findingsRaw !== undefined && findingsRaw !== null) {
+    if (
+      !Array.isArray(findingsRaw) ||
+      findingsRaw.some((f) => typeof f !== "string")
+    ) {
+      // Shape only: the malformed value is model output derived from document
+      // text, so naming it here would leak it into the quarantine reason.
+      throw new ContentScanFailure(
+        "malformed-reply",
+        "content scanner reply's 'findings' was present but is not an array of strings",
+      );
+    }
+  }
+
   const findings = Array.isArray(findingsRaw)
-    ? findingsRaw.filter((f): f is string => typeof f === "string")
+    ? [...new Set(findingsRaw.map(toScanCategory))]
     : [];
 
   // Reconcile the two fields rather than returning them as the model sent
@@ -201,7 +292,8 @@ function parseVerdict(content: string): ContentScanResult {
   // malformed reply it is: the caller quarantines either way, but as a scan
   // FAILURE, which is what actually happened.
   if (flagged && findings.length === 0) {
-    throw new Error(
+    throw new ContentScanFailure(
+      "malformed-reply",
       "content scanner flagged the document but returned no findings to record",
     );
   }
@@ -234,17 +326,21 @@ export type ContentScanConfig = Config["contentScan"];
  * third party — "none" isn't the only safe value, so the gate can't just
  * block every non-none provider the way the sibling factories do.
  */
-function isLikelySelfHosted(baseUrl: string): boolean {
+export function isLikelySelfHosted(baseUrl: string): boolean {
   let hostname: string;
   try {
     hostname = new URL(baseUrl).hostname;
   } catch {
     return false;
   }
+  // An empty hostname means the value had no authority component at all:
+  // `new URL("ollama.railway.internal:11434")` reads the whole thing as a
+  // scheme. Left unguarded it reached the single-label branch below -- no dot,
+  // no colon -- and was accepted as a Compose service name.
+  if (hostname === "") return false;
   if (hostname === "localhost") return true;
   // `new URL("http://[::1]:1/").hostname` keeps the brackets.
   if (hostname === "::1" || hostname === "[::1]") return true;
-  if (/^127\./.test(hostname)) return true;
   if (/\.(internal)$/i.test(hostname)) return true;
   // Single-label host (Compose/Kubernetes service name): no dot, and no colon
   // that would mark it an unbracketed IPv6 literal.
@@ -253,6 +349,12 @@ function isLikelySelfHosted(baseUrl: string): boolean {
   if (octets) {
     const a = Number(octets[1]);
     const b = Number(octets[2]);
+    // Loopback is tested HERE, as a dotted quad, and not as a `/^127\./`
+    // prefix on the hostname: that prefix matches any registrable domain
+    // beginning with those characters, so `127.evil.com` — a public host
+    // under someone else's control — read as self-hosted and cleared the
+    // client-data gate.
+    if (a === 127) return true;
     if (a === 10) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
