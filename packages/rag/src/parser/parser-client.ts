@@ -56,18 +56,34 @@ export class HttpParserClient implements Parser {
       // library exception into its `detail` (services/parser-py/app/parsing.py
       // :203 and :207, tabular.py:39 and :73) and those exceptions can quote
       // the offending cell or line — so a 4xx *or* 5xx body may carry document
-      // text. Keeping it out of `message` keeps it out of anything built by
-      // interpolating that message later.
+      // text.
       //
-      // The analogy is to `RedactionFinding` (packages/core/src/content-safety
-      // .ts:31-33), which deliberately carries `kind` + `count` and never the
-      // matched value. That rule governs the finding object rather than logs;
-      // applying it to a parse failure's message is an extension of the
-      // principle, not an existing repo rule.
+      // Why that matters for a `RagError` specifically: both transports treat a
+      // RagError's `message` as the text they may show a caller —
+      // `apps/api/src/error-handler.ts` sends `payload(error.code,
+      // error.message)` and `apps/mcp/src/tool-error.ts` returns
+      // `toolError(err.code, err.message)`, while an unrecognized error gets a
+      // generic string. A RagError whose message carries document text breaks
+      // that contract. No route reaches a ParserError today (the parser client
+      // is constructed only in apps/worker, and PARSER_ERROR's 502 mapping is
+      // defensive), so this is keeping the contract true rather than closing a
+      // live hole.
       //
-      // `cause` must be an Error, not the raw string: pino's serializer only
-      // walks a cause that is error-like, so a string cause is dropped from
-      // the log entirely rather than relocated there.
+      // What this does NOT do is keep the body out of the logs, and it is not
+      // meant to: pino's serializer folds the cause chain back into the
+      // serialized `message` via `messageWithCauses`, so the log line still
+      // carries the body. That is where the detail belongs. The change moves it
+      // off the `.message` property, which is what a transport would read.
+      //
+      // `cause` must therefore be an Error, not the raw string: the serializer
+      // only walks a cause it considers error-like, so a string cause is
+      // dropped from the log entirely instead of relocated there.
+      //
+      // The nearest in-repo principle is `RedactionFinding`
+      // (packages/core/src/content-safety.ts:30-35), which carries `kind` +
+      // `count` and never the matched value. That governs the finding object,
+      // so applying it to a message is an extension of the idea, not a rule
+      // this repo already states.
       throw new ParserError(
         `Parser returned ${response.statusCode}`,
         new Error(text.slice(0, 500)),

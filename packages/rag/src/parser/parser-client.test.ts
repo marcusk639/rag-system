@@ -69,20 +69,25 @@ describe("HttpParserClient shared-secret auth", () => {
  * tabular.py:39,73), and those can quote the offending cell or line, on a 5xx
  * as well as a 4xx. Up to 500 chars of it went into `ParserError.message`.
  *
- * Keeping it out of `message` keeps it out of anything later built by
- * interpolating that message. The analogy is `RedactionFinding`
- * (packages/core/src/content-safety.ts:31-33), which carries `kind` + `count`
- * and never the matched value — that rule governs the finding object, so
- * applying it to a message is an extension of the principle, not an existing
- * repo rule.
+ * `message` is the field both transports treat as showable: error-handler.ts
+ * sends `payload(code, message)` and tool-error.ts returns
+ * `toolError(code, message)`, while an unrecognized error gets a generic
+ * string. A RagError carrying document text in its message breaks that
+ * contract, so this keeps the contract true. The nearest in-repo principle is
+ * `RedactionFinding` (packages/core/src/content-safety.ts:30-35) carrying
+ * `kind` + `count` and never the matched value — that governs the finding
+ * object, so applying it to a message is an extension, not an existing rule.
  *
- * Two things this is NOT, both of which earlier versions of this comment got
- * wrong:
- *   - not client-facing: the parser client is constructed only in apps/worker,
- *     so a ParserError cannot reach an HTTP route or an MCP tool;
- *   - not in the durable audit trail: failed-documents.ts:38 records the error
- *     name and code (`${name} (${code})`), never `err.message`.
- * The real and only exposure is the pino log line.
+ * Scope, narrowed three times under review and worth stating exactly:
+ *   - NOT client-facing today: the parser client is constructed only in
+ *     apps/worker, so no route or MCP tool can reach a ParserError;
+ *   - NOT in the durable audit trail: failed-documents.ts:38 records
+ *     `${name} (${code})` and never `err.message`;
+ *   - NOT removed from the logs either: pino folds the cause chain back into
+ *     the serialized message (`messageWithCauses`), so the body still appears
+ *     in the log line. That is deliberate — the log is where it belongs.
+ * What remains is that the `.message` property itself is clean, which is what
+ * a transport would read.
  */
 describe("HttpParserClient error bodies stay out of the message", () => {
   const SENSITIVE =
