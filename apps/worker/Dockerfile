@@ -18,11 +18,29 @@ COPY tests ./tests
 COPY examples ./examples
 COPY docs/compliance ./docs/compliance
 COPY packs ./packs
+# scripts/warm-model.ts (see the `warmer` stage below) needs the warm-up
+# script itself in the build context — it is not part of any workspace
+# package, so none of the COPYs above picks it up.
+COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile all workspace packages (tsconfig per package)
 FROM installer AS builder
 RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
+
+# ── warmer: pre-populate the local ONNX embedding model cache at BUILD time.
+#    All of the reasoning, and every failure branch, lives in one place:
+#    scripts/warm-model-verified.sh. Keep it there — this block was previously
+#    ~20 lines duplicated into three Dockerfiles, which is the same drift risk
+#    the shared script was written to remove, one layer up in the comments.
+FROM builder AS warmer
+ENV HF_CACHE_DIR=/app/.hf-cache
+# Gate on verified on-disk state rather than the exit code: onnxruntime-node
+# v1.21.0 SIGABRTs (exit 134) during teardown AFTER a successful warm. The
+# script requires warm-model.ts's own success line before tolerating 134, so
+# that tolerance cannot mask a real failure, and it fails the build on an
+# unpopulated cache. Shared by worker/api/mcp so the three cannot drift.
+RUN sh scripts/warm-model-verified.sh
 
 # ── pruner: extract a self-contained production bundle for this app only.
 #    pnpm deploy resolves all prod deps (including workspace packages with their
@@ -43,6 +61,12 @@ COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compli
 # cwd at startup, and buildDeps refuses to boot without a loadable pack. Same
 # reason as above: pnpm deploy prunes non-package files.
 COPY --from=installer --chown=node:node /workspace/packs ./packs
+# Pre-warmed local ONNX embedding model cache (see the `warmer` stage above and
+# scripts/warm-model-verified.sh). HF_CACHE_DIR must name the SAME absolute
+# path the warm wrote to: a `~/.cache/huggingface` default would silently miss
+# this COPY, since $HOME here need not match the warm stage's.
+ENV HF_CACHE_DIR=/app/.hf-cache
+COPY --from=warmer --chown=node:node /app/.hf-cache ./.hf-cache
 
 USER node
 ENV NODE_ENV=production

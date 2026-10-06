@@ -6,7 +6,12 @@
  * download. Subsequent starts read from HF_CACHE_DIR (disk cache; no network).
  *
  * Usage:
- *   npx tsx scripts/warm-model.ts
+ *   node_modules/.bin/tsx scripts/warm-model.ts   # or: pnpm tsx scripts/warm-model.ts
+ *
+ * NOT `npx tsx`: npx fetches tsx over the network, and a production image
+ * built by `pnpm deploy --prod` has tsx pruned. In a Dockerfile, call
+ * scripts/warm-model-verified.sh instead, which wraps this with the
+ * cache-populated check the build gates on.
  *
  * Environment variables:
  *   EMBEDDING_MODEL   — HuggingFace model id (default: Xenova/bge-base-en-v1.5)
