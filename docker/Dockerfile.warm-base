@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+# Shared pre-warmed local ONNX embedding-model cache.
+#
+# Build from the REPO ROOT context:
+#   docker build -f docker/Dockerfile.warm-base -t rag-warm-base .
+#
+# WHY THIS IMAGE EXISTS
+#
+# apps/{worker,api,mcp} each need the local embedder's ~430MB of weights on
+# disk before first use (see scripts/warm-model-verified.sh for why it must be
+# baked at build time rather than warmed at startup). Warming inside each app's
+# own Dockerfile meant fetching the same weights three times per release, with
+# three independent chances for a transient huggingface.co failure to break a
+# deploy. On Railway each service builds in isolation and cannot see another
+# service's locally-built image, so the only way to fetch once is to publish
+# the cache as its own image and have the apps COPY from it.
+#
+# The published image is FROM scratch: it contains the cache and nothing else —
+# no OS, no node, no shell. It is never run, only used as a COPY source.
+#
+# CONSUMING IT (digest-pinned, deliberately):
+#   COPY --from=ghcr.io/marcusk639/rag-warm-base@sha256:<digest> \
+#        /hf-cache ./.hf-cache
+# A digest rather than a mutable tag, so a silent upstream rebuild can never
+# change what an app image ships. The cost is that changing the model requires
+# a commit that updates the digest in the app Dockerfiles — which is the point:
+# the weights an image carries become reviewable.
+#
+# REBUILD TRIGGER: .github/workflows/warm-base.yml, on changes to this file,
+# scripts/warm-model.ts, scripts/warm-model-verified.sh, or
+# packages/rag/src/embeddings/** — i.e. anything that can change which weights
+# are produced or whether the warm is trustworthy.
+
+FROM node:22-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+# Same install/build shape as the app images: warm-model.ts imports @rag/rag,
+# which resolves to packages/rag/dist/, so the workspace must be built first.
+FROM base AS installer
+WORKDIR /workspace
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig*.json ./
+COPY packages ./packages
+COPY apps ./apps
+COPY tests ./tests
+COPY examples ./examples
+COPY scripts ./scripts
+RUN pnpm install --frozen-lockfile
+
+FROM installer AS builder
+RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
+
+FROM builder AS warmer
+ENV HF_CACHE_DIR=/app/.hf-cache
+# The same gate the app images used, unchanged: it verifies the cache was
+# genuinely populated and fails the build otherwise. Its failure branches are
+# unit-tested in scripts/warm-model-verified.test.ts.
+RUN sh scripts/warm-model-verified.sh
+
+# The published artifact: the cache bytes alone. Nothing here is executable, so
+# this image has no package surface to patch and no runtime to keep current.
+FROM scratch
+COPY --from=warmer /app/.hf-cache /hf-cache

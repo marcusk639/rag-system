@@ -1,0 +1,83 @@
+name: warm-base image
+
+# Publishes the shared pre-warmed embedding-model cache to GHCR.
+#
+# apps/{worker,api,mcp} COPY the cache from this image BY DIGEST, so this
+# workflow's job is to produce a digest and print it prominently. Updating the
+# apps is a deliberate follow-up commit — nothing here changes what a running
+# service ships until someone pins the new digest.
+#
+# BOOTSTRAP / ORDERING, which is the sharp edge of this design: a digest can
+# only be pinned after it exists. On a fresh clone, a fork, or the very first
+# run of this workflow there is no published base, so an app Dockerfile that
+# COPYs from one would fail to build. Sequence is therefore:
+#   1. merge this workflow and docker/Dockerfile.warm-base
+#   2. let it run on main (or dispatch it) and copy the digest it prints
+#   3. in a SEPARATE commit, point the app Dockerfiles at that digest
+# Until step 3, the app images keep warming their own cache and nothing breaks.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/Dockerfile.warm-base
+      - scripts/warm-model.ts
+      - scripts/warm-model-verified.sh
+      - packages/rag/src/embeddings/**
+      - .github/workflows/warm-base.yml
+  # Manual runs matter here: the weights can need refetching for reasons that
+  # are not visible in the diff (an upstream model revision, a corrupt layer).
+  workflow_dispatch:
+
+concurrency:
+  group: warm-base
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The image is FROM scratch and holds only the cache, so it is tagged by
+      # commit SHA for traceability. Consumers pin the digest, not these tags;
+      # the tags exist so a human can tell which commit produced a digest.
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.warm-base
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rag-warm-base:latest
+            ghcr.io/${{ github.repository_owner }}/rag-warm-base:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Printed to the run summary so pinning it is a copy/paste rather than a
+      # registry archaeology exercise.
+      - name: Report the digest to pin
+        run: |
+          {
+            echo "## Pin this digest in the app Dockerfiles"
+            echo
+            echo '```dockerfile'
+            echo "COPY --from=ghcr.io/${{ github.repository_owner }}/rag-warm-base@${{ steps.push.outputs.digest }} \\"
+            echo "     /hf-cache ./.hf-cache"
+            echo '```'
+            echo
+            echo "Built from commit \`${{ github.sha }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
