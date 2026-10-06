@@ -1,6 +1,10 @@
 import { RagError } from "@rag/core";
 import { captureException } from "@rag/runtime";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ErrorCode,
+  McpError,
+  type CallToolResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Logger } from "pino";
 import { ZodError } from "zod";
 
@@ -91,6 +95,47 @@ export function guardToolHandler<Args extends unknown[]>(
       logger.error({ err, tool }, "mcp tool unhandled error");
       captureException(err, { tool });
       return toolError("INTERNAL_ERROR", "Internal server error");
+    }
+  };
+}
+
+/**
+ * The resource-read counterpart of `guardToolHandler`.
+ *
+ * Resource reads need their own guard because the SDK treats them differently
+ * from tool calls: the tool path catches everything and converts it to an
+ * `isError` result (`server/mcp.js:141`), but the `ReadResourceRequestSchema`
+ * handler calls `readCallback` with no catch at all (`server/mcp.js:376-393`),
+ * so the throw lands in the protocol layer, which serializes
+ * `message: error.message ?? 'Internal error'` verbatim
+ * (`shared/protocol.js:398-399`). A resource handler therefore leaks by
+ * exactly the same mechanism, and wrapping the tools alone left it open.
+ *
+ * There is no result envelope to return here, so sanitizing means throwing a
+ * sanitized error: a client-fault `RagError` keeps its message as an
+ * `InvalidParams` McpError, and anything else becomes a generic
+ * `InternalError` with the real cause logged and reported.
+ */
+export function guardResourceHandler<Args extends unknown[], R>(
+  resource: string,
+  logger: Logger,
+  handler: (...args: Args) => Promise<R>,
+): (...args: Args) => Promise<R> {
+  return async (...args: Args): Promise<R> => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      if (err instanceof RagError && CLIENT_FAULT_CODES.has(err.code)) {
+        logger.warn(
+          { err, resource, code: err.code },
+          "mcp resource client error",
+        );
+        throw new McpError(ErrorCode.InvalidParams, err.message);
+      }
+
+      logger.error({ err, resource }, "mcp resource unhandled error");
+      captureException(err, { resource });
+      throw new McpError(ErrorCode.InternalError, "Internal server error");
     }
   };
 }
