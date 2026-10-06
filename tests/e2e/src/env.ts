@@ -128,6 +128,9 @@ export function makeTestConfig(): Config {
     // Digest itself is never triggered by the e2e harness (no worker cron
     // ticks during tests) — values only need to satisfy the Config shape.
     docsGapDigest: { cron: "0 6 * * 1", tz: "UTC", minScore: 0.3 },
+    // Retention of question/answer text: off, matching the production
+    // default. The audit-log-content spec builds its own "full" Config.
+    auditLogContent: "none",
     // Layer 1.5 off in the e2e harness: the suite has no self-hosted
     // scanner to reach. Specs that exercise the layer inject their own
     // ContentScanner into PipelineDeps directly.

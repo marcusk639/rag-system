@@ -390,6 +390,21 @@ export const auditLog = pgTable(
     topScore: real("top_score"),
     /** The answer this row is for; links feedback to answer context. Nullable — pre-0018 rows have none. */
     answerId: text("answer_id"),
+    /**
+     * Raw question and answer text, retained ONLY when AUDIT_LOG_CONTENT=full.
+     * Null otherwise, which is the default — `questionHash` above remains the
+     * record that a question was asked, without its content.
+     *
+     * These are the only two columns in this table that can hold client
+     * content, which makes them the only ones with an egress rule:
+     * `getAuditLogRowsSince` projects columns explicitly and omits both, so
+     * enabling retention never also enables shipping them to
+     * AUDIT_SINK_WEBHOOK_URL. Retaining content internally and disclosing it
+     * to a third-party log sink are separate decisions, and only the first is
+     * what AUDIT_LOG_CONTENT governs.
+     */
+    questionText: text("question_text"),
+    answerText: text("answer_text"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

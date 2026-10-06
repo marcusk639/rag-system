@@ -216,6 +216,13 @@ export const Config = z
      * section being required would break every existing construction site
      * for no benefit.
      */
+    /**
+     * Retain question/answer TEXT in audit_log, or only question_hash.
+     * Firm POLICY decision (PILOT-MANUAL-RUNBOOK.md item 5). Governs
+     * RETENTION only -- never egress; see SHIPPABLE_AUDIT_COLUMNS.
+     */
+    auditLogContent: z.enum(["none", "full"]).default("none"),
+
     contentScan: z
       .object({
         provider: z.enum(["none", "ollama"]).default("none"),

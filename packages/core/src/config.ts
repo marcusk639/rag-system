@@ -327,6 +327,12 @@ export function loadConfig(
         ? Number(env.RERANK_POOL_MULTIPLIER)
         : undefined,
     },
+    // Retention of question/answer text. Policy decision, not tuning --
+    // see the schema field in config-schema.ts and env.example. Without this
+    // mapping the schema's `.default("none")` would make AUDIT_LOG_CONTENT=full
+    // silently ineffective.
+    auditLogContent: (env.AUDIT_LOG_CONTENT ?? "none") as "none" | "full",
+
     contentScan: {
       provider: (env.CONTENT_SCAN_PROVIDER ?? "none") as "none" | "ollama",
       baseUrl: env.CONTENT_SCAN_BASE_URL || undefined,
