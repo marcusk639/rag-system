@@ -52,17 +52,25 @@ export class HttpParserClient implements Parser {
 
     if (response.statusCode >= 400) {
       const text = await response.body.text();
-      // The body is not content-free: a 4xx on a malformed document can echo
-      // the document's own text back, and this message is logged through pino
-      // and recorded in the ingestion audit trail's rejection reason. This
-      // repo holds a redaction finding to "a category/description only, never
-      // a raw identifying value lifted verbatim into logs" — a parse failure
-      // is held to the same standard, so the status code identifies it and the
-      // body travels on `cause` instead of being interpolated into a message
-      // that gets copied onward.
+      // The body is not content-free. The sidecar interpolates the underlying
+      // library exception into its `detail` (services/parser-py/app/parsing.py
+      // :203 and :207, tabular.py:39 and :73) and those exceptions can quote
+      // the offending cell or line — so a 4xx *or* 5xx body may carry document
+      // text. Keeping it out of `message` keeps it out of anything built by
+      // interpolating that message later.
+      //
+      // The analogy is to `RedactionFinding` (packages/core/src/content-safety
+      // .ts:31-33), which deliberately carries `kind` + `count` and never the
+      // matched value. That rule governs the finding object rather than logs;
+      // applying it to a parse failure's message is an extension of the
+      // principle, not an existing repo rule.
+      //
+      // `cause` must be an Error, not the raw string: pino's serializer only
+      // walks a cause that is error-like, so a string cause is dropped from
+      // the log entirely rather than relocated there.
       throw new ParserError(
         `Parser returned ${response.statusCode}`,
-        text.slice(0, 500),
+        new Error(text.slice(0, 500)),
       );
     }
 
