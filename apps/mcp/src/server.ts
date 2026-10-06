@@ -2,7 +2,12 @@ import {
   McpServer,
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type AuthorizationScope, isSourceAllowed } from "@rag/core";
+import {
+  type AuthorizationScope,
+  isSourceAllowed,
+  NotFoundError,
+  ValidationError,
+} from "@rag/core";
 import { getDocument } from "@rag/db";
 import type { Logger } from "pino";
 import type { Deps } from "./deps.js";
@@ -12,6 +17,56 @@ import { registerListSources } from "./tools/list-sources.js";
 import { registerTriggerSync } from "./tools/trigger-sync.js";
 import { registerPurgeSource } from "./tools/purge-source.js";
 import { registerAsk } from "./tools/ask.js";
+import { guardResourceHandler } from "./tool-error.js";
+
+/**
+ * Handler for the `documents://{id}` resource, guarded so an unexpected
+ * failure (a dead pool, a pg error carrying the connection string) cannot
+ * reach the client.
+ *
+ * Exported for direct testing: unlike a tool, a resource callback has no
+ * result envelope, so the SDK forwards whatever it throws straight into the
+ * JSON-RPC error message (see `guardResourceHandler`).
+ *
+ * The two expected refusals are typed rather than bare `Error`s so the guard
+ * recognizes them as client faults and keeps their messages — a bare Error
+ * would be correctly genericized and the agent would lose the "not found"
+ * signal entirely.
+ */
+export function buildDocumentResourceHandler(
+  deps: Deps,
+  scope: AuthorizationScope,
+  logger: Logger,
+) {
+  return guardResourceHandler(
+    "documents",
+    logger,
+    async (uri: URL, { id }: { id?: string | string[] }) => {
+      const docId = Array.isArray(id) ? id[0] : id;
+      if (!docId) {
+        throw new ValidationError("documents:// resource requires an id");
+      }
+      const doc = await getDocument(deps.db, docId);
+      // Confidentiality boundary (P1b): a scoped session must not read — or even
+      // confirm the existence of — a document outside its enforced source set.
+      // Mirror the missing-id path EXACTLY (same thrown "not found") so the
+      // forbidden case is indistinguishable and the markdown body is not
+      // returned.
+      if (!doc || !isSourceAllowed(scope, doc.sourceId)) {
+        throw new NotFoundError(`document ${docId} not found`);
+      }
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "text/markdown",
+            text: doc.markdown,
+          },
+        ],
+      };
+    },
+  );
+}
 
 /**
  * Build a fully configured McpServer instance. The same builder is used by
@@ -57,30 +112,7 @@ export function buildServer(opts: {
         "A single indexed document, addressed by its UUID. Returns the parsed markdown body. Pair with search_documents results to fetch full context for top hits.",
       mimeType: "text/markdown",
     },
-    async (uri, { id }) => {
-      const docId = Array.isArray(id) ? id[0] : id;
-      if (!docId) {
-        throw new Error("documents:// resource requires an id");
-      }
-      const doc = await getDocument(deps.db, docId);
-      // Confidentiality boundary (P1b): a scoped session must not read — or even
-      // confirm the existence of — a document outside its enforced source set.
-      // Mirror the missing-id path EXACTLY (same thrown "not found") so the
-      // forbidden case is indistinguishable and the markdown body is not
-      // returned.
-      if (!doc || !isSourceAllowed(scope, doc.sourceId)) {
-        throw new Error(`document ${docId} not found`);
-      }
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            mimeType: "text/markdown",
-            text: doc.markdown,
-          },
-        ],
-      };
-    },
+    buildDocumentResourceHandler(deps, scope, logger),
   );
 
   logger.info(
