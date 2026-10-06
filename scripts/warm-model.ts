@@ -6,11 +6,12 @@
  * download. Subsequent starts read from HF_CACHE_DIR (disk cache; no network).
  *
  * Usage:
- *   HF_CACHE_DIR=<path> EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 \
- *     npx tsx scripts/warm-model.ts
+ *   node_modules/.bin/tsx scripts/warm-model.ts   # or: pnpm tsx scripts/warm-model.ts
  *
- * Set both. Bare `npx tsx scripts/warm-model.ts` warms the wrong model into a
- * directory the runtime does not read -- see the two notes below.
+ * NOT `npx tsx`: npx fetches tsx over the network, and a production image
+ * built by `pnpm deploy --prod` has tsx pruned. In a Dockerfile, call
+ * scripts/warm-model-verified.sh instead, which wraps this with the
+ * cache-populated check the build gates on.
  *
  * Environment variables:
  *   EMBEDDING_MODEL   — HuggingFace model id (default here: Xenova/bge-base-en-v1.5).

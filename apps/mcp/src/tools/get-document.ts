@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type AuthorizationScope, NotFoundError } from "@rag/core";
 import { getDocumentById } from "@rag/services";
 import type { Deps } from "../deps.js";
+import { guardToolHandler } from "../tool-error.js";
 
 const inputSchema = {
   documentId: z
@@ -26,7 +27,7 @@ export function registerGetDocument(
         "Fetch the full normalized markdown and metadata for a single document by id. Use this after `search_documents` when a top-ranked chunk looks promising and you need surrounding context (the chunk is typically just ~800 tokens). The structured payload includes id, title, sourceId, mimeType, sizeBytes, sourceModifiedAt, metadata, and the full markdown body. Returns isError when the id does not exist.",
       inputSchema,
     },
-    async ({ documentId }) => {
+    guardToolHandler("get_document", deps.logger, async ({ documentId }) => {
       // Confidentiality boundary (P1b): `getDocumentById` enforces the session
       // scope and throws NotFoundError for a forbidden source EXACTLY as it does
       // for a missing id, so the two cases are indistinguishable and the summary
@@ -67,6 +68,6 @@ export function registerGetDocument(
           },
         },
       };
-    },
+    }),
   );
 }

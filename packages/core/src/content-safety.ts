@@ -11,8 +11,13 @@
  * Postgres but embeds the raw text has protected the database and disclosed the
  * document — which is exactly how the original incident happened.
  *
- * Everything here is deterministic and offline. A redactor that needed a network
- * call would itself become an egress path.
+ * Layers 1 and 3 below (pattern redaction, classification) are deterministic
+ * and offline — a redactor that needed a network call would itself become an
+ * egress path. Layer 1.5 (`scanForClientContextOrThrow`) is the deliberate
+ * exception: it calls a `ContentScanner`, which MUST be self-hosted
+ * on-process or on the firm's own network (see `docs/LOCAL-GENERATION.md`),
+ * never a third-party API — calling an external LLM "is this sensitive?"
+ * would itself be the disclosure this file exists to prevent.
  *
  * ── Where the rules live ───────────────────────────────────────────────────
  *
@@ -26,6 +31,7 @@
 import { scanText, type ScanMatch } from "./pack/scan.js";
 import type { LoadedPack } from "./pack/load.js";
 import type { ParsedTable } from "./types.js";
+import type { ContentScanner, ContentScanResult } from "./interfaces.js";
 
 /** A single redaction, recorded so a run can be audited without the value. */
 export interface RedactionFinding {
@@ -286,6 +292,88 @@ export class ContentSafetyError extends Error {
 }
 
 /**
+ * Fixed vocabulary for WHY a Layer 1.5 scan could not produce a verdict.
+ *
+ * The durable record needs the diagnosis — "scanner unreachable" and "model
+ * returned prose" call for different fixes — but the scanner's own error
+ * messages are derived from the model's reading of document text, so passing
+ * one through as the reason discloses that text through the very gate meant to
+ * prevent its disclosure. A closed set keeps the diagnosis and drops the
+ * content.
+ */
+export type ScanFailureCause =
+  /** The scan request never reached a scanner (network, timeout, HTTP error). */
+  | "scanner-unreachable"
+  /** A scanner answered, but not with a usable verdict. */
+  | "malformed-reply"
+  /** A policy gate refused the request before it was sent. */
+  | "egress-blocked"
+  /** The document exceeds what can be scanned in full. */
+  | "too-large"
+  /** Genuinely unclassified — never a guess dressed up as a diagnosis. */
+  | "unknown";
+
+/**
+ * A scan failure that carries its own classification, so callers never have to
+ * recover one by matching substrings of a message. Message-sniffing is how
+ * this layer kept growing defects: a message is the thing being untrusted
+ * here, so it must not also be the thing that decides the category.
+ */
+export class ContentScanFailure extends Error {
+  readonly code = "CONTENT_SCAN_FAILED";
+  constructor(
+    readonly scanFailureCause: ScanFailureCause,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ContentScanFailure";
+  }
+}
+
+/** True when `value` carries a `ScanFailureCause` discriminant. */
+function hasScanFailureCause(
+  value: unknown,
+): value is { scanFailureCause: ScanFailureCause } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { scanFailureCause?: unknown }).scanFailureCause ===
+      "string"
+  );
+}
+
+/**
+ * Reduce an arbitrary thrown value to one `ScanFailureCause`, walking the
+ * `cause` chain (Layer 1.5 failures arrive wrapped in a `ContentSafetyError`).
+ *
+ * Classification is by TYPE and by the explicit discriminant — never by
+ * reading a message. Anything unrecognized is `"unknown"`, which is honest;
+ * inferring a category from message text would reintroduce the coupling this
+ * exists to remove.
+ */
+export function classifyScanFailure(err: unknown): ScanFailureCause {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (hasScanFailureCause(current)) return current.scanFailureCause;
+    if (current instanceof Error) {
+      const name = current.name;
+      if (name === "EgressError" || name === "ComplianceError") {
+        return "egress-blocked";
+      }
+      if (name === "TimeoutError" || name === "AbortError") {
+        return "scanner-unreachable";
+      }
+      current = (current as { cause?: unknown }).cause;
+      continue;
+    }
+    break;
+  }
+  return "unknown";
+}
+
+/**
  * Apply redaction, failing CLOSED.
  *
  * If redaction throws, the caller must quarantine the document rather than
@@ -321,6 +409,48 @@ export function redactOrThrow(
   } catch (err) {
     throw new ContentSafetyError(
       "redaction failed; document must be quarantined, not indexed",
+      err,
+    );
+  }
+}
+
+/**
+ * Layer 1.5 — semantic scan for client-identifying context that pattern
+ * redaction (Layer 1) structurally cannot see. A name in running prose has no
+ * fixed shape a regex can match, which is exactly the gap the 2026-08-03
+ * screen found: per-client files were identified by folder and by content a
+ * human recognized, not by a pattern.
+ *
+ * This layer DETECTS rather than redacts. Surgically masking a name out of
+ * prose risks under-redaction (a nickname, a second mention) and
+ * over-redaction (destroying the sentence around it) in a way a fixed-width
+ * `[REDACTED-SSN]` substitution does not. A flagged finding is handed to the
+ * Layer 3 classification gate, which quarantines for human review — the same
+ * disposition redaction findings already get, and the one this corpus's own
+ * audit (Gate 1) exists to perform.
+ *
+ * Fail-closed on a scanner that THROWS: the document is quarantined rather
+ * than indexed with the check silently skipped.
+ *
+ * This is deliberately NOT the same contract as `redactOrThrow`, which runs
+ * unconditionally. Layer 1.5 is opt-in (`CONTENT_SCAN_PROVIDER`, default
+ * `none`), and "the operator did not turn it on" cannot justify quarantining
+ * every document — that is the shipped default, and it has to behave as it
+ * did before this layer existed. So the caller decides whether to scan at
+ * all, and this function takes a scanner that EXISTS. The two states that
+ * must never be confused are kept apart upstream instead: a provider set but
+ * unbuildable throws in `createContentScanner` at startup, and `loadConfig`
+ * refuses `none` under `COMPLIANCE_MODE=client-data`.
+ */
+export async function scanForClientContextOrThrow(
+  text: string,
+  scanner: ContentScanner,
+): Promise<ContentScanResult> {
+  try {
+    return await scanner.scan(text);
+  } catch (err) {
+    throw new ContentSafetyError(
+      "semantic content scan failed; document must be quarantined, not indexed",
       err,
     );
   }

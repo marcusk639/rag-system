@@ -1,8 +1,10 @@
 import {
   loadPack,
+  EgressPolicy,
   type AuditLogSink,
   type Config,
   type Connector,
+  type ContentScanner,
   type LoadedPack,
   type ObjectStore,
 } from "@rag/core";
@@ -12,7 +14,11 @@ import {
   type Db,
   type PendingUpload,
 } from "@rag/db";
-import { HttpParserClient, CompositeChunker } from "@rag/rag";
+import {
+  HttpParserClient,
+  CompositeChunker,
+  createContentScanner,
+} from "@rag/rag";
 import { buildCoreDeps, type Embedder, type Queue } from "@rag/runtime";
 // NOTE: The connector factory signature is:
 //   createConnector(
@@ -58,6 +64,23 @@ export interface WorkerDeps {
    */
   pack: LoadedPack;
   /**
+   * Layer 1.5 semantic content scanner. Unlike `pack`, this is optional at
+   * the WorkerDeps level: `undefined` means `CONTENT_SCAN_PROVIDER=none` (or
+   * unset), which turns the layer OFF — ingestion behaves as it did before it
+   * existed. It does NOT quarantine per-document; fail-closed applies to a
+   * scanner that is present and throws.
+   *
+   * That is safe because the two states worth distinguishing are both handled
+   * before here: a provider set but unbuildable (missing base URL or model,
+   * a non-self-hosted URL under `client-data`, a host outside the egress
+   * allow-list) throws in `createContentScanner` below, which runs
+   * unguarded in `buildDeps` and so stops the worker at startup; and
+   * `loadConfig` refuses `none` entirely under
+   * `COMPLIANCE_MODE=client-data`, so "off" cannot be chosen where real
+   * client data is in scope.
+   */
+  scanner?: ContentScanner;
+  /**
    * Build a connector for a given source row. The worker calls this per-job
    * because connector instances may hold per-source state (cursors, clients
    * bound to specific credentials/folders).
@@ -84,6 +107,20 @@ export async function buildDeps(
   // version-incompatible pack. Better to refuse to start than to boot a worker
   // whose every ingestion job dies at the redaction gate.
   const pack = loadPack(config.worker.scannerPackDir);
+
+  // Returns undefined for "none" (the layer is off) but THROWS for a provider
+  // that is set and cannot be built — unguarded here on purpose, so a
+  // misconfigured scanner stops the worker at startup instead of arriving in
+  // ingestOne looking indistinguishable from "operator turned it off".
+  const scanner = createContentScanner(config.contentScan, {
+    // Own instance rather than one shared with buildCoreDeps's internal
+    // embedder/reranker policy (it doesn't expose that instance) — reads the
+    // same EGRESS_ALLOWED_HOSTS env var, so functionally equivalent, just not
+    // the literal same object. Threading it at all (vs. the scanner building
+    // its own fallback internally) is what lets this compliance gate apply.
+    egressPolicy: EgressPolicy.fromEnv(),
+    complianceMode: config.complianceMode,
+  });
 
   const parser = new HttpParserClient(
     config.parser.url,
@@ -157,6 +194,7 @@ export async function buildDeps(
     objectStore,
     auditLogSink,
     pack,
+    scanner,
     makeConnector,
     close,
   };

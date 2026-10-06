@@ -90,6 +90,7 @@ function runResult(
     chunksCreated: 2,
     documentsDeleted: 0,
     documentsSkippedOversize: 0,
+    documentsQuarantined: 0,
     done,
     nextCursor,
     ...extra,
@@ -165,6 +166,62 @@ describe("handleSyncSource per-page continuation", () => {
       {},
       "ing-1",
       expect.objectContaining({ documentsProcessed: 1, chunksCreated: 2 }),
+    );
+  });
+
+  it("records a run that quarantined everything as FAILED, not completed", async () => {
+    // A run that refused every document and indexed nothing is the signature
+    // of a broken safety gate -- an unreachable scanner, an egress gap, a
+    // missing pack -- not of a corpus that is entirely sensitive. Stamping it
+    // "completed" is what let a whole-source quarantine surface as a green
+    // sync with chunksCreated: 0, which is the exact shape of the earlier
+    // index-nothing incident.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 47,
+        chunksCreated: 0,
+        documentsQuarantined: 47,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("every document was quarantined"),
+      }),
+    );
+    expect(updateIngestionJobMock).not.toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "completed" }),
+    );
+    // "last synced" must not advance for a run that indexed nothing.
+    expect(markSyncedMock).not.toHaveBeenCalled();
+  });
+
+  it("still completes when some documents were quarantined but others indexed", async () => {
+    // Quarantining is normal and expected; only quarantining EVERYTHING with
+    // nothing indexed is the broken-gate signal.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 47,
+        chunksCreated: 120,
+        documentsQuarantined: 3,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "completed" }),
     );
   });
 

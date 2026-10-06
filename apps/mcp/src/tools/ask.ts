@@ -15,6 +15,7 @@ import {
   GenerationNotConfiguredError,
 } from "@rag/services";
 import type { Deps } from "../deps.js";
+import { guardToolHandler } from "../tool-error.js";
 
 const MAX_TOP_K = MAX_ASK_TOP_K;
 
@@ -122,74 +123,78 @@ export function registerAsk(
         "Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), and retrievedCount. Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case.",
       inputSchema,
     },
-    async ({ question, topK, sourceIds, filter, history }) => {
-      // Thin adapter: the generator-null guard and empty-results short-circuit
-      // live in askQuestion (canonical behavior). We only translate the
-      // not-configured case into an MCP isError with a tool-specific hint.
-      let result;
-      try {
-        result = await askQuestion(
-          deps,
-          { question, topK, sourceIds, filter, history },
-          deps.config.retrieval.defaultTopK,
-          scope,
-          deps.config.retrieval.maxChunksPerDocument,
-          {
-            neighborExpansion: deps.config.retrieval.neighborExpansion,
-            minDenseSimilarity: deps.config.retrieval.minDenseSimilarity,
-          },
-        );
-      } catch (err) {
-        if (err instanceof GenerationNotConfiguredError) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "No generation provider is configured on this MCP server. Set GENERATION_PROVIDER and GENERATION_MODEL (and the matching API key) to enable `ask`, or use `search_documents` to retrieve passages and synthesize the answer yourself.",
-              },
-            ],
-            isError: true,
-          };
+    guardToolHandler(
+      "ask",
+      deps.logger,
+      async ({ question, topK, sourceIds, filter, history }) => {
+        // Thin adapter: the generator-null guard and empty-results short-circuit
+        // live in askQuestion (canonical behavior). We only translate the
+        // not-configured case into an MCP isError with a tool-specific hint.
+        let result;
+        try {
+          result = await askQuestion(
+            deps,
+            { question, topK, sourceIds, filter, history },
+            deps.config.retrieval.defaultTopK,
+            scope,
+            deps.config.retrieval.maxChunksPerDocument,
+            {
+              neighborExpansion: deps.config.retrieval.neighborExpansion,
+              minDenseSimilarity: deps.config.retrieval.minDenseSimilarity,
+            },
+          );
+        } catch (err) {
+          if (err instanceof GenerationNotConfiguredError) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "No generation provider is configured on this MCP server. Set GENERATION_PROVIDER and GENERATION_MODEL (and the matching API key) to enable `ask`, or use `search_documents` to retrieve passages and synthesize the answer yourself.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          throw err;
         }
-        throw err;
-      }
 
-      // `askQuestion` already enforced the confidentiality scope and short-
-      // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
-      const {
-        answer,
-        citations,
-        retrieved,
-        reviewStatus,
-        disclaimer,
-        answerId,
-      } = result;
-      auditAsk(
-        deps,
-        scope,
-        question,
-        retrieved,
-        deps.config.generation?.model,
-        answerId,
-      );
-      return {
-        // Lead with the practitioner-review disclaimer so a consuming agent
-        // cannot present the draft as a finished answer (Circular 230 §10.37).
-        content: [
-          {
-            type: "text",
-            text: `⚠ ${disclaimer}\n\n${renderAnswer(answer, citations)}`,
-          },
-        ],
-        structuredContent: {
+        // `askQuestion` already enforced the confidentiality scope and short-
+        // circuits empty retrieval to a fixed answer; `retrieved` is sanitized.
+        const {
           answer,
           citations,
-          retrievedCount: retrieved.length,
+          retrieved,
           reviewStatus,
           disclaimer,
           answerId,
-        },
-      };
-    },
+        } = result;
+        auditAsk(
+          deps,
+          scope,
+          question,
+          retrieved,
+          deps.config.generation?.model,
+          answerId,
+        );
+        return {
+          // Lead with the practitioner-review disclaimer so a consuming agent
+          // cannot present the draft as a finished answer (Circular 230 §10.37).
+          content: [
+            {
+              type: "text",
+              text: `⚠ ${disclaimer}\n\n${renderAnswer(answer, citations)}`,
+            },
+          ],
+          structuredContent: {
+            answer,
+            citations,
+            retrievedCount: retrieved.length,
+            reviewStatus,
+            disclaimer,
+            answerId,
+          },
+        };
+      },
+    ),
   );
 }

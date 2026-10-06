@@ -31,6 +31,7 @@ export type ClassificationReason =
   | "source-declared"
   | "identifier-found"
   | "client-context-path"
+  | "semantic-context-detected"
   | "unclassified-source";
 
 export interface DocumentClassification {
@@ -48,6 +49,8 @@ export interface ClassifyDocumentInput {
   redactionFindings?: readonly RedactionFinding[];
   /** True when Layer 2 flagged the path as client-context (even if not excluded). */
   clientContextPath?: boolean;
+  /** True when Layer 1.5's semantic scanner flagged client-identifying context (a name in prose) that pattern redaction cannot see. */
+  semanticContextDetected?: boolean;
 }
 
 const ORDER: Record<DocumentClass, number> = { A: 0, B: 1, C: 2, D: 3 };
@@ -103,6 +106,15 @@ export function classifyDocument(
   if (input.clientContextPath) {
     docClass = stricter(docClass, "C");
     reasons.push("client-context-path");
+  }
+
+  // Layer 1.5's semantic finding (a name in prose, not a formatted identifier)
+  // gets the same weight as the path signal above: neither is a structured
+  // identifier, both imply a specific client relationship a pattern alone
+  // cannot establish.
+  if (input.semanticContextDetected) {
+    docClass = stricter(docClass, "C");
+    reasons.push("semantic-context-detected");
   }
 
   return {

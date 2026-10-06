@@ -6,6 +6,7 @@ import { filterSchema, topRelevanceScore } from "@rag/core";
 import { logAskEvent } from "@rag/db";
 import { searchDocuments } from "@rag/services";
 import type { Deps } from "../deps.js";
+import { guardToolHandler } from "../tool-error.js";
 
 const MAX_TOP_K = 50;
 const EXCERPT_CHARS = 300;
@@ -107,23 +108,27 @@ export function registerSearchDocuments(
         "Hybrid (dense vector + sparse BM25) retrieval over all ingested documents. Use this when you need the most relevant passages of source material to answer a factual question, ground a response in citations, or locate where a topic is discussed. Returns ranked chunks with document title, heading path, page number when known, source id, url (if any), and a normalized score in [0,1]. The text response is a numbered list; the structured payload contains the full RetrievalResult objects suitable for downstream synthesis or building UI citations. This tool only retrieves passages — call `ask` if you also want the model to write a grounded answer for you.",
       inputSchema,
     },
-    async ({ query, topK, sourceIds, filter }) => {
-      // The service enforces the MANDATORY confidentiality boundary (scope —
-      // admin for stdio/admin-token, source-scoped for a scoped token; the
-      // optional caller `sourceIds` narrows WITHIN it) and the PII metadata
-      // allowlist, so the same leak via MCP is closed the same way as the HTTP
-      // API. `results` is already sanitized.
-      const results = await searchDocuments(
-        deps,
-        { query, topK, sourceIds, filter },
-        deps.config.retrieval.defaultTopK,
-        scope,
-      );
-      auditSearch(deps, scope, query, results);
-      return {
-        content: [{ type: "text", text: formatResults(results) }],
-        structuredContent: { results },
-      };
-    },
+    guardToolHandler(
+      "search_documents",
+      deps.logger,
+      async ({ query, topK, sourceIds, filter }) => {
+        // The service enforces the MANDATORY confidentiality boundary (scope —
+        // admin for stdio/admin-token, source-scoped for a scoped token; the
+        // optional caller `sourceIds` narrows WITHIN it) and the PII metadata
+        // allowlist, so the same leak via MCP is closed the same way as the HTTP
+        // API. `results` is already sanitized.
+        const results = await searchDocuments(
+          deps,
+          { query, topK, sourceIds, filter },
+          deps.config.retrieval.defaultTopK,
+          scope,
+        );
+        auditSearch(deps, scope, query, results);
+        return {
+          content: [{ type: "text", text: formatResults(results) }],
+          structuredContent: { results },
+        };
+      },
+    ),
   );
 }

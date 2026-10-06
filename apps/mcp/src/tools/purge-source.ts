@@ -4,6 +4,7 @@ import { purgeSource } from "@rag/services";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Deps } from "../deps.js";
+import { guardToolHandler } from "../tool-error.js";
 
 const inputSchema = z.object({
   sourceId: z
@@ -35,7 +36,7 @@ export function registerPurgeSource(
         "Permanently delete a source and all of its indexed content (documents, chunks, ingestion history, pending uploads). This is irreversible. Use `list_sources` first to confirm the correct source id before calling this tool.",
       inputSchema,
     },
-    async ({ sourceId }) => {
+    guardToolHandler("purge_source", deps.logger, async ({ sourceId }) => {
       // Scope check: a scoped session cannot purge sources outside its allow-list.
       const permitted =
         scope.enforcedSourceIds === null ||
@@ -56,26 +57,19 @@ export function registerPurgeSource(
         };
       }
 
-      try {
-        await purgeSource(deps, sourceId);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Source "${source.name}" (${sourceId}) and all its data have been permanently deleted.`,
-            },
-          ],
-          structuredContent: { sourceId, name: source.name, purged: true },
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [
-            { type: "text", text: `Failed to purge source: ${message}` },
-          ],
-          isError: true,
-        };
-      }
-    },
+      // A purge failure is not caught here: `guardToolHandler` turns it into a
+      // sanitized tool error. The previous local catch interpolated the raw
+      // `err.message` into the response, which is what leaked DB internals.
+      await purgeSource(deps, sourceId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Source "${source.name}" (${sourceId}) and all its data have been permanently deleted.`,
+          },
+        ],
+        structuredContent: { sourceId, name: source.name, purged: true },
+      };
+    }),
   );
 }
