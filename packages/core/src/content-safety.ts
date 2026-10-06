@@ -347,21 +347,23 @@ export function redactOrThrow(
  * disposition redaction findings already get, and the one this corpus's own
  * audit (Gate 1) exists to perform.
  *
- * Fail-closed, same contract as `redactOrThrow`: no scanner configured, or a
- * scanner that throws, must quarantine the document rather than index it
- * with this check silently skipped.
+ * Fail-closed on a scanner that THROWS: the document is quarantined rather
+ * than indexed with the check silently skipped.
+ *
+ * This is deliberately NOT the same contract as `redactOrThrow`, which runs
+ * unconditionally. Layer 1.5 is opt-in (`CONTENT_SCAN_PROVIDER`, default
+ * `none`), and "the operator did not turn it on" cannot justify quarantining
+ * every document — that is the shipped default, and it has to behave as it
+ * did before this layer existed. So the caller decides whether to scan at
+ * all, and this function takes a scanner that EXISTS. The two states that
+ * must never be confused are kept apart upstream instead: a provider set but
+ * unbuildable throws in `createContentScanner` at startup, and `loadConfig`
+ * refuses `none` under `COMPLIANCE_MODE=client-data`.
  */
 export async function scanForClientContextOrThrow(
   text: string,
-  scanner: ContentScanner | undefined,
+  scanner: ContentScanner,
 ): Promise<ContentScanResult> {
-  if (!scanner) {
-    throw new ContentSafetyError(
-      "no content scanner configured — Layer 1.5 (semantic client-context " +
-        "detection) cannot run; the document must be quarantined rather " +
-        "than indexed without this check",
-    );
-  }
   try {
     return await scanner.scan(text);
   } catch (err) {

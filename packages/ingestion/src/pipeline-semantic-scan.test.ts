@@ -19,6 +19,7 @@ const {
   documentHasStorageMock,
   setDocumentStorageMock,
   logIngestEventMock,
+  deleteDocumentByExternalIdMock,
 } = vi.hoisted(() => ({
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
@@ -27,6 +28,7 @@ const {
   documentHasStorageMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
   logIngestEventMock: vi.fn(),
+  deleteDocumentByExternalIdMock: vi.fn(),
 }));
 
 vi.mock("@rag/db", () => ({
@@ -35,7 +37,7 @@ vi.mock("@rag/db", () => ({
   replaceChunks: replaceChunksMock,
   documentHasChunks: documentHasChunksMock,
   documentHasStorage: documentHasStorageMock,
-  deleteDocumentByExternalId: vi.fn(),
+  deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
   logIngestEvent: logIngestEventMock,
   clearDocumentStorage: vi.fn().mockResolvedValue({ storageKey: null }),
@@ -51,7 +53,26 @@ beforeEach(() => {
   documentHasStorageMock.mockResolvedValue(true);
   setDocumentStorageMock.mockResolvedValue(undefined);
   logIngestEventMock.mockResolvedValue(undefined);
+  deleteDocumentByExternalIdMock.mockResolvedValue({
+    deleted: false,
+    storageKey: null,
+  });
 });
+
+/** Captures what Layer 1.5 was actually handed. */
+function recordingScanner(
+  verdict = { flagged: false, findings: [] as string[] },
+) {
+  const seen: string[] = [];
+  const scanner: ContentScanner = {
+    name: "fake-recording",
+    scan: async (text: string) => {
+      seen.push(text);
+      return verdict;
+    },
+  };
+  return { scanner, seen };
+}
 
 function testConnector() {
   const { connector } = makeConnector([
@@ -94,14 +115,110 @@ describe("PipelineDeps.scanner — Layer 1.5 gating", () => {
 
     expect(upsertDocumentMock).not.toHaveBeenCalled();
     expect(replaceChunksMock).not.toHaveBeenCalled();
+    // The audit row is the half that matters under 7216 / Circular 230:
+    // preventing the disclosure while destroying the evidence is not a pass.
+    // It must also name the underlying cause -- ContentSafetyError carries a
+    // fixed message and hides the real reason in `cause`, so recording
+    // `err.message` alone makes every scanner failure look identical.
+    expect(logIngestEventMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "blocked",
+        rejectionReason: expect.stringContaining("model unreachable"),
+      }),
+    );
+  });
+
+  it("purges an already-indexed copy when a scan failure quarantines the document", async () => {
+    // Without this, enabling Layer 1.5 on a live index gates only future
+    // writes: a document indexed earlier keeps its chunks and stays
+    // retrievable while the gate reports that it caught something.
+    const throwingScanner: ContentScanner = {
+      name: "fake-throwing",
+      scan: async () => {
+        throw new Error("model unreachable");
+      },
+    };
+    const deps = { ...makeDeps(), scanner: throwingScanner } as PipelineDeps;
+    await runIngestion("src", testConnector(), null, OPTS, deps);
+
+    expect(deleteDocumentByExternalIdMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "src",
+      "doc-a",
+    );
+  });
+
+  it("scans the REDACTED text, never re-sending an identifier Layer 1 masked", async () => {
+    // The redaction assignment and the scan call are adjacent and reorderable.
+    // Without this assertion, moving the scan above the assignment would ship
+    // every raw SSN in the corpus to the scanner endpoint -- an egress of the
+    // exact values Layer 1 exists to mask -- and no test would fail.
+    const { scanner, seen } = recordingScanner();
+    const deps = makeDeps();
+    deps.parser = {
+      parse: vi.fn(async () => ({
+        title: "Checklist",
+        markdown: "Taxpayer SSN 123-45-6789 on file.",
+        tables: [],
+        metadata: {},
+      })),
+    } as unknown as PipelineDeps["parser"];
+    await runIngestion("src", testConnector(), null, OPTS, {
+      ...deps,
+      scanner,
+    } as PipelineDeps);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toContain("123-45-6789");
+  });
+
+  it("scans the title and table cells, not markdown alone", async () => {
+    // Layer 1 redacts all three text-bearing fields because chunks are built
+    // from `tables` and the title is stored, cited, and sent to the model.
+    // In this corpus a client is most often identified by exactly those two --
+    // a filename-derived title, or a name in a spreadsheet cell.
+    const { scanner, seen } = recordingScanner();
+    const deps = makeDeps();
+    deps.parser = {
+      parse: vi.fn(async () => ({
+        title: "Smith Family Trust 2024",
+        markdown: "Generic body text.",
+        tables: [
+          {
+            markdown: "| Client |\n| --- |\n| Jane Doe |",
+            sheetName: "Trust Detail",
+            sheetType: "tabular" as const,
+            headers: ["Client"],
+            rows: [["Jane Doe"]],
+            rowCount: 1,
+            columnCount: 1,
+          },
+        ],
+        metadata: {},
+      })),
+    } as unknown as PipelineDeps["parser"];
+    await runIngestion("src", testConnector(), null, OPTS, {
+      ...deps,
+      scanner,
+    } as PipelineDeps);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain("Smith Family Trust 2024");
+    expect(seen[0]).toContain("Jane Doe");
+    expect(seen[0]).toContain("Client");
+    expect(seen[0]).toContain("Trust Detail");
   });
 
   it("quarantines a document the scanner flags as client-identifying", async () => {
     const flaggingScanner: ContentScanner = {
       name: "fake-flagging",
+      // Category only, never a value: findings are persisted to the audit row
+      // and logged, so a name quoted here is disclosed by the scan meant to
+      // prevent its disclosure.
       scan: async () => ({
         flagged: true,
-        findings: ["possible client name: John Smith"],
+        findings: ["client name"],
       }),
     };
     const deps = { ...makeDeps(), scanner: flaggingScanner } as PipelineDeps;
@@ -114,8 +231,12 @@ describe("PipelineDeps.scanner — Layer 1.5 gating", () => {
       expect.objectContaining({
         action: "blocked",
         docClass: "C",
+        // The categories belong in the durable record, not only in a pino
+        // warning -- the audit row is what a Gate 1 reviewer works from.
+        rejectionReason: expect.stringContaining("client name"),
       }),
     );
+    expect(deleteDocumentByExternalIdMock).toHaveBeenCalled();
   });
 
   it("proceeds to chunk and embed when the scanner reports clean", async () => {

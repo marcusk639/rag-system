@@ -135,8 +135,9 @@ export async function handleSyncSource(
         // before anything is embedded. Loaded once at worker startup.
         pack,
         // Layer 1.5: semantic client-context scanner. undefined (provider
-        // "none") means ingestOne quarantines every document — see the
-        // WorkerDeps.scanner comment.
+        // "none", the default) means the layer is OFF and ingestion behaves as
+        // it did before it existed — see the WorkerDeps.scanner comment. A
+        // scanner that is present and throws quarantines the document.
         scanner,
       },
     );
@@ -148,6 +149,38 @@ export async function handleSyncSource(
       documentsFailed: result.documentsFailed,
       chunksCreated: result.chunksCreated,
     });
+
+    // A run that refused every document and indexed nothing is the signature
+    // of a broken safety gate -- an unreachable scanner, an egress allow-list
+    // gap, a missing pack -- not of a corpus that is entirely sensitive.
+    // Phase 1 refuses C/D sources outright (ClassBlockedError), so there is no
+    // legitimate all-quarantine run to confuse this with.
+    //
+    // Reported as FAILED, and "last synced" is deliberately not advanced:
+    // stamping "completed" is exactly what let a whole-source quarantine show
+    // up as a green sync with chunksCreated: 0.
+    const allQuarantined =
+      result.documentsQuarantined > 0 && result.chunksCreated === 0;
+    if (result.done && allQuarantined) {
+      await updateIngestionJob(db, ingestionId, {
+        status: "failed",
+        completedAt: new Date(),
+        error:
+          `every document was quarantined (${result.documentsQuarantined} of ` +
+          `${result.documentsProcessed} processed) and nothing was indexed; ` +
+          `check the content-safety gates: scanner reachability, the egress ` +
+          `allow-list, and the identifier-scanner pack`,
+      });
+      log.error(
+        {
+          ...result,
+          continuationCount,
+          marker: "ingest.sync.all_quarantined",
+        },
+        "sync refused every document and indexed nothing; recorded as failed",
+      );
+      return;
+    }
 
     if (result.done) {
       // Terminal: stamp the user-visible "last synced" signal (the ONLY place it

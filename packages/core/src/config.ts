@@ -400,6 +400,21 @@ export function loadConfig(
           "COMPLIANCE_MODE=none to run without the gate.",
       );
     }
+    // Layer 1.5 is opt-in and defaults to `none`, which means "off". That is
+    // a defensible default for a corpus of general material, but not once the
+    // operator has declared that real client data is in scope: "off" would
+    // then be a silent bypass of the one layer that catches a client named in
+    // prose, which pattern redaction structurally cannot see. Refuse the
+    // combination rather than boot with the check quietly absent.
+    if (cfg.contentScan.provider === "none") {
+      throw new Error(
+        "COMPLIANCE_MODE=client-data requires CONTENT_SCAN_PROVIDER to be " +
+          "configured (Layer 1.5 semantic client-context detection). " +
+          "CONTENT_SCAN_PROVIDER=none disables it entirely, which is not a " +
+          "valid configuration when client data is in scope. Point it at a " +
+          "self-hosted scanner (see env.example) or set COMPLIANCE_MODE=none.",
+      );
+    }
   }
 
   return cfg;

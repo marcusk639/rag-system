@@ -61,6 +61,31 @@ describe("classifyDocument — source class is a ceiling, not a verdict", () => 
     expect(r.reasons).toContain("semantic-context-detected");
   });
 
+  it("escalates a B source to C on a semantic finding", () => {
+    const r = classifyDocument({
+      sourceClass: "B",
+      semanticContextDetected: true,
+    });
+    expect(r.docClass).toBe("C");
+    expect(r.quarantine).toBe(true);
+  });
+
+  it("leaves a D source at D on a semantic finding, never relaxing it to C", () => {
+    // The source class is a CEILING, so the escalation has to be a `stricter`
+    // comparison and not an assignment. Written as `docClass = "C"` this
+    // would silently downgrade a D source. The quarantine disposition would
+    // survive -- C and D both quarantine, which is exactly why the enum
+    // collapsing them makes this easy to miss -- but the recorded class is
+    // what lands in the audit record.
+    const r = classifyDocument({
+      sourceClass: "D",
+      semanticContextDetected: true,
+    });
+    expect(r.docClass).toBe("D");
+    expect(r.quarantine).toBe(true);
+    expect(r.reasons).toContain("semantic-context-detected");
+  });
+
   it("never downgrades a stricter source class", () => {
     // Absence of evidence must not relax a declared classification.
     const r = classifyDocument({ sourceClass: "D", redactionFindings: [] });

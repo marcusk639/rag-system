@@ -52,10 +52,38 @@ describe("loadConfig — COMPLIANCE_MODE gate", () => {
 
   it("client-data WITH DPA on file loads successfully", () => {
     const cfg = loadConfig(
-      { ...BASE_ENV, COMPLIANCE_MODE: "client-data" },
+      {
+        ...BASE_ENV,
+        COMPLIANCE_MODE: "client-data",
+        // Required now: see the Layer 1.5 test below.
+        CONTENT_SCAN_PROVIDER: "ollama",
+        CONTENT_SCAN_BASE_URL: "http://ollama.railway.internal:11434/v1",
+        CONTENT_SCAN_MODEL: "llama3.2:3b",
+      },
       { checkDpa: () => true },
     );
     expect(cfg.complianceMode).toBe("client-data");
+  });
+
+  it("client-data with Layer 1.5 disabled throws loud", () => {
+    // CONTENT_SCAN_PROVIDER defaults to "none", which turns Layer 1.5 OFF.
+    // That is a defensible default for general material, but not once the
+    // operator has declared real client data is in scope: "off" would then be
+    // a silent bypass of the only layer that catches a client named in prose,
+    // which pattern redaction structurally cannot see. Before this gate, a
+    // client-data deployment could boot with the check simply absent and
+    // nothing logged.
+    expect(() =>
+      loadConfig(
+        { ...BASE_ENV, COMPLIANCE_MODE: "client-data" },
+        { checkDpa: () => true },
+      ),
+    ).toThrow(/requires CONTENT_SCAN_PROVIDER/);
+  });
+
+  it("none mode does not require a content scanner", () => {
+    const cfg = loadConfig({ ...BASE_ENV, COMPLIANCE_MODE: "none" });
+    expect(cfg.contentScan.provider).toBe("none");
   });
 
   it("none mode does not invoke checkDpa at all", () => {

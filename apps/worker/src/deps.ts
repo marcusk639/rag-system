@@ -65,12 +65,19 @@ export interface WorkerDeps {
   pack: LoadedPack;
   /**
    * Layer 1.5 semantic content scanner. Unlike `pack`, this is optional at
-   * the WorkerDeps level — `undefined` means `CONTENT_SCAN_PROVIDER=none`
-   * (or unset), and `ingestOne`'s `scanForClientContextOrThrow` already fails
-   * closed (quarantines) per-document when it's missing. Deliberately NOT a
-   * startup-crashing dependency like `pack`: a transient outage of a
-   * self-hosted scanner would otherwise take down every unrelated sync and
-   * upload job on the worker, not just the content-safety check.
+   * the WorkerDeps level: `undefined` means `CONTENT_SCAN_PROVIDER=none` (or
+   * unset), which turns the layer OFF — ingestion behaves as it did before it
+   * existed. It does NOT quarantine per-document; fail-closed applies to a
+   * scanner that is present and throws.
+   *
+   * That is safe because the two states worth distinguishing are both handled
+   * before here: a provider set but unbuildable (missing base URL or model,
+   * a non-self-hosted URL under `client-data`, a host outside the egress
+   * allow-list) throws in `createContentScanner` below, which runs
+   * unguarded in `buildDeps` and so stops the worker at startup; and
+   * `loadConfig` refuses `none` entirely under
+   * `COMPLIANCE_MODE=client-data`, so "off" cannot be chosen where real
+   * client data is in scope.
    */
   scanner?: ContentScanner;
   /**
@@ -101,9 +108,10 @@ export async function buildDeps(
   // whose every ingestion job dies at the redaction gate.
   const pack = loadPack(config.worker.scannerPackDir);
 
-  // Unlike `loadPack`, this does not throw on "none" — see the WorkerDeps
-  // comment on `scanner` for why a missing/unconfigured scanner degrades to
-  // per-document quarantine rather than refusing to boot.
+  // Returns undefined for "none" (the layer is off) but THROWS for a provider
+  // that is set and cannot be built — unguarded here on purpose, so a
+  // misconfigured scanner stops the worker at startup instead of arriving in
+  // ingestOne looking indistinguishable from "operator turned it off".
   const scanner = createContentScanner(config.contentScan, {
     // Own instance rather than one shared with buildCoreDeps's internal
     // embedder/reranker policy (it doesn't expose that instance) — reads the

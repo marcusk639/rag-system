@@ -6,6 +6,21 @@ import {
 } from "./ollama-scanner.js";
 
 const ALLOW_TEST_HOST = () => new EgressPolicy(["ollama.test"]);
+/** The scanner asserts egress at CONSTRUCTION, so a factory test that is
+ * about the compliance gate still has to allow-list its host or it fails on
+ * egress before reaching the assertion under test. */
+const allow = (...hosts: string[]) => new EgressPolicy(hosts);
+const ALLOW_ANY_TEST_HOST = () =>
+  allow(
+    "ollama.railway.internal",
+    "127.0.0.1",
+    "localhost",
+    "10.0.0.5",
+    "192.168.1.5",
+    "172.16.0.5",
+    "ollama",
+    "api.openai.com",
+  );
 
 function scanner(
   overrides: Partial<
@@ -44,12 +59,14 @@ describe("OllamaContentScanner — scan()", () => {
     vi.stubGlobal(
       "fetch",
       mockChatResponse(
-        '{"flagged": true, "findings": ["client name: John Smith"]}',
+        // Category only, never a value — the prompt forbids lifting a name
+        // into a finding, because findings reach worker logs and the audit row.
+        '{"flagged": true, "findings": ["client name"]}',
       ),
     );
     const result = await scanner().scan("Letter for John Smith.");
     expect(result.flagged).toBe(true);
-    expect(result.findings).toEqual(["client name: John Smith"]);
+    expect(result.findings).toEqual(["client name"]);
   });
 
   it("parses JSON embedded in surrounding prose, since not every model obeys 'JSON only'", async () => {
@@ -71,29 +88,153 @@ describe("OllamaContentScanner — scan()", () => {
   });
 
   it("throws when the HTTP call itself fails", async () => {
-    vi.stubGlobal("fetch", mockChatResponse("", false));
+    vi.stubGlobal("fetch", mockChatResponse("x", false));
     await expect(scanner().scan("text")).rejects.toThrow();
   });
 
-  it("throws when the request targets a host outside the egress allow-list", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const s = new OllamaContentScanner({
-      baseUrl: "http://evil.example:11434/v1",
-      model: "llama3.2:3b",
-      egressPolicy: ALLOW_TEST_HOST(),
-    });
-    await expect(s.scan("text")).rejects.toThrow();
-    expect(fetchMock).not.toHaveBeenCalled();
+  // The previous version of this test passed `content: ""` together with
+  // `ok: false`, so it read as covering two cases while the HTTP check
+  // short-circuited before the content check ever ran.
+  it.each([
+    ["no choices", { choices: [] }],
+    ["empty body", {}],
+    ["choice with no message", { choices: [{}] }],
+    ["message with no content", { choices: [{ message: {} }] }],
+    ["empty-string content", { choices: [{ message: { content: "" } }] }],
+  ])("throws when the reply has %s", async (_label, body) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ ok: true, status: 200, json: async () => body }),
+    );
+    await expect(scanner().scan("text")).rejects.toThrow();
   });
 
-  it("sends the model and a bounded excerpt of the text", async () => {
+  it("throws rather than reading a non-boolean 'flagged' as clean", async () => {
+    // The likeliest small-model deviation: a stringified boolean. Read as
+    // falsy it would pass a flagged document straight through.
+    vi.stubGlobal(
+      "fetch",
+      mockChatResponse('{"flagged": "yes", "findings": []}'),
+    );
+    await expect(scanner().scan("text")).rejects.toThrow();
+  });
+
+  it("treats findings as authoritative when the model answers flagged:false", async () => {
+    // The one combination where a detection would otherwise vanish silently:
+    // the caller only logs findings when flagged, so false + findings means
+    // the document indexes AND the finding is discarded.
+    vi.stubGlobal(
+      "fetch",
+      mockChatResponse('{"flagged": false, "findings": ["client name"]}'),
+    );
+    const result = await scanner().scan("text");
+    expect(result.flagged).toBe(true);
+    expect(result.findings).toEqual(["client name"]);
+  });
+
+  it("throws when the model flags a document but records no finding", async () => {
+    // Quarantining here would write an audit row stating no reason.
+    vi.stubGlobal(
+      "fetch",
+      mockChatResponse('{"flagged": true, "findings": []}'),
+    );
+    await expect(scanner().scan("text")).rejects.toThrow(/no findings/);
+  });
+
+  it("propagates a request timeout rather than swallowing it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")),
+    );
+    await expect(scanner().scan("text")).rejects.toThrow();
+  });
+
+  it("refuses to construct against a host outside the egress allow-list", () => {
+    // At construction, not at scan time: an allow-list gap should stop the
+    // worker at startup, not quarantine a corpus one document at a time.
+    expect(
+      () =>
+        new OllamaContentScanner({
+          baseUrl: "http://evil.example:11434/v1",
+          model: "llama3.2:3b",
+          egressPolicy: ALLOW_TEST_HOST(),
+        }),
+    ).toThrow();
+  });
+
+  it("sends the model and wraps the text in document delimiters", async () => {
     const fetchMock = mockChatResponse('{"flagged": false, "findings": []}');
     vi.stubGlobal("fetch", fetchMock);
     await scanner().scan("hello world");
     const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(body.model).toBe("llama3.2:3b");
-    expect(JSON.stringify(body.messages)).toContain("hello world");
+    expect(body.messages[1].content).toBe(
+      "<document>\nhello world\n</document>",
+    );
+  });
+
+  it("scans the whole document in windows, not just the first 8000 chars", async () => {
+    // A client first named on page 3 of a long engagement letter must still be
+    // seen. Window 1 is clean, window 3 flags.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            { message: { content: '{"flagged": false, "findings": []}' } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            { message: { content: '{"flagged": false, "findings": []}' } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: '{"flagged": true, "findings": ["client name"]}',
+              },
+            },
+          ],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scanner().scan("x".repeat(8000 * 3));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.flagged).toBe(true);
+    expect(result.findings).toEqual(["client name"]);
+  });
+
+  it("stops at the first flagged window", async () => {
+    const fetchMock = mockChatResponse(
+      '{"flagged": true, "findings": ["client name"]}',
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await scanner().scan("x".repeat(8000 * 4));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a document too large to scan in full rather than sampling it", async () => {
+    const fetchMock = mockChatResponse('{"flagged": false, "findings": []}');
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(scanner().scan("x".repeat(8000 * 25))).rejects.toThrow(
+      /cannot be scanned in full/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -103,11 +244,14 @@ describe("createContentScanner", () => {
   });
 
   it("builds an OllamaContentScanner for provider 'ollama'", () => {
-    const s = createContentScanner({
-      provider: "ollama",
-      baseUrl: "http://ollama.test:11434/v1",
-      model: "llama3.2:3b",
-    });
+    const s = createContentScanner(
+      {
+        provider: "ollama",
+        baseUrl: "http://ollama.test:11434/v1",
+        model: "llama3.2:3b",
+      },
+      { egressPolicy: allow("ollama.test") },
+    );
     expect(s?.name).toBe("ollama");
   });
 
@@ -135,7 +279,10 @@ describe("createContentScanner", () => {
             baseUrl: "http://ollama.railway.internal:11434/v1",
             model: "llama3.2:3b",
           },
-          { complianceMode: "client-data" },
+          {
+            complianceMode: "client-data",
+            egressPolicy: ALLOW_ANY_TEST_HOST(),
+          },
         ),
       ).not.toThrow();
     });
@@ -151,7 +298,10 @@ describe("createContentScanner", () => {
         expect(() =>
           createContentScanner(
             { provider: "ollama", baseUrl, model: "llama3.2:3b" },
-            { complianceMode: "client-data" },
+            {
+              complianceMode: "client-data",
+              egressPolicy: ALLOW_ANY_TEST_HOST(),
+            },
           ),
         ).not.toThrow();
       }
@@ -165,7 +315,10 @@ describe("createContentScanner", () => {
             baseUrl: "https://api.openai.com/v1",
             model: "llama3.2:3b",
           },
-          { complianceMode: "client-data" },
+          {
+            complianceMode: "client-data",
+            egressPolicy: ALLOW_ANY_TEST_HOST(),
+          },
         ),
       ).toThrow(ComplianceError);
     });
@@ -174,18 +327,24 @@ describe("createContentScanner", () => {
       expect(
         createContentScanner(
           { provider: "none" },
-          { complianceMode: "client-data" },
+          {
+            complianceMode: "client-data",
+            egressPolicy: ALLOW_ANY_TEST_HOST(),
+          },
         ),
       ).toBeUndefined();
     });
 
     it("does not restrict baseUrl when complianceMode is not client-data", () => {
       expect(() =>
-        createContentScanner({
-          provider: "ollama",
-          baseUrl: "https://api.openai.com/v1",
-          model: "llama3.2:3b",
-        }),
+        createContentScanner(
+          {
+            provider: "ollama",
+            baseUrl: "https://api.openai.com/v1",
+            model: "llama3.2:3b",
+          },
+          { egressPolicy: allow("api.openai.com") },
+        ),
       ).not.toThrow();
     });
   });

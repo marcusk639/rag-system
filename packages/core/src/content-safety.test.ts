@@ -488,16 +488,14 @@ describe("scanForClientContextOrThrow — fails closed", () => {
     expect(result.findings).toContain("possible client name: John Smith");
   });
 
-  it("throws ContentSafetyError when no scanner is configured, rather than skipping the check", async () => {
-    // A document ingested with this layer silently skipped would be
-    // indistinguishable in the index from one the layer actually cleared.
-    await expect(
-      scanForClientContextOrThrow("some text", undefined),
-    ).rejects.toThrow(ContentSafetyError);
-    await expect(
-      scanForClientContextOrThrow("some text", undefined),
-    ).rejects.toThrow(/no content scanner configured/);
-  });
+  // There is deliberately no "throws when no scanner is configured" case.
+  // Layer 1.5 is opt-in and `none` is the default, so an absent scanner means
+  // the layer is off and ingestion proceeds as it did before the layer
+  // existed — asserted end-to-end in
+  // `packages/ingestion/src/pipeline-semantic-scan.test.ts`. The states that
+  // must not be confused with "off" are rejected upstream: an unbuildable
+  // provider throws in `createContentScanner`, and `loadConfig` refuses
+  // `none` under `COMPLIANCE_MODE=client-data`.
 
   it("throws ContentSafetyError when the scanner itself throws", async () => {
     await expect(

@@ -197,17 +197,33 @@ export const Config = z
     }),
     /**
      * Layer 1.5 semantic content scanner (ingestion-time), separate from
-     * generation/embeddings/rerank. `none` (default) means `ingestOne`
-     * quarantines every document rather than skipping this check — see
-     * `createContentScanner`'s docstring. MUST be self-hosted; never a
-     * third-party API (same constraint as self-hosted generation).
+     * generation/embeddings/rerank.
+     *
+     * `none` (the default) means the layer is OFF: documents are indexed
+     * without a semantic scan, exactly as they were before this layer
+     * existed. It is NOT a quarantine-everything setting. `loadConfig`
+     * refuses `none` under `COMPLIANCE_MODE=client-data`, which is what keeps
+     * "off" from being a silent bypass where real client data is in scope.
+     *
+     * MUST be self-hosted; never a third-party API (same constraint as
+     * self-hosted generation). That is enforced by `isLikelySelfHosted` in
+     * `createContentScanner`, and only under `client-data` mode — in the
+     * default mode it is a convention the operator upholds. `EgressPolicy`
+     * separately enforces an allow-list, which is not the same thing.
+     *
+     * `.default({})` so a `Config` literal that predates this section stays
+     * valid: every inner field has a default or is optional, and the whole
+     * section being required would break every existing construction site
+     * for no benefit.
      */
-    contentScan: z.object({
-      provider: z.enum(["none", "ollama"]).default("none"),
-      baseUrl: z.string().optional(),
-      model: z.string().optional(),
-      timeoutMs: z.number().int().positive().optional(),
-    }),
+    contentScan: z
+      .object({
+        provider: z.enum(["none", "ollama"]).default("none"),
+        baseUrl: z.string().optional(),
+        model: z.string().optional(),
+        timeoutMs: z.number().int().positive().default(30_000),
+      })
+      .default({}),
 
     generation: z
       .object({
