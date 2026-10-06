@@ -268,6 +268,10 @@ export const ingestionJobs = pgTable(
     documentsProcessed: integer("documents_processed").notNull().default(0),
     documentsFailed: integer("documents_failed").notNull().default(0),
     chunksCreated: integer("chunks_created").notNull().default(0),
+    // Layer 1.5 refused these documents; they are neither indexed nor
+    // "failed". Counted separately so a run that quarantined most of a
+    // source cannot read as a clean success after the process exits.
+    documentsQuarantined: integer("documents_quarantined").notNull().default(0),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),

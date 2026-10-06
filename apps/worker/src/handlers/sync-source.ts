@@ -24,6 +24,14 @@ import type { WorkerDeps } from "../deps.js";
 const PAGES_PER_RUN = 5;
 
 /**
+ * Share of a sync's processed documents that may be quarantined before the run
+ * is recorded as failed. Layer 1.5 refusing a quarter of a source means the
+ * gate is broken, not that the source is sensitive -- Phase 1 rejects C/D
+ * sources at classification, before a document reaches the scanner.
+ */
+const MAX_QUARANTINE_RATIO = 0.25;
+
+/**
  * pg-boss hands the worker a job whose `data` is the SyncSourcePayload we put
  * on the queue from the API. We:
  *   1. Resolve the source row from Postgres.
@@ -144,40 +152,61 @@ export async function handleSyncSource(
 
     // Accumulate this run's counts into the single history row (additive, not
     // exactly-once under retries — see incrementIngestionJobCounters).
-    await incrementIngestionJobCounters(db, ingestionId, {
+    const totals = await incrementIngestionJobCounters(db, ingestionId, {
       documentsProcessed: result.documentsProcessed,
       documentsFailed: result.documentsFailed,
       chunksCreated: result.chunksCreated,
+      documentsQuarantined: result.documentsQuarantined,
     });
 
-    // A run that refused every document and indexed nothing is the signature
-    // of a broken safety gate -- an unreachable scanner, an egress allow-list
-    // gap, a missing pack -- not of a corpus that is entirely sensitive.
-    // Phase 1 refuses C/D sources outright (ClassBlockedError), so there is no
-    // legitimate all-quarantine run to confuse this with.
+    // A sync that refuses a large share of a source is the signature of a
+    // broken safety gate -- an unreachable scanner, an egress allow-list gap, a
+    // missing pack -- not of a corpus that is mostly sensitive. Phase 1 refuses
+    // C/D sources outright (ClassBlockedError), so there is no legitimate
+    // mostly-quarantine run to confuse this with.
     //
-    // Reported as FAILED, and "last synced" is deliberately not advanced:
-    // stamping "completed" is exactly what let a whole-source quarantine show
-    // up as a green sync with chunksCreated: 0.
-    const allQuarantined =
-      result.documentsQuarantined > 0 && result.chunksCreated === 0;
-    if (result.done && allQuarantined) {
+    // Two things this deliberately does NOT do, both of which were how the
+    // first version missed the common case:
+    //
+    //  - It is a RATIO, not `quarantined > 0 && chunksCreated === 0`. The
+    //    dominant failure of a local model is degradation, not death: timeouts
+    //    under load, intermittent 500s, a model reloading. One document out of
+    //    858 happening to succeed made the all-or-nothing test false and the
+    //    run green. The ratio also removes the mirror false positive, where an
+    //    incremental sync whose documents are all `unchanged` (chunksCreated 0)
+    //    plus one quarantine was reported as a total gate failure.
+    //  - It reads the ACCUMULATED row, not this run's result, and is checked on
+    //    every run rather than only the terminal one. `runIngestion` counts per
+    //    call and the worker does PAGES_PER_RUN pages per job, so a scanner
+    //    down for the first nineteen continuations of a twenty-job sync never
+    //    reached a `result.done` test, and each job re-enqueued the next.
+    const quarantineRatio =
+      totals.documentsProcessed > 0
+        ? totals.documentsQuarantined / totals.documentsProcessed
+        : 0;
+    if (quarantineRatio > MAX_QUARANTINE_RATIO) {
       await updateIngestionJob(db, ingestionId, {
         status: "failed",
         completedAt: new Date(),
         error:
-          `every document was quarantined (${result.documentsQuarantined} of ` +
-          `${result.documentsProcessed} processed) and nothing was indexed; ` +
-          `check the content-safety gates: scanner reachability, the egress ` +
-          `allow-list, and the identifier-scanner pack`,
+          `${totals.documentsQuarantined} of ${totals.documentsProcessed} ` +
+          `documents were quarantined (${Math.round(quarantineRatio * 100)}%, ` +
+          `over the ${Math.round(MAX_QUARANTINE_RATIO * 100)}% threshold) and ` +
+          `${totals.chunksCreated} chunks were indexed; check the ` +
+          `content-safety gates: scanner reachability, the egress allow-list, ` +
+          `and the identifier-scanner pack. The source cursor has already ` +
+          `advanced past these documents, so re-run with mode "full" after ` +
+          `fixing the gate -- an incremental sync will not revisit them.`,
       });
       log.error(
         {
           ...result,
+          totals,
+          quarantineRatio,
           continuationCount,
-          marker: "ingest.sync.all_quarantined",
+          marker: "ingest.sync.quarantine_ratio_exceeded",
         },
-        "sync refused every document and indexed nothing; recorded as failed",
+        "sync quarantined too large a share of the source; recorded as failed",
       );
       return;
     }

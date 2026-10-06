@@ -18,6 +18,34 @@ const { getSourceMock, updateIngestionJobMock, incrementMock, markSyncedMock } =
     markSyncedMock: vi.fn(),
   }));
 
+// incrementIngestionJobCounters RETURNs the accumulated row (one statement, so
+// the handler's ratio test and the durable row cannot disagree). The fake
+// accumulates across calls for the same reason: a continuation test that reset
+// to this run's delta would never exercise the across-pages case the ratio
+// check exists for.
+const accumulated = {
+  documentsProcessed: 0,
+  documentsFailed: 0,
+  chunksCreated: 0,
+  documentsQuarantined: 0,
+};
+function resetAccumulated() {
+  for (const k of Object.keys(accumulated) as (keyof typeof accumulated)[]) {
+    accumulated[k] = 0;
+  }
+}
+function installIncrementFake() {
+  incrementMock.mockImplementation(
+    (_db: unknown, _id: string, delta: Partial<typeof accumulated>) => {
+      accumulated.documentsProcessed += delta.documentsProcessed ?? 0;
+      accumulated.documentsFailed += delta.documentsFailed ?? 0;
+      accumulated.chunksCreated += delta.chunksCreated ?? 0;
+      accumulated.documentsQuarantined += delta.documentsQuarantined ?? 0;
+      return Promise.resolve({ ...accumulated });
+    },
+  );
+}
+
 vi.mock("@rag/db", () => ({
   getSource: getSourceMock,
   updateIngestionJob: updateIngestionJobMock,
@@ -142,7 +170,8 @@ beforeEach(() => {
   captureExceptionMock.mockReset();
   getSourceMock.mockResolvedValue({ ...SOURCE });
   updateIngestionJobMock.mockResolvedValue(undefined);
-  incrementMock.mockResolvedValue(undefined);
+  resetAccumulated();
+  installIncrementFake();
   markSyncedMock.mockResolvedValue(undefined);
   enqueueContinuationMock.mockResolvedValue("cont-1");
   runIngestionMock.mockResolvedValue(runResult(true, "cur1"));
@@ -192,7 +221,7 @@ describe("handleSyncSource per-page continuation", () => {
       "ing-1",
       expect.objectContaining({
         status: "failed",
-        error: expect.stringContaining("every document was quarantined"),
+        error: expect.stringContaining("47 of 47 documents were quarantined"),
       }),
     );
     expect(updateIngestionJobMock).not.toHaveBeenCalledWith(
@@ -202,6 +231,110 @@ describe("handleSyncSource per-page continuation", () => {
     );
     // "last synced" must not advance for a run that indexed nothing.
     expect(markSyncedMock).not.toHaveBeenCalled();
+  });
+
+  it("fails a run that quarantined most of the source but indexed something", async () => {
+    // The case the all-or-nothing test missed, and the likelier one: a local
+    // model degrades rather than dies, so one document succeeds out of 858 and
+    // `chunksCreated === 0` is false. 857/858 is a broken gate, not a sync.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 858,
+        chunksCreated: 2,
+        documentsQuarantined: 857,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(markSyncedMock).not.toHaveBeenCalled();
+  });
+
+  it("completes an all-unchanged incremental sync with one quarantine", async () => {
+    // The mirror false positive of the old guard: every document `unchanged`
+    // means chunksCreated 0 legitimately, so `quarantined > 0 && chunks === 0`
+    // marked a healthy sync as a total gate failure. 1/47 is under the ratio.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 47,
+        chunksCreated: 0,
+        documentsQuarantined: 1,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "completed" }),
+    );
+    expect(markSyncedMock).toHaveBeenCalled();
+  });
+
+  it("stops a multi-page sync mid-run instead of re-enqueueing every page", async () => {
+    // The guard used to be gated on `result.done`, so a scanner down for the
+    // first nineteen continuations of a twenty-job sync never reached it and
+    // each job queued the next. Checked per run now, against the accumulated
+    // row, so the first refusing page ends the job.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(false, "cur1", {
+        documentsProcessed: 50,
+        chunksCreated: 0,
+        documentsQuarantined: 50,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(enqueueContinuationMock).not.toHaveBeenCalled();
+  });
+
+  it("persists the quarantine count to the durable row", async () => {
+    // Without the documents_quarantined column this number lived only in a pino
+    // line, so the row an operator reads said documentsFailed: 0.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 47,
+        chunksCreated: 120,
+        documentsQuarantined: 3,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(incrementMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ documentsQuarantined: 3 }),
+    );
+  });
+
+  it("passes the configured scanner into runIngestion", async () => {
+    // Nothing asserted this, and after the absent-scanner contract was
+    // relaxed, a dropped wire is indistinguishable from the intended default:
+    // Layer 1.5 would be off in every deployment with a green suite.
+    const { deps } = makeDeps();
+
+    await handleSyncSource(job({}), deps);
+
+    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
+      expect.objectContaining({ scanner: deps.scanner }),
+    );
   });
 
   it("still completes when some documents were quarantined but others indexed", async () => {

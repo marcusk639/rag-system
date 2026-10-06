@@ -508,6 +508,14 @@ export async function updateIngestionJob(
  * retries the page and adds its counts again. These counters are observability,
  * not billing; for an exact count, COUNT over `documents`/`chunks` instead.
  */
+/** Accumulated counters on an `ingestion_jobs` row, after an increment. */
+export interface IngestionJobCounters {
+  documentsProcessed: number;
+  documentsFailed: number;
+  chunksCreated: number;
+  documentsQuarantined: number;
+}
+
 export async function incrementIngestionJobCounters(
   db: Db,
   id: string,
@@ -515,15 +523,37 @@ export async function incrementIngestionJobCounters(
     documentsProcessed: number;
     documentsFailed: number;
     chunksCreated: number;
+    // Optional so existing callers compile unchanged; a run that never
+    // quarantines contributes 0 either way.
+    documentsQuarantined?: number;
   },
-): Promise<void> {
-  await db.execute(sql`
+): Promise<IngestionJobCounters> {
+  // RETURNING the accumulated totals rather than a second SELECT: a multi-page
+  // sync runs this once per continuation job, and the caller's "did this whole
+  // sync refuse most of the source?" test has to read the accumulated row, not
+  // the one run's in-memory result. One statement keeps the two consistent.
+  const result = await db.execute<{
+    documents_processed: number;
+    documents_failed: number;
+    chunks_created: number;
+    documents_quarantined: number;
+  }>(sql`
     UPDATE ${ingestionJobs}
     SET documents_processed = documents_processed + ${delta.documentsProcessed},
         documents_failed = documents_failed + ${delta.documentsFailed},
-        chunks_created = chunks_created + ${delta.chunksCreated}
+        chunks_created = chunks_created + ${delta.chunksCreated},
+        documents_quarantined = documents_quarantined + ${delta.documentsQuarantined ?? 0}
     WHERE id = ${id}
+    RETURNING documents_processed, documents_failed, chunks_created,
+              documents_quarantined
   `);
+  const row = result.rows[0];
+  return {
+    documentsProcessed: Number(row?.documents_processed ?? 0),
+    documentsFailed: Number(row?.documents_failed ?? 0),
+    chunksCreated: Number(row?.chunks_created ?? 0),
+    documentsQuarantined: Number(row?.documents_quarantined ?? 0),
+  };
 }
 
 /**
