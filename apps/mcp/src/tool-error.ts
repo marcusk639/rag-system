@@ -9,6 +9,42 @@ import type { Logger } from "pino";
 import { ZodError } from "zod";
 
 /**
+ * `RagError.code`s whose MESSAGE is audited safe to show a caller. This is a
+ * different question from fault attribution above, and conflating them is what
+ * made this guard too permissive: it returned `err.message` for every
+ * RagError, including codes whose messages are built by interpolating
+ * something internal — `EmbeddingError` at packages/rag/src/embeddings/
+ * gemini.ts carries the provider's own error text, on a path every
+ * `search_documents` and `ask` call takes.
+ *
+ * The repo already had the narrower rule, on the HTTP streaming path
+ * (apps/api/src/routes/ask.ts): "Only these two codes are echoed... Anything
+ * else keeps the generic message, because an arbitrary error here can carry
+ * connection details. Adding a code to this set means auditing that error's
+ * message." That reasoning applies at least as strongly to the agent-facing
+ * surface, so this set is that one plus the three client faults whose messages
+ * are caller-authored by construction (a bad argument, a missing id, a busy
+ * source).
+ *
+ * Note this makes MCP stricter than `apps/api/src/error-handler.ts`, which
+ * still echoes every RagError message. That is deliberate: of the two policies
+ * already in the repo, the agent-facing transport takes the stricter one.
+ * Tightening the HTTP non-streaming path the same way belongs in its own
+ * change, with its own consumers considered.
+ *
+ * The CODE is always returned regardless, so an agent can still branch on it.
+ */
+const ECHOABLE_ERROR_CODES = new Set([
+  // Audited on the HTTP streaming path: a hostname, and TRI pattern labels.
+  "EGRESS_BLOCKED",
+  "COMPLIANCE_VIOLATION",
+  // Caller-authored by construction.
+  "VALIDATION_ERROR",
+  "NOT_FOUND",
+  "SYNC_ALREADY_RUNNING",
+]);
+
+/**
  * `RagError.code`s that describe a fault in the *call* rather than in the
  * server — the agent sent something wrong, asked for something absent, or hit
  * a deliberate policy refusal. These are logged at `warn` and not reported to
@@ -47,15 +83,22 @@ function toolError(code: string, message: string): CallToolResult {
  * MCP surface had no equivalent, so the agent-facing transport was the leaky
  * one.
  *
- * The trust boundary matches the HTTP side deliberately, so the two surfaces
- * cannot diverge: a `RagError` carries an operator-authored message and is
- * passed through with its code, and anything else is replaced with a generic
- * message while the real error goes to the log and to Sentry.
+ * Two independent questions, deliberately kept apart — conflating them is what
+ * made an earlier version of this guard too permissive:
  *
- * One consequence worth naming: a `RagError` message is trusted, so whatever a
- * provider adapter interpolates into e.g. `EmbeddingError` reaches the client.
- * That is pre-existing HTTP behaviour, not something this wrapper introduces —
- * tightening it belongs at the `throw` sites, in both surfaces at once.
+ *   - WHOSE FAULT is it (`CLIENT_FAULT_CODES`) decides the log level and
+ *     whether Sentry hears about it.
+ *   - IS THE MESSAGE SHOWABLE (`ECHOABLE_ERROR_CODES`) decides whether the
+ *     caller sees `err.message` or a generic string. The code is always
+ *     returned either way.
+ *
+ * So a `RagError` message is NOT trusted by default. An `EmbeddingError`
+ * interpolates the provider's own error text and is reachable on every
+ * `search_documents`/`ask` call, so it is logged and reported in full and the
+ * caller gets the code with a generic message. This follows the stricter of
+ * the repo's two HTTP policies (`STREAMABLE_ERROR_CODES` in
+ * apps/api/src/routes/ask.ts); `apps/api/src/error-handler.ts` still echoes
+ * every RagError message, and tightening that belongs in its own change.
  *
  * Every tool registration goes through this. A new tool that skips it is a
  * leak, so wrap the handler as the existing six do.
@@ -89,7 +132,15 @@ export function guardToolHandler<Args extends unknown[]>(
           );
           captureException(err, { tool, code: err.code });
         }
-        return toolError(err.code, err.message);
+        // Code always; message only if audited. A non-echoable message is
+        // replaced rather than dropped, so the agent still learns the
+        // category from the code.
+        return toolError(
+          err.code,
+          ECHOABLE_ERROR_CODES.has(err.code)
+            ? err.message
+            : "Internal server error",
+        );
       }
 
       logger.error({ err, tool }, "mcp tool unhandled error");
@@ -125,12 +176,32 @@ export function guardResourceHandler<Args extends unknown[], R>(
     try {
       return await handler(...args);
     } catch (err) {
-      if (err instanceof RagError && CLIENT_FAULT_CODES.has(err.code)) {
-        logger.warn(
-          { err, resource, code: err.code },
-          "mcp resource client error",
+      if (err instanceof RagError) {
+        // The two tests are independent here exactly as in guardToolHandler.
+        // Nesting echoability inside the client-fault check made the inner
+        // branch unreachable (CLIENT_FAULT_CODES is a subset of
+        // ECHOABLE_ERROR_CODES) and gave this path a different echo policy
+        // than the tool path -- EGRESS_BLOCKED is echoable but not a client
+        // fault, so it was genericized here and not there.
+        const clientFault = CLIENT_FAULT_CODES.has(err.code);
+        if (clientFault) {
+          logger.warn(
+            { err, resource, code: err.code },
+            "mcp resource client error",
+          );
+        } else {
+          logger.error(
+            { err, resource, code: err.code, cause: err.cause },
+            "mcp resource server error",
+          );
+          captureException(err, { resource, code: err.code });
+        }
+        throw new McpError(
+          clientFault ? ErrorCode.InvalidParams : ErrorCode.InternalError,
+          ECHOABLE_ERROR_CODES.has(err.code)
+            ? err.message
+            : "Internal server error",
         );
-        throw new McpError(ErrorCode.InvalidParams, err.message);
       }
 
       logger.error({ err, resource }, "mcp resource unhandled error");
