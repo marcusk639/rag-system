@@ -132,16 +132,26 @@ export class ComplianceError extends RagError {
  * (`packages/rag/src/embeddings/gemini.ts`) on a path every search and ask
  * call takes.
  *
- * Membership is decided by CODE, so a code is eligible only if EVERY throw
- * site produces a safe message. The discriminator is NOT whether the message
- * arrives as a constructor parameter — `VALIDATION_ERROR` and `NOT_FOUND` are
- * members and take one. It is WHO AUTHORS the string. `CONNECTOR_AUTH_ERROR`,
+ * Membership is decided by CODE, so eligibility is a claim about every
+ * REQUEST-REACHABLE throw site of that code. Reachability is load-bearing and
+ * cannot be dropped from the rule: `VALIDATION_ERROR` is a member, yet
+ * `packages/connectors/src/git-markdown/index.ts:96` interpolates a server
+ * filesystem path and `String(err)` into one, and
+ * `packages/rag/src/content-scanning/ollama-scanner.ts:409` puts a configured
+ * base URL into a `COMPLIANCE_VIOLATION`. Neither can reach a client: connector
+ * `validate()` runs only in the worker (`apps/worker/src/handlers/
+ * sync-source.ts`), and the rag factories throw at `buildCoreDeps`, so the
+ * process fails to boot rather than answering a request.
+ *
+ * What disqualifies the excluded codes is therefore stronger than "takes a
+ * constructor parameter" — two members take one. `CONNECTOR_AUTH_ERROR`,
  * `CONNECTOR_TRANSIENT_ERROR`, `PARSER_ERROR` and `EMBEDDING_ERROR` are built
- * by internal code out of upstream state — a provider's rejection, the parser
- * sidecar's response, a failed connection — so their safety varies per throw
- * site and cannot be settled by code here; those exclusions are permanent
- * rather than pending-audit. Each member below carries its own justification
- * inline.
+ * by internal code out of upstream state (a provider's rejection, the parser
+ * sidecar's response, a failed connection) ON REQUEST-SERVING PATHS, so no
+ * audit here can settle them. Those exclusions are permanent.
+ *
+ * Adding a throw site for a member is therefore a change to this audit: it
+ * must either be request-unreachable or carry a caller-authored message.
  *
  * It lives in core because two transports enforce it — `registerErrorHandler`
  * and `guardToolHandler` — and a security allow-list duplicated per transport
@@ -160,8 +170,20 @@ export class ComplianceError extends RagError {
  * "Generation failed." — the one surface here where the code is not always
  * returned. A higher bar for a lossier envelope, decided separately.
  */
+export class StorageNotConfiguredError extends RagError {
+  constructor() {
+    super(
+      "object store is not configured; uploads are disabled",
+      "STORAGE_NOT_CONFIGURED",
+      undefined,
+    );
+  }
+}
+
 export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
-  // Audited: a hostname, and TRI pattern labels.
+  // Audited. EGRESS_BLOCKED is a hostname (its full-URL path was removed; see
+  // egress-policy.ts). COMPLIANCE_VIOLATION is TRI pattern labels on the
+  // request path; its config-interpolating sites are boot-time only.
   "EGRESS_BLOCKED",
   "COMPLIANCE_VIOLATION",
   // Caller-authored by construction — a bad argument, a missing id, a busy
@@ -169,11 +191,13 @@ export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "SYNC_ALREADY_RUNNING",
-  // Static strings naming the env vars an operator must set. Suppressing
-  // these told the caller "Service temporarily unavailable" about a permanent
-  // misconfiguration, inviting an indefinite retry; docs/API.md documents the
-  // GENERATION_NOT_CONFIGURED text as the response body, and apps/web renders
-  // both straight to the user.
+  // Fixed strings describing a permanent misconfiguration (the first names
+  // the env vars to set; the second just reports uploads are disabled). Both
+  // are thrown by zero-argument error classes, so neither can carry caller or
+  // server data. Suppressing them reported a permanent fault as "Service
+  // temporarily unavailable", inviting an indefinite retry; docs/API.md
+  // documents the GENERATION_NOT_CONFIGURED text as the response body, and
+  // apps/web renders both straight to the user.
   "GENERATION_NOT_CONFIGURED",
   "STORAGE_NOT_CONFIGURED",
 ]);

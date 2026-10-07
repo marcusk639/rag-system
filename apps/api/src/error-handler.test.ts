@@ -178,23 +178,35 @@ describe("registerErrorHandler — the suppression policy is closed", () => {
   });
 
   it("never sends error.cause to the client, even for an echoable code", async () => {
-    // At packages/rag/src/parser/parser-client.ts:50 the MESSAGE is already
-    // generic and the whole exposure sits in `cause` (an undici error carrying
-    // PARSER_URL). Every other case here builds errors without a cause, so a
-    // `clientMessage` that appended it would keep this file green.
+    // The cause MUST be a real Error: production causes always are (an undici
+    // error at parser-client.ts:50, `new Error(text.slice(0,500))` at :87, the
+    // provider's object at openai.ts:106). A plain object would make this test
+    // pass for the wrong reason -- `String({detail})` is "[object Object]" and
+    // `({detail}).message` is undefined, so both natural ways to leak a cause
+    // would stay green here while leaking in production.
+    //
+    // At parser-client.ts:50 the MESSAGE is already generic and the whole
+    // exposure sits in the cause, so this is the realistic leak shape.
+    const cause = new Error(LEAKY_MESSAGE);
+
     const suppressed = await inject(
-      new RagError("Parser request failed (500)", "PARSER_ERROR", {
-        detail: LEAKY_MESSAGE,
-      }),
+      new RagError("Parser request failed (500)", "PARSER_ERROR", cause),
     );
+    // Positive control FIRST: prove the cause was attached and reachable, so
+    // this cannot go vacuous if RagError ever stops forwarding a cause.
+    expect(suppressed.logLines.join("\n")).toContain(SENTINEL);
     expect(suppressed.res.body).not.toContain(SENTINEL);
+    expect(JSON.stringify(suppressed.res.headers)).not.toContain(SENTINEL);
+    // toEqual fails on ANY appended text, sentinel-bearing or not.
+    expect(suppressed.res.json()).toEqual({
+      error: { code: "PARSER_ERROR", message: "Upstream service error" },
+    });
 
     const echoable = await inject(
-      new RagError("sourceId must be a uuid", "VALIDATION_ERROR", {
-        detail: LEAKY_MESSAGE,
-      }),
+      new RagError("sourceId must be a uuid", "VALIDATION_ERROR", cause),
     );
     expect(echoable.res.body).not.toContain(SENTINEL);
+    expect(JSON.stringify(echoable.res.headers)).not.toContain(SENTINEL);
     expect(echoable.res.json()).toEqual({
       error: { code: "VALIDATION_ERROR", message: "sourceId must be a uuid" },
     });
