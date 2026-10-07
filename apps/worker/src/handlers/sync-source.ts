@@ -32,6 +32,23 @@ const PAGES_PER_RUN = 5;
 const MAX_QUARANTINE_RATIO = 0.25;
 
 /**
+ * Documents a sync must have processed before the quarantine RATIO is treated
+ * as evidence of anything.
+ *
+ * A ratio needs a sample. Without a floor, one document processed and
+ * quarantined is 100% and fails the run -- but that is also Layer 1.5 working
+ * exactly as designed on a one-document incremental sync, which is the common
+ * shape here (the live corpus is ~48 documents, and an incremental sync
+ * processes only what changed). The ratio was added to catch a BROKEN gate;
+ * at n=1 it cannot distinguish that from a correct single detection.
+ *
+ * Below the floor the run is not failed, but a quarantine is still logged --
+ * not failing is not the same as saying nothing. 8 is the smallest sample at
+ * which exceeding 25% takes more than two documents.
+ */
+const MIN_QUARANTINE_SAMPLE = 8;
+
+/**
  * pg-boss hands the worker a job whose `data` is the SyncSourcePayload we put
  * on the queue from the API. We:
  *   1. Resolve the source row from Postgres.
@@ -184,7 +201,27 @@ export async function handleSyncSource(
       totals.documentsProcessed > 0
         ? totals.documentsQuarantined / totals.documentsProcessed
         : 0;
-    if (quarantineRatio > MAX_QUARANTINE_RATIO) {
+    if (totals.documentsProcessed < MIN_QUARANTINE_SAMPLE) {
+      // Too few documents for the ratio to mean anything. Say so rather than
+      // staying silent: a quarantine below the floor is the only evidence a
+      // human gets that the gate fired at all, and a gate that is genuinely
+      // broken on a tiny source will cross the floor as soon as the source
+      // grows or a full re-sync runs.
+      if (totals.documentsQuarantined > 0) {
+        log.warn(
+          {
+            totals,
+            quarantineRatio,
+            minSample: MIN_QUARANTINE_SAMPLE,
+            marker: "ingest.sync.quarantine_sample_too_small",
+          },
+          `${totals.documentsQuarantined} of ${totals.documentsProcessed} ` +
+            `documents were quarantined, but the sync processed fewer than ` +
+            `${MIN_QUARANTINE_SAMPLE} documents, so the ratio is not treated ` +
+            `as evidence of a broken gate; not recorded as failed`,
+        );
+      }
+    } else if (quarantineRatio > MAX_QUARANTINE_RATIO) {
       await updateIngestionJob(db, ingestionId, {
         status: "failed",
         completedAt: new Date(),

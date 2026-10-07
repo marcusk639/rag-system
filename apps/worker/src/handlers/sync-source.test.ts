@@ -75,17 +75,21 @@ vi.mock("@rag/ingestion", () => ({
   MAX_SYNC_CONTINUATIONS: 100_000,
 }));
 
+// Spies, not no-ops: this handler's whole job is making a quarantine VISIBLE,
+// so what it logs is behaviour worth asserting. `child()` returns the same
+// object so a call on the child is observable here.
 function fakeLogger() {
   const l: Record<string, unknown> = {};
   l.child = () => l;
-  l.info = () => undefined;
-  l.warn = () => undefined;
-  l.error = () => undefined;
-  l.debug = () => undefined;
+  l.info = vi.fn();
+  l.warn = vi.fn();
+  l.error = vi.fn();
+  l.debug = vi.fn();
   return l;
 }
 
 function makeDeps() {
+  const logger = fakeLogger();
   const connector = {
     kind: "sharepoint",
     validate: vi.fn(async () => undefined),
@@ -94,7 +98,7 @@ function makeDeps() {
   };
   const deps = {
     db: {},
-    logger: fakeLogger(),
+    logger,
     parser: {},
     chunker: {},
     embedder: {},
@@ -104,7 +108,7 @@ function makeDeps() {
     makeConnector: vi.fn(() => connector),
     close: vi.fn(),
   } as unknown as WorkerDeps;
-  return { deps, connector };
+  return { deps, logger, connector };
 }
 
 function runResult(
@@ -254,6 +258,74 @@ describe("handleSyncSource per-page continuation", () => {
       expect.objectContaining({ status: "failed" }),
     );
     expect(markSyncedMock).not.toHaveBeenCalled();
+  });
+
+  it("completes a tiny sync whose single document was legitimately quarantined", async () => {
+    // A ratio needs a sample. One document processed and quarantined is 100%,
+    // which the bare ratio reads as a total gate failure -- but it is also
+    // Layer 1.5 working exactly as designed on a one-document incremental
+    // sync, which is the common shape for this corpus. Below the sample floor
+    // the ratio says nothing, so the run must not be recorded as failed.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 1,
+        chunksCreated: 0,
+        documentsQuarantined: 1,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).not.toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(markSyncedMock).toHaveBeenCalled();
+  });
+
+  it("still warns when an under-floor sync quarantined anything", async () => {
+    // Not failing is not the same as saying nothing: a quarantine below the
+    // floor is still the only evidence a human gets that the gate fired.
+    const { deps, logger } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 2,
+        chunksCreated: 1,
+        documentsQuarantined: 1,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        marker: "ingest.sync.quarantine_sample_too_small",
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("applies the ratio once the sample reaches the floor", async () => {
+    // The floor must not become a hole: at the floor the ratio applies again,
+    // so a gate failing most of a small-but-measurable source still fails.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 8,
+        chunksCreated: 1,
+        documentsQuarantined: 7,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "failed" }),
+    );
   });
 
   it("completes an all-unchanged incremental sync with one quarantine", async () => {
