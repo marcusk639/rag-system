@@ -107,10 +107,19 @@ services:
       # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
       # Set an explicit model only to OVERRIDE the provider default.
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
-      # Where the local ONNX embedder reads its weights. The app images bake a
-      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
-      # volume holding the weights) or a client-data deployment boots cold.
-      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Defaults to the path the app images bake the pre-warmed cache into, and
+      # must NOT default to empty. Compose's `environment:` always overrides an
+      # image's Dockerfile `ENV`, including when the substituted value is an
+      # empty string -- so `${HF_CACHE_DIR:-}` would blank the images' own
+      # `ENV HF_CACHE_DIR=/app/.hf-cache`. local.ts reads this with a truthy
+      # check, so an empty value is skipped and @huggingface/transformers falls
+      # back to a cache dir inside node_modules: every default `compose up`
+      # would cold-download the weights the image already carries, and under
+      # COMPLIANCE_MODE=client-data (allowRemoteModels=false) that is a hard
+      # boot failure rather than a slow first query.
+      #
+      # Override only to point at a volume that genuinely holds the weights.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-/app/.hf-cache}
       # Compliance / egress
       COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
       EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
@@ -261,10 +270,19 @@ services:
       # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
       # Set an explicit model only to OVERRIDE the provider default.
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
-      # Where the local ONNX embedder reads its weights. The app images bake a
-      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
-      # volume holding the weights) or a client-data deployment boots cold.
-      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Defaults to the path the app images bake the pre-warmed cache into, and
+      # must NOT default to empty. Compose's `environment:` always overrides an
+      # image's Dockerfile `ENV`, including when the substituted value is an
+      # empty string -- so `${HF_CACHE_DIR:-}` would blank the images' own
+      # `ENV HF_CACHE_DIR=/app/.hf-cache`. local.ts reads this with a truthy
+      # check, so an empty value is skipped and @huggingface/transformers falls
+      # back to a cache dir inside node_modules: every default `compose up`
+      # would cold-download the weights the image already carries, and under
+      # COMPLIANCE_MODE=client-data (allowRemoteModels=false) that is a hard
+      # boot failure rather than a slow first query.
+      #
+      # Override only to point at a volume that genuinely holds the weights.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-/app/.hf-cache}
       # Compliance / egress
       COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
       EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
@@ -301,10 +319,19 @@ services:
       # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
       # Set an explicit model only to OVERRIDE the provider default.
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
-      # Where the local ONNX embedder reads its weights. The app images bake a
-      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
-      # volume holding the weights) or a client-data deployment boots cold.
-      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Defaults to the path the app images bake the pre-warmed cache into, and
+      # must NOT default to empty. Compose's `environment:` always overrides an
+      # image's Dockerfile `ENV`, including when the substituted value is an
+      # empty string -- so `${HF_CACHE_DIR:-}` would blank the images' own
+      # `ENV HF_CACHE_DIR=/app/.hf-cache`. local.ts reads this with a truthy
+      # check, so an empty value is skipped and @huggingface/transformers falls
+      # back to a cache dir inside node_modules: every default `compose up`
+      # would cold-download the weights the image already carries, and under
+      # COMPLIANCE_MODE=client-data (allowRemoteModels=false) that is a hard
+      # boot failure rather than a slow first query.
+      #
+      # Override only to point at a volume that genuinely holds the weights.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-/app/.hf-cache}
       # Compliance / egress
       COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
       EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
