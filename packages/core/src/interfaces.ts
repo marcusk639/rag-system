@@ -1,6 +1,7 @@
 import type { Readable } from "node:stream";
 import type {
   Chunk,
+  DocumentClass,
   Embedding,
   ParsedDocument,
   RetrievalResult,
@@ -109,6 +110,15 @@ export interface GenerationResult {
     score: number;
     /** Source document's last-modified date (YYYY-MM-DD), when known. */
     modifiedAt?: string;
+    /**
+     * §7216/GLBA data classification of the source document, for display on
+     * staff surfaces. OMITTED, never defaulted, when the document is untagged:
+     * `isSourceUrlExposable` (metadata-policy.ts) treats an absent class as
+     * stricter than A, so rendering "A" here would invent a reassurance the
+     * data does not support. Only A/B can reach the index — C/D are refused by
+     * the ingestion gate — so this is a label, not a new disclosure surface.
+     */
+    docClass?: DocumentClass;
   }>;
 }
 

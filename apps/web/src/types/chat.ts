@@ -15,6 +15,12 @@ export interface Citation {
   score: number;
   /** Source document's last-modified date (YYYY-MM-DD), when known. */
   modifiedAt?: string;
+  /**
+   * §7216/GLBA class of the source document, when tagged. Absent means
+   * UNTAGGED, which the server treats as stricter than A — never render a
+   * default here.
+   */
+  docClass?: "A" | "B" | "C" | "D";
 }
 
 export interface Message {

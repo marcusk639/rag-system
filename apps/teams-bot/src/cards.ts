@@ -46,7 +46,7 @@ export function answerCard(a: AskAnswer): Attachment {
     for (const citation of a.citations) {
       const citationItem: AdaptiveCardElement = {
         type: "TextBlock",
-        text: `${citation.index}. ${citation.title}${citation.modifiedAt ? ` (modified ${citation.modifiedAt})` : ""}`,
+        text: `${citation.index}. ${citation.title}${citation.modifiedAt ? ` (modified ${citation.modifiedAt})` : ""}${citation.docClass ? ` [Class ${citation.docClass}]` : ""}`,
         wrap: true,
       };
 

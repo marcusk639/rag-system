@@ -124,6 +124,60 @@ describe("ChatInterface data-testid hooks", () => {
     expect(screen.getByTestId("citation-chip")).toHaveTextContent("2025-11-04");
   });
 
+  it("shows the data-class badge when the document is tagged", () => {
+    render(
+      <ChatInterface
+        session={sessionWith({
+          id: "10",
+          role: "assistant",
+          content: "Answer [1].",
+          citations: [
+            {
+              index: 1,
+              documentId: "d",
+              title: "Intake SOP",
+              chunkId: "c",
+              score: 1,
+              docClass: "B",
+            },
+          ],
+        })}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    expect(screen.getByTestId("citation-class")).toHaveTextContent("B");
+  });
+
+  it("renders NO class badge for an untagged document", () => {
+    render(
+      <ChatInterface
+        session={sessionWith({
+          id: "11",
+          role: "assistant",
+          content: "Answer [1].",
+          citations: [
+            {
+              index: 1,
+              documentId: "d",
+              title: "Untagged note",
+              chunkId: "c",
+              score: 1,
+            },
+          ],
+        })}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    // An absent class is stricter than A server-side (metadata-policy.ts), so a
+    // default badge here would invent a reassurance the data does not support.
+    expect(screen.getByTestId("citation-chip")).toBeInTheDocument();
+    expect(screen.queryByTestId("citation-class")).toBeNull();
+  });
+
   it("gives the icon-only send button an accessible name", () => {
     render(
       <ChatInterface

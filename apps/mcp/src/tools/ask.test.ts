@@ -138,3 +138,41 @@ describe("ask tool — audit logging", () => {
     expect(deps.logger.error).toHaveBeenCalled();
   });
 });
+
+describe("ask tool — data-class label in the Sources footer", () => {
+  async function footerFor(citation: Record<string, unknown>) {
+    askQuestionMock.mockClear();
+    askQuestionMock.mockResolvedValue({
+      ...askResultFixture(),
+      citations: [citation],
+    });
+    const { server, handlers } = fakeServer();
+    registerAsk(server, makeDeps(), ADMIN_SCOPE);
+    const result = (await handlers.get("ask")!({
+      question: "what is our refund policy",
+    })) as { content?: Array<{ text?: string }> };
+    return result.content?.[0]?.text ?? "";
+  }
+
+  it("shows the class when the cited document is tagged", async () => {
+    const text = await footerFor({
+      index: 1,
+      title: "Doc",
+      documentId: "doc-1",
+      docClass: "B",
+    });
+    expect(text).toContain("Class B");
+  });
+
+  it("shows no class for an untagged document", async () => {
+    // An absent class is stricter than A server-side (metadata-policy.ts), so
+    // agents must not be told a class the data does not assert.
+    const text = await footerFor({
+      index: 1,
+      title: "Doc",
+      documentId: "doc-1",
+    });
+    expect(text).toContain("[1] Doc");
+    expect(text).not.toContain("Class");
+  });
+});

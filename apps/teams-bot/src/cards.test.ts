@@ -139,3 +139,31 @@ describe("cards", () => {
     expect(text(att)).toContain("Intake SOP (modified 2025-11-04)");
   });
 });
+
+describe("cards — data-class label", () => {
+  it("labels a tagged citation with its class", () => {
+    const att = answerCard({
+      answer: "Answer [1].",
+      citations: [
+        {
+          index: 1,
+          title: "Intake SOP",
+          chunkId: "c",
+          score: 1,
+          docClass: "B",
+        },
+      ],
+    } as never);
+    expect(text(att)).toContain("[Class B]");
+  });
+
+  it("omits the label for an untagged citation", () => {
+    // Absent class is stricter than A server-side; a default would mislead.
+    const att = answerCard({
+      answer: "Answer [1].",
+      citations: [{ index: 1, title: "Untagged", chunkId: "c", score: 1 }],
+    } as never);
+    expect(text(att)).toContain("Untagged");
+    expect(text(att)).not.toContain("Class");
+  });
+});
