@@ -1,4 +1,4 @@
-import { RagError } from "@rag/core";
+import { ECHOABLE_ERROR_CODES, RagError } from "@rag/core";
 import { captureException } from "@rag/runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
@@ -45,6 +45,24 @@ function payload(code: string, message: string): ErrorPayload {
 }
 
 /**
+ * Decide what the client is allowed to read.
+ *
+ * Gated on `ECHOABLE_ERROR_CODES` (`@rag/core`) — the audited set shared with
+ * the MCP surface — and NOT on the status, because the two do not line up:
+ * `EGRESS_BLOCKED` is a 503 whose message is audited (a hostname the operator
+ * needs), while an unaudited 4xx would otherwise echo simply for being a
+ * client fault. Everything outside the set gets fixed text and logs the real
+ * message, with `error.code` returned either way.
+ */
+function clientMessage(code: string, status: number, message: string): string {
+  if (ECHOABLE_ERROR_CODES.has(code)) return message;
+  if (status < 500) return "Bad request";
+  if (status === 502) return "Upstream service error";
+  if (status === 503) return "Service temporarily unavailable";
+  return "Internal server error";
+}
+
+/**
  * Register a single global error handler. We log the full error server-side
  * (with stack + cause) and return a sanitized envelope to the client so we
  * never leak internal details (DB errors, stack frames, secret-laden URLs).
@@ -80,7 +98,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
             code: error.code,
           });
         }
-        return reply.code(status).send(payload(error.code, error.message));
+        return reply
+          .code(status)
+          .send(
+            payload(
+              error.code,
+              clientMessage(error.code, status, error.message),
+            ),
+          );
       }
 
       // Fastify-native validation error (e.g. malformed JSON body).

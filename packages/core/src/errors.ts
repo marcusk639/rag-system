@@ -111,3 +111,40 @@ export class ComplianceError extends RagError {
     super(message, "COMPLIANCE_VIOLATION", undefined);
   }
 }
+
+/**
+ * `RagError.code`s whose MESSAGE has been audited as safe to return to a
+ * caller. Every other code gets a generic string; the CODE is always returned
+ * either way, so callers can still branch on the category.
+ *
+ * This is a different question from whose fault the error is, and conflating
+ * the two is what made an earlier version of the MCP guard too permissive.
+ * Fault attribution decides the log level and whether Sentry hears about it —
+ * it is expressed as the sub-500 entries of `STATUS_BY_CODE`
+ * (`apps/api/src/error-handler.ts`) and as `CLIENT_FAULT_CODES`
+ * (`apps/mcp/src/tool-error.ts`). Showability is THIS set, and it is not the
+ * same shape: `EGRESS_BLOCKED` is a server fault (503) whose message is
+ * nonetheless audited — it is a hostname the operator needs to see.
+ *
+ * Adding a code here means auditing what that error class interpolates into
+ * its message. `EmbeddingError` is the standing example of what must stay out:
+ * it carries the embedding provider's own error text
+ * (`packages/rag/src/embeddings/gemini.ts`) on a path every search and ask
+ * call takes.
+ *
+ * It lives in core because two transports enforce it — `registerErrorHandler`
+ * and `guardToolHandler` — and a security allow-list duplicated per transport
+ * drifts. `STREAMABLE_ERROR_CODES` (`apps/api/src/routes/ask.ts`) is
+ * deliberately NOT this set: mid-stream there is no envelope to carry a code,
+ * so it stays narrower.
+ */
+export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
+  // Audited: a hostname, and TRI pattern labels.
+  "EGRESS_BLOCKED",
+  "COMPLIANCE_VIOLATION",
+  // Caller-authored by construction — a bad argument, a missing id, a busy
+  // source.
+  "VALIDATION_ERROR",
+  "NOT_FOUND",
+  "SYNC_ALREADY_RUNNING",
+]);
