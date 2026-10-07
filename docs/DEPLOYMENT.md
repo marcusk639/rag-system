@@ -114,14 +114,17 @@ are inert to other images. Note that rolling back re-crosses the glibc boundary,
 ### Migrations on deploy (Railway)
 
 Migrations run **automatically** via the `rag-worker` service's `preDeployCommand`
-(`pnpm --filter @rag/db migrate`, see `apps/worker/railway.json`). Railway runs a
+(`node node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json:8`). Railway runs a
 pre-deploy command between build and release, on the private network with the
 service's env vars; if it exits non-zero the deployment is aborted. Because it
 runs against the **new** image, any migration committed alongside code ships and
 applies before that code serves traffic.
 
-**The worker is the single migration owner** — it boots without the index-assert
-guard that makes `rag-api`/`rag-mcp` crash-loop on a not-yet-migrated DB. Do NOT
+**The worker is the single migration owner** — not because it skips the
+index-assert guard (it does not: `apps/worker/src/main.ts:48` asserts and
+crashes exactly like api and mcp), but because the pre-deploy command is a
+separate process running only the migrate entrypoint, which never boots the app
+and so never reaches that assert. Do NOT
 add the same `preDeployCommand` to `rag-api`/`rag-mcp`: concurrent runs of the
 `0000_init.sql` bootstrap (HNSW/GIN index creation) would contend.
 

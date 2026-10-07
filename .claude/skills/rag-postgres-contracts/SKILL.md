@@ -51,11 +51,20 @@ collections are detectable.
 ## Boot-time index assertions
 
 `packages/db/src/required-indexes.ts` exports `REQUIRED_SEARCH_INDEXES` and
-`REQUIRED_CHUNK_TRIGGERS` (`chunks_tsv_update`), asserted at startup. api and mcp
-**crash-loop** if these are missing. The worker boots _without_ the assert on
-purpose — it is the single migration owner and must be able to start on an
-un-migrated database to run migrations. Do not add the assert to the worker, and
-do not give api/mcp a `preDeployCommand` migration step.
+`REQUIRED_CHUNK_TRIGGERS` (`chunks_tsv_update`). **All three backend apps assert
+them at startup and crash rather than serve degraded retrieval** — api
+(`apps/api/src/main.ts:34`), mcp (`:45`) and worker
+(`apps/worker/src/main.ts:48`). The worker's is the one that matters most: it is
+the process that writes embeddings, so a missing `chunks_tsv_update` trigger
+there would silently repopulate the corpus with a NULL `tsv`.
+
+Migrations can still run against an un-migrated database because they do not
+run inside any app. `apps/worker/railway.json:8` sets
+`preDeployCommand` to `node node_modules/@rag/db/dist/migrate.js` — a separate
+process invoking the migrate entrypoint only, which never boots the app and so
+never reaches a startup assert (`packages/db/src/migrate.ts` has no reference to
+`assertRequiredIndexes`). Do NOT give api/mcp the same `preDeployCommand`:
+concurrent `0000_init` bootstraps contend.
 
 ## Migrations are forward-only
 
