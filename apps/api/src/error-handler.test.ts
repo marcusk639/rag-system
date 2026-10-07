@@ -55,16 +55,37 @@ async function inject(thrown: unknown) {
   return { res, logLines };
 }
 
-describe("registerErrorHandler — unaudited RagError messages are not echoed", () => {
-  // Every code in STATUS_BY_CODE that is NOT in ECHOABLE_ERROR_CODES, with
-  // its status and the generic text the client should get instead.
-  const suppressed: Array<[string, number, string]> = [
-    ["CONNECTOR_AUTH_ERROR", 502, "Upstream service error"],
-    ["PARSER_ERROR", 502, "Upstream service error"],
-    ["EMBEDDING_ERROR", 502, "Upstream service error"],
-    ["CONNECTOR_TRANSIENT_ERROR", 503, "Service temporarily unavailable"],
-  ];
+// Every code in STATUS_BY_CODE that is NOT in ECHOABLE_ERROR_CODES, with its
+// status and the generic text the client should get instead. The partition test
+// derives from THIS table, so a new code cannot be classified without also
+// stating what body it returns.
+const suppressed: Array<[string, number, string]> = [
+  ["CONNECTOR_AUTH_ERROR", 502, "Upstream service error"],
+  ["PARSER_ERROR", 502, "Upstream service error"],
+  ["EMBEDDING_ERROR", 502, "Upstream service error"],
+  ["CONNECTOR_TRANSIENT_ERROR", 503, "Service temporarily unavailable"],
+];
 
+/**
+ * Gated on `ECHOABLE_ERROR_CODES` (`@rag/core`), not a status threshold.
+ * `EGRESS_BLOCKED` is the case that makes the difference: it maps to 503, but
+ * its message is a hostname audited as safe, and `/ask`'s streaming path and
+ * the MCP surface both already show it. Suppressing it here would make the
+ * non-streaming response disagree with the stream for one and the same error.
+ */
+const echoable: Array<[string, number]> = [
+  ["VALIDATION_ERROR", 400],
+  ["NOT_FOUND", 404],
+  ["SYNC_ALREADY_RUNNING", 409],
+  ["COMPLIANCE_VIOLATION", 422],
+  ["EGRESS_BLOCKED", 503],
+  // Static strings naming env vars. Suppressing these reported a permanent
+  // misconfiguration as "temporarily unavailable".
+  ["GENERATION_NOT_CONFIGURED", 503],
+  ["STORAGE_NOT_CONFIGURED", 503],
+];
+
+describe("registerErrorHandler — unaudited RagError messages are not echoed", () => {
   it.each(suppressed)(
     "%s -> %i with a generic message and no internal detail",
     async (code, status, generic) => {
@@ -100,25 +121,6 @@ describe("registerErrorHandler — unaudited RagError messages are not echoed", 
 });
 
 describe("registerErrorHandler — audited RagError messages are echoed", () => {
-  /**
-   * `ECHOABLE_ERROR_CODES` (`@rag/core`), not a status threshold. `EGRESS_BLOCKED`
-   * is the case that makes the difference: it maps to 503, but its message is a
-   * hostname audited as safe, and `/ask`'s streaming path and the MCP surface
-   * both already show it. Suppressing it here would make the non-streaming
-   * response disagree with the stream for one and the same error.
-   */
-  const echoable: Array<[string, number]> = [
-    ["VALIDATION_ERROR", 400],
-    ["NOT_FOUND", 404],
-    ["SYNC_ALREADY_RUNNING", 409],
-    ["COMPLIANCE_VIOLATION", 422],
-    ["EGRESS_BLOCKED", 503],
-    // Static strings naming env vars. Suppressing these reported a permanent
-    // misconfiguration as "temporarily unavailable".
-    ["GENERATION_NOT_CONFIGURED", 503],
-    ["STORAGE_NOT_CONFIGURED", 503],
-  ];
-
   it.each(echoable)("%s -> %i keeps its message", async (code, status) => {
     const message = "sourceId must be a uuid";
     const { res } = await inject(new RagError(message, code));
@@ -133,9 +135,9 @@ describe("registerErrorHandler — the suppression policy is closed", () => {
    * Growing `ECHOABLE_ERROR_CODES` or `STATUS_BY_CODE` without a test row was
    * the one way to reopen the leak while this file stayed green: neither table
    * above enumerates itself, so a new `DB_ERROR: 500` plus an allow-list entry
-   * would have gone unnoticed. This asserts the two tables PARTITION
-   * STATUS_BY_CODE exactly, so any added code fails here until it is
-   * classified deliberately.
+   * would have gone unnoticed. This asserts the two `it.each` tables PARTITION
+   * STATUS_BY_CODE exactly — derived FROM those tables, so a new code must gain
+   * a row asserting its actual response body, not merely a name in a list.
    */
   it("every STATUS_BY_CODE code is covered by exactly one table above", () => {
     const echoed = Object.keys(STATUS_BY_CODE).filter((c) =>
@@ -145,25 +147,11 @@ describe("registerErrorHandler — the suppression policy is closed", () => {
       (c) => !ECHOABLE_ERROR_CODES.has(c),
     );
 
-    expect(suppressedCodes.sort()).toEqual(
-      [
-        "CONNECTOR_AUTH_ERROR",
-        "CONNECTOR_TRANSIENT_ERROR",
-        "EMBEDDING_ERROR",
-        "PARSER_ERROR",
-      ].sort(),
-    );
-    expect(echoed.sort()).toEqual(
-      [
-        "COMPLIANCE_VIOLATION",
-        "EGRESS_BLOCKED",
-        "GENERATION_NOT_CONFIGURED",
-        "NOT_FOUND",
-        "STORAGE_NOT_CONFIGURED",
-        "SYNC_ALREADY_RUNNING",
-        "VALIDATION_ERROR",
-      ].sort(),
-    );
+    // Compared against the it.each tables themselves, NOT a second copy of the
+    // code names. That is what makes the claim above true: a new code must gain
+    // a behavioral row, not merely a name in a list here.
+    expect(suppressedCodes.sort()).toEqual(suppressed.map((r) => r[0]).sort());
+    expect(echoed.sort()).toEqual(echoable.map((r) => r[0]).sort());
   });
 
   it("every echoable code has a status mapping", () => {
