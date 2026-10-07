@@ -172,7 +172,7 @@ Set both variables explicitly. `HF_CACHE_DIR` unset means the weights land insid
 # In Dockerfile (worker and api), after `pnpm install`:
 RUN HF_CACHE_DIR=/opt/hf-cache \
     EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 \
-    npx tsx scripts/warm-model.ts
+    node_modules/.bin/tsx scripts/warm-model.ts
 ```
 
 The build-stage path must be the same one the runtime reads, so keep `HF_CACHE_DIR=/opt/hf-cache` in the service's own environment too.
@@ -180,7 +180,7 @@ The build-stage path must be the same one the runtime reads, so keep `HF_CACHE_D
 Or run it manually before the first deploy:
 
 ```sh
-HF_CACHE_DIR=/opt/hf-cache EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 npx tsx scripts/warm-model.ts
+HF_CACHE_DIR=/opt/hf-cache node_modules/.bin/tsx scripts/warm-model.ts
 ```
 
 Subsequent container restarts read from the cache volume — no network egress, no download delay. Mount `HF_CACHE_DIR` as a persistent volume so it survives redeploys.
@@ -199,7 +199,10 @@ Subsequent container restarts read from the cache volume — no network egress, 
 - [ ] `HF_CACHE_DIR` — mounted as a persistent volume
 - [ ] `EGRESS_ALLOWED_HOSTS` — set to the generation vendor only (not the embedding API)
 - [ ] `COMPLIANCE_MODE=client-data` — set once a DPA is filed in `docs/compliance/`
-- [ ] `scripts/warm-model.ts` — runs in Dockerfile before first deploy
+- [ ] Model cache — the app images COPY it from the digest-pinned
+      `rag-warm-base` image (see `docker/Dockerfile.warm-base`); nothing to run
+      by hand. Only a non-Docker or mounted-volume deployment needs
+      `scripts/warm-model.ts`.
 
 ---
 

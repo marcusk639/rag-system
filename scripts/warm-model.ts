@@ -14,18 +14,23 @@
  * cache-populated check the build gates on.
  *
  * Environment variables:
- *   EMBEDDING_MODEL   — HuggingFace model id (default here: Xenova/bge-base-en-v1.5).
- *                       NOTE this differs from the runtime default: config.ts
- *                       defaults EMBEDDING_MODEL to gemini-embedding-001
- *                       regardless of provider, so warming without it set
- *                       warms a model the service never asks for.
+ *   EMBEDDING_MODEL   — HuggingFace model id. Unset or empty, this falls back
+ *                       to `defaultEmbeddingModel("local")` from @rag/core —
+ *                       the SAME function loadConfig uses — so the warmed
+ *                       model cannot drift from the one the service asks for.
+ *                       This script does not call loadConfig (that would
+ *                       demand a full runtime env, DATABASE_URL included), so
+ *                       sharing the function is what keeps the two in step.
  *   HF_CACHE_DIR      — cache directory. Unset, @huggingface/transformers caches
  *                       inside its own node_modules directory, which does not survive
  *                       a multi-stage image copy or a prod-only reinstall. Set it.
  */
+import { defaultEmbeddingModel } from "@rag/core";
 import { createEmbeddingProvider } from "@rag/rag";
 
-const model = process.env["EMBEDDING_MODEL"] ?? "Xenova/bge-base-en-v1.5";
+// `||` not `??`: Compose and Railway inject an always-present but empty
+// variable rather than omitting it, and "" must fall through too.
+const model = process.env["EMBEDDING_MODEL"] || defaultEmbeddingModel("local");
 const cacheDir = process.env["HF_CACHE_DIR"];
 
 if (cacheDir) {
