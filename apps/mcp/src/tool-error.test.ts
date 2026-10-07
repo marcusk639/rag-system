@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EmbeddingError, NotFoundError } from "@rag/core";
+import {
+  ComplianceError,
+  EgressError,
+  EmbeddingError,
+  NotFoundError,
+} from "@rag/core";
 import type { Logger } from "pino";
 import { z } from "zod";
 
@@ -9,7 +14,7 @@ const { captureExceptionMock } = vi.hoisted(() => ({
 
 vi.mock("@rag/runtime", () => ({ captureException: captureExceptionMock }));
 
-import { guardToolHandler } from "./tool-error.js";
+import { guardResourceHandler, guardToolHandler } from "./tool-error.js";
 
 function fakeLogger() {
   return {
@@ -39,6 +44,40 @@ const LEAKY =
 
 beforeEach(() => {
   captureExceptionMock.mockClear();
+});
+
+describe("guardResourceHandler", () => {
+  // The resource guard used to nest echoability inside the client-fault check,
+  // which made the inner branch unreachable and left this path with a
+  // different echo policy than the tool path. EGRESS_BLOCKED is the code that
+  // exposes the difference: echoable, but not a client fault.
+  it("echoes an echoable non-client-fault and still reports it", async () => {
+    const logger = fakeLogger();
+    const guarded = guardResourceHandler("documents", logger, () => {
+      throw new EgressError(
+        "host not in EGRESS_ALLOWED_HOSTS: ollama.railway.internal",
+      );
+    });
+
+    const err = (await guarded().catch((e: unknown) => e)) as Error;
+
+    expect(err.message).toContain("EGRESS_ALLOWED_HOSTS");
+    // Not a client fault, so it is a server error and Sentry hears about it.
+    expect(logger.error).toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalled();
+  });
+
+  it("does not echo a non-echoable message", async () => {
+    const guarded = guardResourceHandler("documents", fakeLogger(), () => {
+      throw new EmbeddingError("Gemini failed: quota for project 12345");
+    });
+
+    const err = (await guarded().catch((e: unknown) => e)) as Error;
+
+    // McpError prefixes its message with the JSON-RPC code.
+    expect(err.message).toContain("Internal server error");
+    expect(err.message).not.toContain("12345");
+  });
 });
 
 describe("guardToolHandler", () => {
@@ -119,7 +158,47 @@ describe("guardToolHandler", () => {
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
 
-  it("reports a server-side RagError while still returning its message", async () => {
+  it("does not echo an EmbeddingError's message, only its code", async () => {
+    // EmbeddingError's message interpolates the provider's own error text
+    // (packages/rag/src/embeddings/gemini.ts), and search_documents/ask take
+    // that path on every call. The repo's HTTP streaming path already refuses
+    // to echo an unaudited RagError message for exactly this reason
+    // (apps/api/src/routes/ask.ts); this is the agent-facing equivalent.
+    const logger = fakeLogger();
+    const guarded = guardToolHandler(
+      "search_documents",
+      logger,
+      (_args: unknown) => {
+        throw new EmbeddingError(
+          'Gemini embedding failed: 429 {"error":{"message":"quota for project 12345 exceeded"}}',
+        );
+      },
+    );
+
+    const result = (await guarded({})) as ToolError;
+
+    expect(result.structuredContent?.error.code).toBe("EMBEDDING_ERROR");
+    expect(result.content[0]?.text).toBe("Internal server error");
+    expect(JSON.stringify(result)).not.toContain("project 12345");
+    // Still a server fault: logged at error and reported.
+    expect(logger.error).toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalled();
+  });
+
+  it("echoes the codes the HTTP streaming path already audited", async () => {
+    for (const err of [
+      new ComplianceError("TRI pre-flight refused: ssn, ein"),
+      new EgressError("host not in EGRESS_ALLOWED_HOSTS: ollama.internal"),
+    ]) {
+      const guarded = guardToolHandler("ask", fakeLogger(), (_a: unknown) => {
+        throw err;
+      });
+      const result = (await guarded({})) as ToolError;
+      expect(result.content[0]?.text).toBe(err.message);
+    }
+  });
+
+  it("reports a server-side RagError without echoing its message", async () => {
     const logger = fakeLogger();
     const guarded = guardToolHandler(
       "search_documents",
@@ -131,9 +210,10 @@ describe("guardToolHandler", () => {
 
     const result = (await guarded({})) as ToolError;
 
-    // EMBEDDING_ERROR maps to 502 in apps/api/src/error-handler.ts, so it is
-    // a server fault worth reporting even though the message is operator-authored.
+    // EMBEDDING_ERROR maps to 502 in apps/api/src/error-handler.ts: a server
+    // fault worth reporting, and not an audited-echoable message.
     expect(result.structuredContent?.error.code).toBe("EMBEDDING_ERROR");
+    expect(result.content[0]?.text).toBe("Internal server error");
     expect(logger.error).toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalled();
   });

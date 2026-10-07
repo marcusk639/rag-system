@@ -17,9 +17,12 @@ COPY apps ./apps
 COPY tests ./tests
 COPY examples ./examples
 COPY docs/compliance ./docs/compliance
-# scripts/warm-model.ts (see the `warmer` stage below) needs the warm-up
-# script itself in the build context — it is not part of any workspace
-# package, so none of the COPYs above picks it up.
+# scripts/ is a pnpm WORKSPACE PACKAGE (@rag/scripts, added so `pnpm -r run
+# test` collects the build-gate tests), so `pnpm install --frozen-lockfile`
+# below fails without its package.json present. This COPY was originally here
+# to supply the warm-up script to a local `warmer` stage; that stage is gone
+# (the cache now comes from the pinned base image in the runtime stage), but
+# the COPY is still required for the install to resolve the workspace.
 COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 
@@ -27,25 +30,24 @@ RUN pnpm install --frozen-lockfile
 FROM installer AS builder
 RUN pnpm -r --filter=./packages/* --filter=./apps/* run build
 
-# ── warmer: pre-populate the local ONNX embedding model cache at BUILD time.
-#    All of the reasoning, and every failure branch, lives in one place:
-#    scripts/warm-model-verified.sh. Keep it there — this block was previously
-#    ~20 lines duplicated into three Dockerfiles, which is the same drift risk
-#    the shared script was written to remove, one layer up in the comments.
-FROM builder AS warmer
-ENV HF_CACHE_DIR=/app/.hf-cache
-# Gate on verified on-disk state rather than the exit code: onnxruntime-node
-# v1.21.0 SIGABRTs (exit 134) during teardown AFTER a successful warm. The
-# script requires warm-model.ts's own success line before tolerating 134, so
-# that tolerance cannot mask a real failure, and it fails the build on an
-# unpopulated cache. Shared by worker/api/mcp so the three cannot drift.
-RUN sh scripts/warm-model-verified.sh
-
 # ── pruner: extract a self-contained production bundle for this app only.
 #    pnpm deploy resolves all prod deps (including workspace packages with their
 #    built dist/) into /deploy — no devDeps, no other apps, no monorepo layout.
 FROM builder AS pruner
 RUN pnpm --filter "@rag/api" deploy --prod /deploy
+
+# ── warmcache: the shared pre-warmed model cache, pinned BY DIGEST.
+#    `--platform=linux/amd64` is required, not incidental: the base is built on
+#    ubuntu-latest (.github/workflows/warm-base.yml), so its manifest is
+#    amd64-only and a bare `COPY --from=<ref>` fails on an arm64 host with "no
+#    match for platform in manifest" — which would have blocked every Apple
+#    Silicon developer from building this image at all.
+#
+#    Forcing the platform is safe here and nowhere else: the base is FROM
+#    scratch and holds only model weights — inert data, never executed, byte-
+#    identical on every architecture. See docker/Dockerfile.warm-base for why
+#    it is pinned by digest rather than tag.
+FROM --platform=linux/amd64 ghcr.io/marcusk639/rag-warm-base@sha256:6c518bd041a895f9f6fcf7427e452ce2f02aaff2ef0c175c4be9fb613acccb48 AS warmcache
 
 # ── runtime: minimal final image — only /deploy content lands here
 FROM node:22-slim AS runtime
@@ -58,12 +60,18 @@ COPY --from=pruner --chown=node:node /deploy .
 # docs/compliance/vendor-dpa-*.md relative to cwd at runtime — pnpm deploy's
 # pruned output doesn't include it, so copy it separately from installer.
 COPY --from=installer --chown=node:node /workspace/docs/compliance ./docs/compliance
-# Pre-warmed local ONNX embedding model cache (see the `warmer` stage above and
-# scripts/warm-model-verified.sh). HF_CACHE_DIR must name the SAME absolute
+# Pre-warmed local ONNX embedding model cache, pulled from the shared base
+# image (docker/Dockerfile.warm-base, published by
+# .github/workflows/warm-base.yml). Pinned BY DIGEST, not by tag, so an
+# upstream rebuild cannot silently change the weights this image ships —
+# changing the model is a reviewable commit that moves this line.
+#
+# Fetched once for all three services instead of three times per release.
+# HF_CACHE_DIR must name the SAME absolute
 # path the warm wrote to: a `~/.cache/huggingface` default would silently miss
 # this COPY, since $HOME here need not match the warm stage's.
 ENV HF_CACHE_DIR=/app/.hf-cache
-COPY --from=warmer --chown=node:node /app/.hf-cache ./.hf-cache
+COPY --from=warmcache --chown=node:node /hf-cache ./.hf-cache
 
 USER node
 ENV NODE_ENV=production
