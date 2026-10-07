@@ -178,6 +178,25 @@ function defaultCheckDpa(cwd = process.cwd()): boolean {
 const LOCAL_PROVIDER_MAX_CHUNK_SIZE = 512;
 
 /** Read env into a typed Config. Centralizes all env access in one place. */
+/**
+ * The model to use when the operator sets a provider but no model. Must track
+ * each provider's own default: `Xenova/bge-base-en-v1.5` is what
+ * `LocalEmbeddingProvider` loads (packages/rag/src/embeddings/local.ts), and
+ * both are 768-dimensional, matching the `chunks.embedding` vector(768) column.
+ */
+function defaultEmbeddingModel(
+  provider: "gemini" | "openai" | "local",
+): string {
+  switch (provider) {
+    case "local":
+      return "Xenova/bge-base-en-v1.5";
+    case "openai":
+      return "text-embedding-3-small";
+    case "gemini":
+      return "gemini-embedding-001";
+  }
+}
+
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   opts?: {
@@ -256,7 +275,16 @@ export function loadConfig(
     databaseSsl: env.DATABASE_SSL || undefined,
     embedding: {
       provider,
-      model: env.EMBEDDING_MODEL ?? "gemini-embedding-001",
+      // Provider-aware, and `||` not `??`.
+      //
+      // A single hardcoded default handed "gemini-embedding-001" to the LOCAL
+      // ONNX embedder whenever EMBEDDING_PROVIDER=local and the operator left
+      // the model unset -- it would then try to download a HuggingFace repo by
+      // that name. `||` rather than `??` because Compose and Railway commonly
+      // inject an always-present but EMPTY variable instead of omitting it
+      // (see docker/compose.prod.yml's `${EMBEDDING_MODEL:-}`), and an empty
+      // string would otherwise pass through as the literal model id.
+      model: env.EMBEDDING_MODEL || defaultEmbeddingModel(provider),
       dimensions: Number(env.EMBEDDING_DIMENSIONS ?? 768),
       apiKey,
       maxRetries:

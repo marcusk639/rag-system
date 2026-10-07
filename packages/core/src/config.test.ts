@@ -512,6 +512,63 @@ describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
   });
 });
 
+describe("loadConfig — EMBEDDING_MODEL fallthrough", () => {
+  // Compose and Railway commonly inject an always-present but EMPTY env var
+  // rather than omitting it. `??` only falls through on undefined, so an empty
+  // string became the literal embedding model id -- wrong for every provider.
+  it("falls back to the provider default when EMBEDDING_MODEL is empty", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "local",
+      EMBEDDING_MODEL: "",
+    });
+    expect(cfg.embedding.model).toBe("Xenova/bge-base-en-v1.5");
+  });
+
+  // The other two arms of defaultEmbeddingModel. Each must equal the
+  // provider's OWN default, or an operator who sets only EMBEDDING_PROVIDER
+  // gets a model the provider never intended.
+  it.each([
+    ["gemini", "gemini-embedding-001"],
+    // openai.ts defaults to this too, and v3 models honour the `dimensions`
+    // request parameter (openai.ts passes it), so pairing it with the 768
+    // default below is coherent rather than a 1536-vs-768 mismatch.
+    ["openai", "text-embedding-3-small"],
+  ])("defaults %s to its own provider default", (provider, expected) => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: provider,
+      EMBEDDING_MODEL: "",
+      ...(provider === "openai" ? { OPENAI_API_KEY: "sk-test" } : {}),
+    });
+    expect(cfg.embedding.model).toBe(expected);
+  });
+
+  it("pairs every provider default with the 768-d column width", () => {
+    // chunks.embedding is vector(768) (EMBEDDING_COLUMN_DIMENSIONS). A
+    // provider default whose dimensions disagree with that would only fail at
+    // insert time, per document, after the API spend -- so pin it here.
+    for (const provider of ["gemini", "openai", "local"]) {
+      const cfg = loadConfig({
+        ...BASE_ENV,
+        EMBEDDING_PROVIDER: provider,
+        EMBEDDING_MODEL: "",
+        ...(provider === "openai" ? { OPENAI_API_KEY: "sk-test" } : {}),
+      });
+      expect(cfg.embedding.dimensions).toBe(768);
+    }
+  });
+
+  it("still honours an explicitly set EMBEDDING_MODEL", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "local",
+      EMBEDDING_MODEL: "Xenova/all-MiniLM-L6-v2",
+    });
+    expect(cfg.embedding.model).toBe("Xenova/all-MiniLM-L6-v2");
+  });
+});
+
 describe("loadConfig — contentScan (Layer 1.5)", () => {
   it("defaults to provider 'none'", () => {
     const cfg = loadConfig({ ...BASE_ENV });

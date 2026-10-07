@@ -101,7 +101,19 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      # Unset (not a literal default): a non-empty fallback here would always
+      # win over loadConfig's provider-aware default (defaultEmbeddingModel in
+      # packages/core/src/config.ts), handing the ONNX loader a Gemini model id
+      # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
+      # Set an explicit model only to OVERRIDE the provider default.
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      # Where the local ONNX embedder reads its weights. The app images bake a
+      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
+      # volume holding the weights) or a client-data deployment boots cold.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Compliance / egress
+      COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       # Generation
       GENERATION_PROVIDER: ${GENERATION_PROVIDER:-gemini}
@@ -243,7 +255,19 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      # Unset (not a literal default): a non-empty fallback here would always
+      # win over loadConfig's provider-aware default (defaultEmbeddingModel in
+      # packages/core/src/config.ts), handing the ONNX loader a Gemini model id
+      # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
+      # Set an explicit model only to OVERRIDE the provider default.
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      # Where the local ONNX embedder reads its weights. The app images bake a
+      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
+      # volume holding the weights) or a client-data deployment boots cold.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Compliance / egress
+      COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       GENERATION_PROVIDER: ${GENERATION_PROVIDER:-gemini}
       GENERATION_MODEL: ${GENERATION_MODEL:-gemini-1.5-flash}
@@ -271,7 +295,19 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      # Unset (not a literal default): a non-empty fallback here would always
+      # win over loadConfig's provider-aware default (defaultEmbeddingModel in
+      # packages/core/src/config.ts), handing the ONNX loader a Gemini model id
+      # whenever EMBEDDING_PROVIDER=local and the operator leaves this unset.
+      # Set an explicit model only to OVERRIDE the provider default.
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      # Where the local ONNX embedder reads its weights. The app images bake a
+      # pre-warmed cache in at /app/.hf-cache; this must name that path (or a
+      # volume holding the weights) or a client-data deployment boots cold.
+      HF_CACHE_DIR: ${HF_CACHE_DIR:-}
+      # Compliance / egress
+      COMPLIANCE_MODE: ${COMPLIANCE_MODE:-none}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       OBJECT_STORE_PROVIDER: ${OBJECT_STORE_PROVIDER:-none}
       OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-}
