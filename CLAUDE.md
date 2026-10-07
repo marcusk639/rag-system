@@ -29,21 +29,32 @@ pnpm dev:mcp                  # run MCP server (stdio by default)
 pnpm dev:worker               # run ingestion worker
 pnpm build                    # build all packages + apps
 pnpm lint                     # workspace-wide lint
+pnpm format:check             # prettier --check . (what the pre-commit hook enforces)
 pnpm typecheck                # workspace-wide tsc --noEmit
 pnpm test                     # workspace-wide vitest
 pnpm test:fresh               # build then unit-test (e2e excluded) — REQUIRED on a fresh clone (tests resolve workspace deps via dist/)
-pnpm e2e                      # end-to-end tests (@rag/e2e)
+pnpm e2e                      # end-to-end tests (@rag/e2e, in tests/e2e/)
 pnpm eval                     # retrieval evaluation harness (@rag/e2e)
 pnpm eval:real                # eval harness against real providers (needs API keys)
+pnpm eval:gold                # eval against the curated gold set (docs/EVAL-GOLD-SET-GUIDE.md)
 pnpm gen:parser-types         # regenerate parser TS types from the live parser's OpenAPI schema
 pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
+pnpm --filter @rag/web dev    # web UI — there is NO root `dev:web` script
+```
+
+One-off scripts that have no package.json entry:
+
+```bash
+HF_CACHE_DIR=<path> EMBEDDING_MODEL=<model> node_modules/.bin/tsx scripts/warm-model.ts   # pre-download local ONNX weights
+npx tsx scripts/reembed-chunks.ts                                          # re-embed after an embedding-model change
+./scripts/reembed-and-stream.sh                                            # re-embed + watch progress
 ```
 
 ## Architectural ground rules
 
 - **TypeScript is primary.** Python lives only in `services/parser-py/` because the document-parsing ecosystem there is materially better. Do not creep Python into other services.
 - **All cross-package contracts live in `@rag/core`.** Connectors, parsers, embedders, and chunkers all implement interfaces defined there. Adding a provider = implement the interface, register it in the factory.
-- **Business logic is transport-agnostic in `@rag/services`.** The five service functions (`searchDocuments`, `askQuestion`, `triggerSync`, `listPublicSources`, `getDocumentById`) take a structural `ServiceDeps` and are shared by both the HTTP API and the MCP server — never duplicate search/ask logic in a route or tool.
+- **Business logic is transport-agnostic in `@rag/services`.** The service functions take a structural `ServiceDeps` and are shared by both the HTTP API and the MCP server — never duplicate search/ask logic in a route or tool. The full surface (`packages/services/src/index.ts`): `searchDocuments`; `askQuestion` / `askQuestionStream`; `triggerSync` / `listPublicSources` / `purgeSource`; `getDocumentById` / `getDocumentDownload`; `submitAnswerFeedback`.
 - **The shared dependency graph is built once via `@rag/runtime`.** `buildCoreDeps(config, logger)` wires the DB pool, embedder, retriever, queue, and optional generator (plus a hardened idempotent `close()`). The three backend apps (api/mcp/worker) build `CoreDeps` from it. The other two apps consume the HTTP API instead and never touch `CoreDeps`: `apps/web` (Next.js frontend — see `apps/web/CLAUDE.md`) and `apps/teams-bot` (Microsoft Teams bot, Entra SSO + Adaptive Cards, single-instance only because it uses `MemoryStorage` for the SSO exchange).
 - **Database access goes through `@rag/db`.** Apps and packages never import `pg`/`drizzle-orm` directly — they import typed query functions.
 - **Authentication is a pluggable `AuthProvider` in `@rag/core`.** Apps don't hand-roll token checks — they call `buildAuthProvider(config, logger)` (`@rag/runtime`), which returns an `AuthProvider` (`authenticate(credential) → Principal | null`). Strategies: `static-token`, `oidc`, `composite` (default; static tried first, then OIDC), selected via `AUTH_PROVIDER`. The downstream authorization contract (`Principal` → `AuthorizationScope` → scope-threaded retrieval) is unchanged — this sits in front of `resolvePrincipal`, it does not replace the scope machinery. The core has zero IdP-specific (e.g. Entra) code.
@@ -66,6 +77,7 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 | Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                          |
 | Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4}/`   |
 | Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)     |
+| Neighbor expansion        | `packages/rag/src/retrieval/contextualize.ts`                                          |
 | Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                   |
 | HTTP routes               | `apps/api/src/routes/`                                                                 |
 | MCP tools                 | `apps/mcp/src/tools/`                                                                  |
@@ -73,6 +85,9 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 | Python parser             | `services/parser-py/app/main.py`                                                       |
 | Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules |
 | Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)        |
+| E2E suites                | `tests/e2e/` (`@rag/e2e`, also hosts the eval harness) and `tests/web-e2e/`            |
+| Shared test fixtures      | `packages/test-fixtures/`                                                              |
+| Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                         |
 
 ## Adding a new connector
 
@@ -101,6 +116,9 @@ pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 - **`pnpm test` fails on a fresh clone.** Tests resolve workspace packages via their built `dist/` entry points, so an unbuilt checkout errors with `Failed to resolve entry for package "@rag/core"`. Run `pnpm test:fresh` (or `pnpm -r build` first). CI builds before testing, so this only bites locally.
 - **Migrations auto-run on Railway deploy.** The `rag-worker` service has a `preDeployCommand` (`pnpm --filter @rag/db migrate`) — it's the single migration owner (it boots without the index-assert that crash-loops api/mcp). On a schema-changing release, deploy `rag-worker` first, then api/mcp. Don't add the same command to api/mcp (concurrent `0000_init` bootstrap contends). See `docs/DEPLOYMENT.md`.
 - **pgvector dimension mismatch.** The `chunks.embedding` column is `vector(768)` to match Gemini. If you switch to OpenAI 1536-dim, change the column AND drop/rebuild the HNSW index. The migration script in `packages/db/drizzle/` handles this if you regenerate.
+- **`COMPLIANCE_MODE=client-data` changes boot behavior in four coupled places**, each a hard startup failure rather than a degraded mode. It (1) refuses `CONTENT_SCAN_PROVIDER=none`; (2) refuses runtime HuggingFace weight downloads, so `local` is the only permitted embedding provider and its weights must be pre-warmed at image-build time (`scripts/warm-model.ts`); (3) therefore requires `HF_CACHE_DIR` to name a durable path — `LocalEmbeddingProvider`'s **constructor** throws without it (`packages/rag/src/embeddings/local.ts`), so an empty-string compose override is as bad as unset; and (4) requires a DPA on record, with `EGRESS_ALLOWED_HOSTS` left blank unless a signed DPA covers each listed host (`docs/compliance/`). The authoritative annotations are in `env.example` — read it before changing any embedding or scanning env var.
+- **`CHUNK_SIZE` is silently capped at 512 when `EMBEDDING_PROVIDER=local`.** `Xenova/bge-base-en-v1.5` hard-truncates at 512 tokens, so a larger configured value is capped automatically with a startup warning. Don't route around the cap — chunks above it were previously embedded with invisible retrieval-quality loss.
+- **`scripts/` is a workspace package on purpose.** It ships no code; it's listed in `pnpm-workspace.yaml` only so `pnpm -r run test` picks up the Docker build-gate test in `scripts/warm-model-verified.test.ts`.
 - **Railway Postgres is a different image than local/CI, on purpose.** Production `rag-postgres` runs `ghcr.io/railwayapp-templates/postgres-ssl:16.14` (Railway's official image: bundles pgvector, self-signed SSL, and pgBackRest — WAL archiving to the `rag-documents` bucket is live, so `archive_mode=on` and a `postgres` superuser role must keep existing or backups stop silently). The image's **automated** PITR restore is broken on Railway volumes (err 088, and it wedges the volume into a crash loop) — backups are proven restorable, but only via the manual root procedure in `docs/BACKUP-SCHEDULE-RUNBOOK.md`. Local dev (`docker/docker-compose.yml`), the single-VM stack (`docker/compose.prod.yml`), and CI (`.github/workflows/e2e.yml`) still use `pgvector/pgvector:pg16` — that divergence is intentional, don't "fix" it. The image also hard-requires the volume at exactly `/var/lib/postgresql/data` with `PGDATA=/var/lib/postgresql/data/pgdata`; its entrypoint refuses to boot otherwise.
 - **`railway connect rag-postgres` detects the DB from the image NAME.** The CLI reads `serviceInstance.source.image` and matches it against a keyword list (`postgres`, `mysql`, `redis`, `mongo`, `postgis`, `timescale`, `mariadb`, `memcached`, `valkey`). Any image lacking one of those — `pgvector/pgvector:pg16` included — fails with `No supported database found in service` no matter how it's configured. It also needs a `DATABASE_URL` on the **database** service itself (not just on `rag-api`), which is why `rag-postgres` carries one.
 - **A Postgres image bump can silently invalidate every text index.** `postgres-ssl` tags track Debian, so a rebuild at the same PG minor can still move glibc (16.14 went bookworm/glibc 2.36 → trixie/glibc 2.41), making all text btree indexes suspect. The image's boot script then runs `ALTER DATABASE ... REFRESH COLLATION VERSION` on every database **without reindexing** — silencing the warning and erasing the only evidence that a rebuild is needed. After any Postgres image change: check `select version()` for a changed `pgdgNN`, and if it moved, run `REINDEX DATABASE <db>` **before** the refresh, for every connectable database (`rag`, `postgres`, `template1`, plus any `rag_premigration_*` leftovers) — not just `rag`.

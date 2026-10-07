@@ -6,7 +6,3 @@ Message-based connector over the Gmail API. Implements the `Connector` interface
 - **Has a local `parse.ts`** — email messages (headers + body + attachments) are converted to markdown here, NOT routed through the Python file parser. This is the one connector with inline parsing.
 - Delta sync uses an opaque base64(JSON) cursor via the shared `../util/cursor.ts` (`CursorCodec`); paging via `../util/paginate.ts`. Don't hand-roll either.
 - Registered in `../factory.ts` and `../index.ts`.
-
-<claude-mem-context>
-
-</claude-mem-context>
