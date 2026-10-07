@@ -184,14 +184,18 @@ const requireUuid = (v: string, what: string) =>
   UUID_RE.test(v) ? v : die(`${what} must be a uuid, got '${v}'`);
 
 /**
- * `StaffSourceAssignmentHistoryRow` declares these as `Date`, but the driver
- * returns strings at runtime. The admin UI survives it by wrapping in
- * `new Date(...)` -- see `SourceAccessHistoryForm` in
- * apps/web/src/app/admin/access/access-forms.tsx (the sibling
- * `AccessHistoryForm` renders CLIENT assignments, a different row type). That
- * wrap is why the declared type's being wrong went unnoticed; this does the
- * same. Nothing in-tree asserts the runtime type either way, so a regression
- * test belongs with a fix to the declaration, not here.
+ * `StaffSourceAssignmentHistoryRow` now declares these as `string`, which is
+ * what the driver actually returns: a raw `db.execute()` yields the Postgres
+ * wire string, because drizzle overrides the timestamp type parsers (see the
+ * caveat on that interface, and `queries.raw-execute-timestamps.test.ts`,
+ * which is the regression test this comment used to ask for).
+ *
+ * The union keeps `Date` anyway. `new Date(...)` accepts either, the admin UI
+ * wraps the same way (`SourceAccessHistoryForm` in
+ * apps/web/src/app/admin/access/access-forms.tsx -- the sibling
+ * `AccessHistoryForm` renders CLIENT assignments, a different row type), and
+ * a helper in a CLI is the wrong place to be strict about an input it can
+ * handle correctly either way.
  */
 const stamp = (v: Date | string | null): string =>
   v === null ? "" : new Date(v).toISOString().slice(0, 16).replace("T", " ");
