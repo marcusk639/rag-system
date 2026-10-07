@@ -49,3 +49,37 @@ export async function getChunksByOrdinals(
     page: r.page,
   }));
 }
+
+/**
+ * Does this document have chunks embedded by THIS provider+model?
+ *
+ * The model-agnostic `documentHasChunks` is not sufficient for the
+ * unchanged-hash short-circuit. The content hash
+ * (`packages/ingestion/src/pipeline.ts`) covers the markdown and the
+ * processing version but NOT the embedder's identity, while the dense arm of
+ * hybrid search requires `embedding_provider`/`embedding_model` to equal the
+ * active ones. So after an embedder swap every document is "unchanged" and has
+ * chunks, yet none of those chunks can be retrieved densely — retrieval
+ * degrades to sparse-only across the whole corpus with no error and no failed
+ * sync, and a re-sync cannot repair it because it is a no-op by the same logic.
+ *
+ * Asking the model-scoped question instead lets the existing
+ * "hash unchanged but no chunks -> re-embed" path self-heal the corpus one
+ * document at a time on the next sync.
+ */
+export async function documentHasChunksForModel(
+  db: Db,
+  documentId: string,
+  embeddingProvider: string,
+  embeddingModel: string,
+): Promise<boolean> {
+  const result = await db.execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM chunks
+      WHERE document_id = ${documentId}
+        AND embedding_provider = ${embeddingProvider}
+        AND embedding_model = ${embeddingModel}
+    ) AS exists
+  `);
+  return result.rows[0]?.exists ?? false;
+}

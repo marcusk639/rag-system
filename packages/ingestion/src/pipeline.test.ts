@@ -19,7 +19,7 @@ const {
   updateSourceCursorMock,
   upsertDocumentMock,
   replaceChunksMock,
-  documentHasChunksMock,
+  documentHasChunksForModelMock,
   documentHasStorageMock,
   deleteDocumentByExternalIdMock,
   setDocumentStorageMock,
@@ -30,7 +30,7 @@ const {
   updateSourceCursorMock: vi.fn(),
   upsertDocumentMock: vi.fn(),
   replaceChunksMock: vi.fn(),
-  documentHasChunksMock: vi.fn(),
+  documentHasChunksForModelMock: vi.fn(),
   documentHasStorageMock: vi.fn(),
   deleteDocumentByExternalIdMock: vi.fn(),
   setDocumentStorageMock: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock("@rag/db", () => ({
   updateSourceCursor: updateSourceCursorMock,
   upsertDocument: upsertDocumentMock,
   replaceChunks: replaceChunksMock,
-  documentHasChunks: documentHasChunksMock,
+  documentHasChunksForModel: documentHasChunksForModelMock,
   documentHasStorage: documentHasStorageMock,
   deleteDocumentByExternalId: deleteDocumentByExternalIdMock,
   setDocumentStorage: setDocumentStorageMock,
@@ -57,7 +57,7 @@ beforeEach(() => {
   upsertDocumentMock.mockResolvedValue({ id: "doc-1", contentChanged: true });
   replaceChunksMock.mockResolvedValue(undefined);
   updateSourceCursorMock.mockResolvedValue(undefined);
-  documentHasChunksMock.mockResolvedValue(true);
+  documentHasChunksForModelMock.mockResolvedValue(true);
   documentHasStorageMock.mockResolvedValue(true);
   deleteDocumentByExternalIdMock.mockResolvedValue({
     deleted: true,
@@ -212,7 +212,7 @@ describe("ingestOne unchanged-hash handling", () => {
       id: "doc-1",
       contentChanged: false,
     });
-    documentHasChunksMock.mockResolvedValue(true);
+    documentHasChunksForModelMock.mockResolvedValue(true);
 
     const { connector } = makeConnector([
       { documents: ["a"], nextCursor: "c1", done: true },
@@ -220,7 +220,12 @@ describe("ingestOne unchanged-hash handling", () => {
 
     await runIngestion("src", connector, null, OPTS, makeDeps());
 
-    expect(documentHasChunksMock).toHaveBeenCalledWith({}, "doc-1");
+    expect(documentHasChunksForModelMock).toHaveBeenCalledWith(
+      {},
+      "doc-1",
+      expect.any(String),
+      expect.any(String),
+    );
     expect(replaceChunksMock).not.toHaveBeenCalled();
   });
 
@@ -229,7 +234,7 @@ describe("ingestOne unchanged-hash handling", () => {
       id: "doc-1",
       contentChanged: false,
     });
-    documentHasChunksMock.mockResolvedValue(false);
+    documentHasChunksForModelMock.mockResolvedValue(false);
 
     const { connector } = makeConnector([
       { documents: ["a"], nextCursor: "c1", done: true },
@@ -237,8 +242,44 @@ describe("ingestOne unchanged-hash handling", () => {
 
     await runIngestion("src", connector, null, OPTS, makeDeps());
 
-    expect(documentHasChunksMock).toHaveBeenCalledWith({}, "doc-1");
+    expect(documentHasChunksForModelMock).toHaveBeenCalledWith(
+      {},
+      "doc-1",
+      expect.any(String),
+      expect.any(String),
+    );
     // The straggler must be re-chunked + re-embedded rather than skipped forever.
+    expect(replaceChunksMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-embeds when the chunks belong to a DIFFERENT embedding model", async () => {
+    // The corpus-blinding case. The content hash covers the markdown and the
+    // processing version but NOT the embedder, while hybrid search's dense CTE
+    // filters on embedding_provider/embedding_model. A model-agnostic
+    // "has chunks?" therefore reports unchanged for every document after an
+    // embedder swap, leaving a corpus that is intact on disk and invisible to
+    // dense retrieval -- and unrepairable by re-syncing, since the re-sync
+    // takes this same branch. COMPLIANCE_MODE=client-data forces
+    // EMBEDDING_PROVIDER=local, so this is reachable by a compliance setting,
+    // not just by a deliberate model change.
+    upsertDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      contentChanged: false,
+    });
+    // No chunks exist FOR THE ACTIVE MODEL, though the document does have rows.
+    documentHasChunksForModelMock.mockResolvedValue(false);
+
+    const { connector } = makeConnector([
+      { documents: ["a"], nextCursor: "c1", done: true },
+    ]);
+
+    await runIngestion("src", connector, null, OPTS, makeDeps());
+
+    // The query must be scoped to the active embedder, not just the document.
+    const call = documentHasChunksForModelMock.mock.calls[0];
+    expect(call?.[1]).toBe("doc-1");
+    expect(call?.[2]).toBeTruthy();
+    expect(call?.[3]).toBeTruthy();
     expect(replaceChunksMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -395,7 +436,7 @@ describe("runIngestion original-bytes storage", () => {
       id: "doc-1",
       contentChanged: false,
     });
-    documentHasChunksMock.mockResolvedValue(true);
+    documentHasChunksForModelMock.mockResolvedValue(true);
     documentHasStorageMock.mockResolvedValue(true);
     const objectStore = makeObjectStore();
     const deps = { ...makeDeps(), objectStore } as PipelineDeps;
@@ -415,7 +456,7 @@ describe("runIngestion original-bytes storage", () => {
       id: "doc-1",
       contentChanged: false,
     });
-    documentHasChunksMock.mockResolvedValue(true);
+    documentHasChunksForModelMock.mockResolvedValue(true);
     documentHasStorageMock.mockResolvedValue(false);
     const objectStore = makeObjectStore();
     const deps = { ...makeDeps(), objectStore } as PipelineDeps;
