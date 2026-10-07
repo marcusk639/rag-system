@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RetrievalResult } from "@rag/core";
-import { ADMIN_SCOPE } from "@rag/core";
+import { ADMIN_SCOPE, MAX_ASK_TOP_K } from "@rag/core";
 import { askQuestion, expandWithNeighbors } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
 
@@ -174,5 +174,62 @@ describe("relevance floor then neighbour expansion", () => {
     const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
     expect(context.map((r) => r.chunk.id)).toEqual(["A-1", "A-0", "A-2"]);
     expect(getChunksByOrdinalsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("expandWithNeighbors — context budget", () => {
+  /**
+   * `MAX_ASK_TOP_K` (packages/core/src/validation.ts) is justified in TOKENS:
+   * "every retrieved chunk (~800 tokens) lands in the generation prompt, so a
+   * caller-chosen 100 meant an ~80k-token prompt". But it bounds only the
+   * `topK` slice, and expansion appends AFTER it — up to
+   * `documents × chunksPerDocument` more (default 2 × 4). So the prompt could
+   * reach 38 chunks while the stated bound was 30, with no backstop.
+   */
+  beforeEach(() => {
+    getChunksByOrdinalsMock.mockImplementation(
+      async (_db: unknown, docId: string, ordinals: number[]) =>
+        ordinals.map((o) => row(docId, o)),
+    );
+  });
+
+  it("never returns more chunks than MAX_ASK_TOP_K", async () => {
+    // 28 retrieved + an expansion that would add 8 => 36 without a cap.
+    const results = Array.from({ length: 28 }, (_, i) =>
+      hit(`D${i % 4}`, i * 3),
+    );
+    const out = await expandWithNeighbors(deps(), results, {
+      documents: 4,
+      chunksPerDocument: 4,
+    });
+    expect(out.length).toBeLessThanOrEqual(MAX_ASK_TOP_K);
+  });
+
+  it("adds no neighbours at all once the retrieved set already fills the budget", async () => {
+    const results = Array.from({ length: MAX_ASK_TOP_K }, (_, i) =>
+      hit("A", i * 3),
+    );
+    const out = await expandWithNeighbors(deps(), results, {
+      documents: 2,
+      chunksPerDocument: 4,
+    });
+    expect(out).toHaveLength(MAX_ASK_TOP_K);
+    expect(out.every((r) => r.score > 0)).toBe(true);
+  });
+
+  it("never DROPS retrieved chunks when the set already exceeds the budget", async () => {
+    // Guards the off-by-sign trap: a naive `slice(0, budget)` with a negative
+    // budget removes real results from the end instead of adding nothing.
+    const results = Array.from({ length: MAX_ASK_TOP_K + 5 }, (_, i) =>
+      hit("A", i * 3),
+    );
+    const out = await expandWithNeighbors(deps(), results, {
+      documents: 2,
+      chunksPerDocument: 4,
+    });
+    expect(out).toHaveLength(results.length);
+    expect(out.map((r) => r.chunk.ordinal)).toEqual(
+      results.map((r) => r.chunk.ordinal),
+    );
   });
 });
