@@ -134,6 +134,20 @@
       "when": 1796000000000,
       "tag": "0019_audit_log_content",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1797000000000,
+      "tag": "0020_ingestion_jobs_documents_quarantined",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1798000000000,
+      "tag": "0021_ingestion_jobs_gate_failure_quarantines",
+      "breakpoints": true
     }
   ]
 }

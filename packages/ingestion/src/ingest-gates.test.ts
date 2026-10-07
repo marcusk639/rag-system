@@ -5,7 +5,13 @@ import {
   ComplianceError,
   ContentScanFailure,
 } from "@rag/core";
-import { quarantineForScanFailure } from "./ingest-gates.js";
+import {
+  GATE_FAILURE_REASON_PREFIX,
+  quarantineForScanFailure,
+} from "./ingest-gates.js";
+
+/** The reason a failed scan records, with the gate-failure prefix applied. */
+const P = GATE_FAILURE_REASON_PREFIX;
 
 /**
  * What a FAILED Layer 1.5 scan is allowed to record.
@@ -83,7 +89,7 @@ describe("quarantineForScanFailure — cause taxonomy", () => {
       ),
     );
     const { reason } = await quarantine(err);
-    expect(reason).toBe("semantic scan failed: malformed-reply");
+    expect(reason).toBe(`${P}semantic scan failed: malformed-reply`);
     expect(reason).not.toContain(LEAKED);
   });
 
@@ -114,7 +120,7 @@ describe("quarantineForScanFailure — cause taxonomy", () => {
   ])("maps a %s scanner failure", async (expected, inner) => {
     const err = new ContentSafetyError("semantic content scan failed", inner);
     const { reason } = await quarantine(err);
-    expect(reason).toBe(`semantic scan failed: ${expected}`);
+    expect(reason).toBe(`${P}semantic scan failed: ${expected}`);
   });
 
   it("maps a compliance/egress refusal to egress-blocked", async () => {
@@ -123,18 +129,25 @@ describe("quarantineForScanFailure — cause taxonomy", () => {
       new ComplianceError(`egress denied for ${LEAKED}`),
     );
     const { reason } = await quarantine(err);
-    expect(reason).toBe("semantic scan failed: egress-blocked");
+    expect(reason).toBe(`${P}semantic scan failed: egress-blocked`);
   });
 
   it("falls back to 'unknown' rather than inventing a diagnosis", async () => {
     const { reason } = await quarantine(new Error(`weird ${LEAKED}`));
-    expect(reason).toBe("semantic scan failed: unknown");
+    expect(reason).toBe(`${P}semantic scan failed: unknown`);
   });
 
   it("still quarantines and still purges", async () => {
     // The taxonomy changes what is RECORDED, never the disposition.
     const { outcome } = await quarantine(new Error("boom"));
-    expect(outcome).toEqual({ outcome: "quarantined", chunksCreated: 0 });
+    // `cause` is part of the disposition contract: a caller that cannot tell
+    // a broken gate from a refused document cannot escalate the first without
+    // also failing every sync of a legitimately sensitive source.
+    expect(outcome).toEqual({
+      outcome: "quarantined",
+      cause: "gate-failure",
+      chunksCreated: 0,
+    });
     expect(deleteDocumentByExternalIdMock).toHaveBeenCalledOnce();
   });
 });

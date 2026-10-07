@@ -144,40 +144,78 @@ export async function handleSyncSource(
 
     // Accumulate this run's counts into the single history row (additive, not
     // exactly-once under retries — see incrementIngestionJobCounters).
-    await incrementIngestionJobCounters(db, ingestionId, {
+    const totals = await incrementIngestionJobCounters(db, ingestionId, {
       documentsProcessed: result.documentsProcessed,
       documentsFailed: result.documentsFailed,
       chunksCreated: result.chunksCreated,
+      documentsQuarantined: result.documentsQuarantined,
+      documentsQuarantinedGateFailure: result.documentsQuarantinedGateFailure,
     });
 
-    // A run that refused every document and indexed nothing is the signature
-    // of a broken safety gate -- an unreachable scanner, an egress allow-list
-    // gap, a missing pack -- not of a corpus that is entirely sensitive.
-    // Phase 1 refuses C/D sources outright (ClassBlockedError), so there is no
-    // legitimate all-quarantine run to confuse this with.
+    // A quarantine a BROKEN gate caused fails the run. Not a share of them --
+    // any of them.
     //
-    // Reported as FAILED, and "last synced" is deliberately not advanced:
-    // stamping "completed" is exactly what let a whole-source quarantine show
-    // up as a green sync with chunksCreated: 0.
-    const allQuarantined =
-      result.documentsQuarantined > 0 && result.chunksCreated === 0;
-    if (result.done && allQuarantined) {
+    // The two things this must not be, both of which have shipped and both of
+    // which failed on the common case:
+    //
+    //  - NOT `quarantined > 0 && chunksCreated === 0`. The dominant failure of
+    //    a local model is degradation, not death: timeouts under load,
+    //    intermittent 500s, a model reloading. One document out of 858 happening
+    //    to succeed made the all-or-nothing test false and the run green.
+    //  - NOT a share of ALL quarantines. Layer 3 escalation is ordinary --
+    //    classify-document.ts escalates on ANY Layer 1 identifier finding, so
+    //    an EIN-shaped number is enough -- and its share is a stable property
+    //    of the corpus. A 25% threshold over the total therefore failed every
+    //    sync of a legitimately sensitive source, permanently: lastSyncedAt
+    //    never advanced again, and the error's own remedy (re-run full)
+    //    reprocessed everything and re-tripped it.
+    //
+    // Keying on the gate-failure count alone is what makes `> 0` defensible
+    // rather than merely strict. The signal is unambiguous (nothing about the
+    // document is involved), it carries no retry path of its own, and it is a
+    // property of the pipeline -- so once the gate is fixed, a re-run produces
+    // zero and nothing re-trips. There is no share to tune, no small-denominator
+    // case, and no NaN to keep out of the message.
+    //
+    // Read from the ACCUMULATED row and checked on EVERY run, not only the
+    // terminal one: `runIngestion` counts per call and the worker does
+    // PAGES_PER_RUN pages per job, so a scanner down for the first nineteen
+    // continuations of a twenty-job sync never reached a `result.done` test,
+    // and each job re-enqueued the next.
+    if (totals.documentsQuarantinedGateFailure > 0) {
+      const policyQuarantined =
+        totals.documentsQuarantined - totals.documentsQuarantinedGateFailure;
       await updateIngestionJob(db, ingestionId, {
         status: "failed",
         completedAt: new Date(),
+        // Counts and causes only -- never the offending external ids. They are
+        // filenames and paths, which identify a client as readily as the
+        // content does ("Smith_John_1040.xlsx"), and this string is the most
+        // widely surfaced field on the row. The per-document record lives in
+        // `ingest_log`, which is the designed place for it.
         error:
-          `every document was quarantined (${result.documentsQuarantined} of ` +
-          `${result.documentsProcessed} processed) and nothing was indexed; ` +
-          `check the content-safety gates: scanner reachability, the egress ` +
-          `allow-list, and the identifier-scanner pack`,
+          `a content-safety gate FAILED on ` +
+          `${totals.documentsQuarantinedGateFailure} of ` +
+          `${totals.documentsProcessed} documents this sync ` +
+          `(${policyQuarantined} further documents were quarantined by policy, ` +
+          `which is normal, and ${totals.chunksCreated} chunks were indexed). ` +
+          `The gate could not reach a verdict, so these documents were neither ` +
+          `indexed nor recorded as failures: check scanner reachability, the ` +
+          `egress allow-list, and the identifier-scanner pack. List the ` +
+          `affected documents with listGateFailureQuarantines (they are the ` +
+          `'gate-failure:' rows in ingest_log) -- one that recurs every sync ` +
+          `is a document to fix or exclude at the source. The cursor has ` +
+          `already advanced past them, so re-run with mode "full" once the ` +
+          `gate is healthy; an incremental sync will not revisit them.`,
       });
       log.error(
         {
           ...result,
+          totals,
           continuationCount,
-          marker: "ingest.sync.all_quarantined",
+          marker: "ingest.sync.gate_failure_quarantine",
         },
-        "sync refused every document and indexed nothing; recorded as failed",
+        "a content-safety gate failed during this sync; recorded as failed",
       );
       return;
     }
