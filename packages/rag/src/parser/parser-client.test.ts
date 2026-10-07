@@ -69,7 +69,7 @@ describe("HttpParserClient shared-secret auth", () => {
  * tabular.py:39,73), and those can quote the offending cell or line, on a 5xx
  * as well as a 4xx. Up to 500 chars of it went into `ParserError.message`.
  *
- * `message` is the field both transports treat as showable: error-handler.ts
+ * `message` WAS the field both transports treated as showable (they now gate on `ECHOABLE_ERROR_CODES` in @rag/core, which excludes PARSER_ERROR — this redaction is defence in depth, no longer the only guard): error-handler.ts
  * sends `payload(code, message)` and tool-error.ts returns
  * `toolError(code, message)`, while an unrecognized error gets a generic
  * string. A RagError carrying document text in its message breaks that

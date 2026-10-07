@@ -166,6 +166,17 @@ describe("registerErrorHandler — the suppression policy is closed", () => {
     );
   });
 
+  it("every echoable code has a status mapping", () => {
+    // The partition test above iterates STATUS_BY_CODE, so it cannot see a
+    // code added to ECHOABLE_ERROR_CODES and nowhere else. That code would
+    // fall to `?? 500` and echo its message -- suppression bypassed by
+    // omission rather than by edit.
+    const unmapped = [...ECHOABLE_ERROR_CODES].filter(
+      (c) => !(c in STATUS_BY_CODE),
+    );
+    expect(unmapped).toEqual([]);
+  });
+
   it("never sends error.cause to the client, even for an echoable code", async () => {
     // At packages/rag/src/parser/parser-client.ts:50 the MESSAGE is already
     // generic and the whole exposure sits in `cause` (an undici error carrying

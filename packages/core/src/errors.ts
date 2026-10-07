@@ -143,12 +143,19 @@ export class ComplianceError extends RagError {
  * It lives in core because two transports enforce it — `registerErrorHandler`
  * and `guardToolHandler` — and a security allow-list duplicated per transport
  * drifts. `STREAMABLE_ERROR_CODES` (`apps/api/src/routes/ask.ts`) is
- * deliberately NOT this set, but not because a stream cannot carry a code —
- * `streamErrorPayload` does return `{ code, message }`. It is narrower because
- * only EGRESS_BLOCKED and COMPLIANCE_VIOLATION are reachable after the 200
- * header is written; the rest fail before the stream opens and are handled by
- * `registerErrorHandler`. Divergence there fails closed to "Generation
- * failed.".
+ * deliberately NOT this set, and the reason is NOT that a stream cannot carry
+ * a code — `streamErrorPayload` does return `{ code, message }`. Nor is it
+ * that fewer codes are reachable mid-stream: `apps/api/src/routes/ask.ts:236`
+ * writes the 200 header before `pumpAskStream` runs, and
+ * `packages/services/src/ask.ts:506` embeds the query inside the stream
+ * generator before its first yield, so an EMBEDDING_ERROR lands mid-stream
+ * too. (GENERATION_NOT_CONFIGURED is the one that cannot: ask.ts:229 checks
+ * the generator before `reply.hijack()`.)
+ *
+ * The set is narrower because that payload carries no status and a non-member
+ * loses its CODE as well as its message, flattening to a bare
+ * "Generation failed." — the one surface here where the code is not always
+ * returned. A higher bar for a lossier envelope, decided separately.
  */
 export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   // Audited: a hostname, and TRI pattern labels.
