@@ -522,8 +522,41 @@ describe("loadConfig — EMBEDDING_MODEL fallthrough", () => {
       EMBEDDING_PROVIDER: "local",
       EMBEDDING_MODEL: "",
     });
-    expect(cfg.embedding.model).not.toBe("");
-    expect(cfg.embedding.model).toContain("bge");
+    expect(cfg.embedding.model).toBe("Xenova/bge-base-en-v1.5");
+  });
+
+  // The other two arms of defaultEmbeddingModel. Each must equal the
+  // provider's OWN default, or an operator who sets only EMBEDDING_PROVIDER
+  // gets a model the provider never intended.
+  it.each([
+    ["gemini", "gemini-embedding-001"],
+    // openai.ts defaults to this too, and v3 models honour the `dimensions`
+    // request parameter (openai.ts passes it), so pairing it with the 768
+    // default below is coherent rather than a 1536-vs-768 mismatch.
+    ["openai", "text-embedding-3-small"],
+  ])("defaults %s to its own provider default", (provider, expected) => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: provider,
+      EMBEDDING_MODEL: "",
+      ...(provider === "openai" ? { OPENAI_API_KEY: "sk-test" } : {}),
+    });
+    expect(cfg.embedding.model).toBe(expected);
+  });
+
+  it("pairs every provider default with the 768-d column width", () => {
+    // chunks.embedding is vector(768) (EMBEDDING_COLUMN_DIMENSIONS). A
+    // provider default whose dimensions disagree with that would only fail at
+    // insert time, per document, after the API spend -- so pin it here.
+    for (const provider of ["gemini", "openai", "local"]) {
+      const cfg = loadConfig({
+        ...BASE_ENV,
+        EMBEDDING_PROVIDER: provider,
+        EMBEDDING_MODEL: "",
+        ...(provider === "openai" ? { OPENAI_API_KEY: "sk-test" } : {}),
+      });
+      expect(cfg.embedding.dimensions).toBe(768);
+    }
   });
 
   it("still honours an explicitly set EMBEDDING_MODEL", () => {
