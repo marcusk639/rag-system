@@ -101,6 +101,21 @@ describe("E2E: grantClientAccess / revokeClientAccess / listAssignmentHistoryFor
       grantedBy: "e2e-admin-oid-1",
       revokedAt: null,
     });
+    // The ONLY assertion in the repo that actually exercises the premise these
+    // row types are declared on: a raw `db.execute()` returns a timestamptz as
+    // Postgres' wire string, because drizzle installs a per-query
+    // `types.getTypeParser` returning `(val) => val` for that OID. The unit
+    // tests stub the driver, so they stipulate this rather than testing it --
+    // if a drizzle upgrade dropped that override, `grantedAt` would silently
+    // become a Date, every declaration would be wrong again, and only this
+    // line would notice. `toMatchObject` above deliberately omits the field.
+    expect(typeof history[0]!.grantedAt).toBe("string");
+    expect(history[0]!.grantedAt).not.toBeInstanceOf(Date);
+    // Wire format, not ISO-8601: a space rather than a `T`, which is why a
+    // `z.string().datetime()` boundary would reject it.
+    expect(history[0]!.grantedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?[+-]\d{2}(:\d{2})?$/,
+    );
   });
 
   it("revoking sets revokedAt without deleting the row (audit trail preserved)", async () => {

@@ -1101,11 +1101,25 @@ export async function revokeClientAccess(
   `);
 }
 
+/**
+ * ⚠ `grantedAt`/`revokedAt` are Postgres WIRE STRINGS (`2026-10-06 00:00:00+00`),
+ * not `Date`s, and not ISO-8601 — note the space instead of a `T`, which means
+ * a `z.string().datetime()` boundary would reject them.
+ *
+ * These come from a raw `db.execute()`, where drizzle's `NodePgPreparedQuery`
+ * installs a per-query `types.getTypeParser` returning `(val) => val` for
+ * TIMESTAMPTZ/TIMESTAMP/DATE/INTERVAL (see
+ * `drizzle-orm/node-postgres/session.js`, `rawQueryConfig`) so that a drizzle
+ * column's own `mapFromDriverValue` can own the conversion. A raw execute has
+ * no column type to apply, so nothing converts them. Bare node-postgres WOULD
+ * parse them to `Date`, which is why these were declared `Date` for as long as
+ * they existed — see `queries.raw-execute-timestamps.test.ts`.
+ */
 export interface StaffAssignmentHistoryRow {
   clientId: string;
-  grantedAt: Date;
+  grantedAt: string;
   grantedBy: string;
-  revokedAt: Date | null;
+  revokedAt: string | null;
 }
 
 /** Full grant/revoke history for one staff member, newest first — powers the admin UI's history view. */
@@ -1115,9 +1129,9 @@ export async function listAssignmentHistoryForStaff(
 ): Promise<StaffAssignmentHistoryRow[]> {
   const rows = await db.execute<{
     client_id: string;
-    granted_at: Date;
+    granted_at: string;
     granted_by: string;
-    revoked_at: Date | null;
+    revoked_at: string | null;
   }>(sql`
     SELECT client_id, granted_at, granted_by, revoked_at
     FROM staff_client_assignments
@@ -1178,11 +1192,12 @@ export async function revokeSourceAccess(
   `);
 }
 
+/** Same wire-string caveat as `StaffAssignmentHistoryRow` above. */
 export interface StaffSourceAssignmentHistoryRow {
   sourceId: string;
-  grantedAt: Date;
+  grantedAt: string;
   grantedBy: string;
-  revokedAt: Date | null;
+  revokedAt: string | null;
 }
 
 /** Full grant/revoke history for one staff member's direct source grants, newest first — powers the admin UI's history view. */
@@ -1192,9 +1207,9 @@ export async function listSourceAssignmentHistoryForStaff(
 ): Promise<StaffSourceAssignmentHistoryRow[]> {
   const rows = await db.execute<{
     source_id: string;
-    granted_at: Date;
+    granted_at: string;
     granted_by: string;
-    revoked_at: Date | null;
+    revoked_at: string | null;
   }>(sql`
     SELECT source_id, granted_at, granted_by, revoked_at
     FROM staff_source_assignments
