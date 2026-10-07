@@ -56,10 +56,12 @@ function payload(code: string, message: string): ErrorPayload {
  */
 function clientMessage(code: string, status: number, message: string): string {
   if (ECHOABLE_ERROR_CODES.has(code)) return message;
-  // Every sub-500 code in STATUS_BY_CODE is echoable, so suppression only ever
-  // reaches a 5xx. `error-handler.test.ts` pins that partition, which is what
-  // keeps this exhaustive; a future unaudited 4xx code would fail that test
-  // rather than silently land on the 500 text here.
+  // Every sub-500 code in STATUS_BY_CODE is echoable today, so suppression only
+  // ever reaches a 5xx; `error-handler.test.ts` pins that partition, and a new
+  // unaudited 4xx code fails it rather than landing here silently. The 4xx
+  // fallback is kept anyway so that if one ever does land here it reads as a
+  // client error instead of claiming a server fault.
+  if (status < 500) return "Bad request";
   if (status === 502) return "Upstream service error";
   if (status === 503) return "Service temporarily unavailable";
   return "Internal server error";

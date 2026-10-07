@@ -133,12 +133,15 @@ export class ComplianceError extends RagError {
  * call takes.
  *
  * Membership is decided by CODE, so a code is eligible only if EVERY throw
- * site produces a safe message. That makes most exclusions permanent rather
- * than pending-audit: `CONNECTOR_AUTH_ERROR`, `CONNECTOR_TRANSIENT_ERROR`,
- * `PARSER_ERROR`, `EMBEDDING_ERROR` and `VALIDATION_ERROR` take their message
- * as a constructor parameter, so "is it safe" varies per call site and cannot
- * be settled here. The members below are either zero-argument/sole-site
- * literals or audited interpolations.
+ * site produces a safe message. The discriminator is NOT whether the message
+ * arrives as a constructor parameter — `VALIDATION_ERROR` and `NOT_FOUND` are
+ * members and take one. It is WHO AUTHORS the string. `CONNECTOR_AUTH_ERROR`,
+ * `CONNECTOR_TRANSIENT_ERROR`, `PARSER_ERROR` and `EMBEDDING_ERROR` are built
+ * by internal code out of upstream state — a provider's rejection, the parser
+ * sidecar's response, a failed connection — so their safety varies per throw
+ * site and cannot be settled by code here; those exclusions are permanent
+ * rather than pending-audit. Each member below carries its own justification
+ * inline.
  *
  * It lives in core because two transports enforce it — `registerErrorHandler`
  * and `guardToolHandler` — and a security allow-list duplicated per transport

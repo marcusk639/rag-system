@@ -24,7 +24,7 @@ import { ZodError } from "zod";
  * 422). MCP has no status codes, so only the fault attribution survives the
  * translation. Keep the two aligned when adding a `RagError` subclass.
  */
-const CLIENT_FAULT_CODES = new Set([
+export const CLIENT_FAULT_CODES = new Set([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "SYNC_ALREADY_RUNNING",

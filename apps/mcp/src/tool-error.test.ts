@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComplianceError,
+  ECHOABLE_ERROR_CODES,
   EgressError,
   EmbeddingError,
   NotFoundError,
@@ -14,7 +15,11 @@ const { captureExceptionMock } = vi.hoisted(() => ({
 
 vi.mock("@rag/runtime", () => ({ captureException: captureExceptionMock }));
 
-import { guardResourceHandler, guardToolHandler } from "./tool-error.js";
+import {
+  CLIENT_FAULT_CODES,
+  guardResourceHandler,
+  guardToolHandler,
+} from "./tool-error.js";
 
 function fakeLogger() {
   return {
@@ -261,5 +266,22 @@ describe("guardToolHandler", () => {
     await guarded({ documentId: "abc" });
 
     expect(handler).toHaveBeenCalledWith({ documentId: "abc" });
+  });
+});
+
+describe("CLIENT_FAULT_CODES is a subset of ECHOABLE_ERROR_CODES", () => {
+  /**
+   * Both guards return a single generic string ("Internal server error") for
+   * any non-echoable code. That is only correct while every client-fault code
+   * is also echoable — otherwise an agent that sent a bad argument would be
+   * told the server broke. The relation is load-bearing and was documented in
+   * prose only; widening ECHOABLE_ERROR_CODES preserves it, but adding to
+   * CLIENT_FAULT_CODES can break it silently.
+   */
+  it("every client-fault code may show its message", () => {
+    const notEchoable = [...CLIENT_FAULT_CODES].filter(
+      (c) => !ECHOABLE_ERROR_CODES.has(c),
+    );
+    expect(notEchoable).toEqual([]);
   });
 });
