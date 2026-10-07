@@ -28,6 +28,24 @@
 import { defaultEmbeddingModel } from "@rag/core";
 import { createEmbeddingProvider } from "@rag/rag";
 
+// This script warms the LOCAL ONNX weight cache and nothing else: a remote
+// provider has no on-disk cache to populate, and constructing one here would
+// make an image build issue a billable API call that produces no cache.
+// EMBEDDING_PROVIDER defaults to `gemini` in env.example and
+// docker/compose.prod.yml, so an unchecked hardcode of "local" below would
+// silently disagree with the deployment it is warming for. Check it rather
+// than assume it. Empty counts as unset: Compose and Railway inject an
+// always-present empty variable rather than omitting it.
+const requestedProvider = process.env["EMBEDDING_PROVIDER"]?.trim();
+if (requestedProvider && requestedProvider !== "local") {
+  process.stderr.write(
+    `EMBEDDING_PROVIDER=${requestedProvider} has no local weight cache to ` +
+      `warm; this script only populates the local ONNX cache. Unset it, or ` +
+      `set it to "local", for the warm step.\n`,
+  );
+  process.exit(1);
+}
+
 // `||` not `??`: Compose and Railway inject an always-present but empty
 // variable rather than omitting it, and "" must fall through too.
 const model = process.env["EMBEDDING_MODEL"] || defaultEmbeddingModel("local");
@@ -43,6 +61,15 @@ const provider = createEmbeddingProvider({
   provider: "local",
   model,
   dimensions: 768,
+  // Required by the TYPE, not by this provider. `Config["embedding"]` is zod's
+  // OUTPUT type, where a `.default()`ed field is required rather than optional,
+  // so both must be supplied even though LocalEmbeddingProvider reads neither:
+  // they govern remote-API 429 backoff and client-side request pacing (see
+  // gemini.ts / openai.ts / retry.ts), and an in-process ONNX model has no
+  // rate limit to respect. Zero rather than a plausible number, so nothing
+  // here reads as rate-limit awareness that does not exist.
+  maxRetries: 0,
+  requestsPerMinute: 0,
 });
 
 await provider.embed("warmup");
