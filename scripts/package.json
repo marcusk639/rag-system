@@ -6,6 +6,10 @@
   "scripts": {
     "test": "vitest run"
   },
+  "dependencies": {
+    "@rag/core": "workspace:*",
+    "@rag/rag": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "^2.1.8"
   }

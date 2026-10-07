@@ -184,7 +184,7 @@ const LOCAL_PROVIDER_MAX_CHUNK_SIZE = 512;
  * `LocalEmbeddingProvider` loads (packages/rag/src/embeddings/local.ts), and
  * both are 768-dimensional, matching the `chunks.embedding` vector(768) column.
  */
-function defaultEmbeddingModel(
+export function defaultEmbeddingModel(
   provider: "gemini" | "openai" | "local",
 ): string {
   switch (provider) {
