@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { GATE_FAILURE_REASON_PREFIX } from "@rag/core";
 import type { Db } from "./client.js";
 import { ingestionJobs, type NewIngestionJob } from "./schema.js";
 
@@ -126,6 +127,23 @@ export interface GateFailureQuarantine {
   externalId: string;
   rejectionReason: string;
   attempts: number;
+  /**
+   * The raw Postgres wire value, e.g. `2026-10-06 00:00:00+00` — a STRING, not
+   * a Date, and NOT ISO-8601 (no `T`).
+   *
+   * ⚠ Do not "fix" this to `Date`. Bare node-postgres would parse a
+   * `timestamptz` to a Date, but a raw `db.execute()` does not: drizzle's
+   * `NodePgPreparedQuery` installs a per-query `types.getTypeParser` that
+   * returns `(val) => val` for TIMESTAMPTZ/TIMESTAMP/DATE/INTERVAL, so the
+   * column type's own `mapFromDriverValue` can own the conversion — and a raw
+   * execute has no column type to apply. See
+   * `drizzle-orm/node-postgres/session.js` (`rawQueryConfig`).
+   *
+   * A consumer that wants a Date must construct one, and a
+   * `z.string().datetime()` boundary would REJECT this value. The same mistake
+   * is already latent at `queries.ts` (`granted_at`/`revoked_at` typed `Date`
+   * on a raw execute) — that is a pre-existing bug, not a precedent to copy.
+   */
   lastSeenAt: string;
 }
 
@@ -155,13 +173,18 @@ export async function listGateFailureQuarantines(
     last_seen_at: string;
   }>(sql`
     SELECT external_id,
-           max(rejection_reason) AS rejection_reason,
+           -- The reason AT last_seen_at. max() would return the
+           -- lexicographically greatest string, so a document that broke the
+           -- scanner once and has quarantined on a missing pack ever since
+           -- would report the stale cause forever.
+           (array_agg(rejection_reason ORDER BY created_at DESC))[1]
+             AS rejection_reason,
            count(*)::int AS attempts,
            max(created_at) AS last_seen_at
     FROM ingest_log
     WHERE source_id = ${sourceId}::uuid
       AND action = 'blocked'
-      AND rejection_reason LIKE ${"gate-failure: %"}
+      AND rejection_reason LIKE ${`${GATE_FAILURE_REASON_PREFIX}%`}
     GROUP BY external_id
     ORDER BY max(created_at) DESC
     LIMIT ${opts.limit}

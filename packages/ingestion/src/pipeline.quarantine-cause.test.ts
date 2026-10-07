@@ -210,6 +210,50 @@ describe("runIngestion — gate-failure vs policy quarantines", () => {
     );
 
     expect(result.documentsQuarantinedGateFailure).toBe(1);
+    // The retry pass handled a document, so it must appear in the processed
+    // total too. Counting the quarantine but not the processing left the
+    // operator message reading "a gate FAILED on 1 of 0 documents".
+    expect(result.documentsProcessed).toBe(1);
+    // The gate-failure count is documented as a SUBSET of the total, and the
+    // worker derives `policy = total - gateFailure` for its operator message.
+    // Counting a retry-path gate failure in only one of the two broke that
+    // invariant and printed "-1 further documents were quarantined by policy".
+    expect(result.documentsQuarantined).toBe(1);
+    expect(result.documentsQuarantinedGateFailure).toBeLessThanOrEqual(
+      result.documentsQuarantined,
+    );
+  });
+
+  it("counts a POLICY quarantine on the retry path in the total", async () => {
+    // The other half of the same hole: the retry pass reported only gate
+    // failures, so a policy quarantine reached through it incremented neither
+    // counter and vanished from the run's reported totals entirely.
+    listRetryableIngestFailuresMock.mockResolvedValue(["doc-z"]);
+    const { connector } = makeConnector([
+      { documents: [], nextCursor: "c1", done: true },
+    ]);
+    (connector as unknown as { fetch: unknown }).fetch = vi.fn(
+      async (externalId: string): Promise<SourceDocument> => ({
+        externalId,
+        title: externalId,
+        modifiedAt: new Date().toISOString(),
+        mimeType: "text/plain",
+        content: Buffer.from("content"),
+        metadata: {},
+      }),
+    );
+    const deps = { ...makeDeps(), scanner: FLAGGING_SCANNER } as PipelineDeps;
+
+    const result = await runIngestion(
+      "src",
+      connector,
+      null,
+      { ...OPTS, retryFailed: true },
+      deps,
+    );
+
+    expect(result.documentsQuarantined).toBe(1);
+    expect(result.documentsQuarantinedGateFailure).toBe(0);
   });
 
   it("reports a gate failure at error level under its own marker", async () => {

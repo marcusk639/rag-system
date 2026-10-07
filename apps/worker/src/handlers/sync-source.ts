@@ -201,12 +201,14 @@ export async function handleSyncSource(
           `which is normal, and ${totals.chunksCreated} chunks were indexed). ` +
           `The gate could not reach a verdict, so these documents were neither ` +
           `indexed nor recorded as failures: check scanner reachability, the ` +
-          `egress allow-list, and the identifier-scanner pack. List the ` +
-          `affected documents with listGateFailureQuarantines (they are the ` +
-          `'gate-failure:' rows in ingest_log) -- one that recurs every sync ` +
-          `is a document to fix or exclude at the source. The cursor has ` +
-          `already advanced past them, so re-run with mode "full" once the ` +
-          `gate is healthy; an incremental sync will not revisit them.`,
+          `egress allow-list, and the identifier-scanner pack. The affected ` +
+          `documents are the ingest_log rows for this source whose ` +
+          `rejection_reason starts with 'gate-failure:' -- one that recurs ` +
+          `every sync is a document to fix or exclude at the source. ` +
+          `Re-run with mode "full" once the gate is healthy: this run stopped ` +
+          `without enumerating the source's remaining pages, and the cursor ` +
+          `has already advanced, so an incremental sync revisits neither the ` +
+          `refused documents nor anything on the pages that were not reached.`,
       });
       log.error(
         {
@@ -216,6 +218,29 @@ export async function handleSyncSource(
           marker: "ingest.sync.gate_failure_quarantine",
         },
         "a content-safety gate failed during this sync; recorded as failed",
+      );
+      // Alert, even though nothing threw. This path deliberately RETURNS
+      // rather than throwing -- throwing would have pg-boss retry the whole
+      // sync, which cannot help when the gate itself is down -- and that also
+      // skips the captureException in the catch below. Without this, the one
+      // outcome this handler treats as silent data loss was its only terminal
+      // failure with no alert. It is terminal by construction, so there is no
+      // retry-exhaustion check to make first.
+      captureException(
+        new Error(
+          `content-safety gate failed on ` +
+            `${totals.documentsQuarantinedGateFailure} of ` +
+            `${totals.documentsProcessed} documents`,
+        ),
+        {
+          sourceId,
+          ingestionId,
+          jobId: job.id,
+          documentsQuarantinedGateFailure:
+            totals.documentsQuarantinedGateFailure,
+          documentsQuarantined: totals.documentsQuarantined,
+          documentsProcessed: totals.documentsProcessed,
+        },
       );
       return;
     }

@@ -335,6 +335,67 @@ describe("handleSyncSource per-page continuation", () => {
     expect(markSyncedMock).toHaveBeenCalled();
   });
 
+  it("alerts on a gate failure, which returns rather than throwing", async () => {
+    // The guard deliberately returns instead of throwing (throwing would make
+    // pg-boss retry the whole sync), which also bypasses the captureException
+    // in the catch block -- so the one outcome this code calls silent data
+    // loss was the only terminal failure in the handler with no alert.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 10,
+        chunksCreated: 18,
+        documentsQuarantined: 1,
+        documentsQuarantinedGateFailure: 1,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    const failure = updateIngestionJobMock.mock.calls.find(
+      (call) => (call[2] as { status?: string }).status === "failed",
+    );
+    const error = (failure?.[2] as { error: string }).error;
+    // Counts must be coherent: the retry pass contributes to documentsProcessed
+    // too, so an operator never reads "1 of 0 documents".
+    expect(error).toContain("1 of 10");
+    // Remediation must be actionable. `listGateFailureQuarantines` has no
+    // route, MCP tool or script exposing it, so naming it sent an operator
+    // mid-incident after a function they cannot invoke.
+    expect(error).not.toContain("listGateFailureQuarantines");
+    expect(error).toContain("ingest_log");
+    expect(error).toContain("gate-failure:");
+    // The cursor advanced past the UNENUMERATED remaining pages too, not just
+    // the refused documents, so a re-run is wider than the counts imply.
+    expect(error).toMatch(
+      /remaining pages|not been enumerated|were not reached/,
+    );
+    expect(captureExceptionMock).toHaveBeenCalledOnce();
+    expect(captureExceptionMock.mock.calls[0]![1]).toEqual(
+      expect.objectContaining({
+        sourceId: "s1",
+        ingestionId: "ing-1",
+        documentsQuarantinedGateFailure: 1,
+      }),
+    );
+  });
+
+  it("does NOT alert when only policy quarantines occurred", async () => {
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 50,
+        chunksCreated: 48,
+        documentsQuarantined: 26,
+        documentsQuarantinedGateFailure: 0,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
   it("stops a multi-page sync at the first gate failure instead of re-enqueueing", async () => {
     // The guard used to be gated on `result.done`, so a scanner down for the
     // first nineteen continuations of a twenty-job sync never reached it and

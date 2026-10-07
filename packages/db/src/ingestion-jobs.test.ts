@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { GATE_FAILURE_REASON_PREFIX } from "@rag/core";
 import {
   incrementIngestionJobCounters,
   listGateFailureQuarantines,
+  type GateFailureQuarantine,
 } from "./ingestion-jobs.js";
 import type { Db } from "./client.js";
 
@@ -26,6 +28,10 @@ function sqlText(node: unknown): string {
     if (Array.isArray(o.value) && o.value.every((v) => typeof v === "string")) {
       return (o.value as string[]).join(" ");
     }
+    // Bind parameters too: the gate-failure prefix is passed as a param, so a
+    // helper that only walked literal chunks could not see the one value that
+    // decides whether this query matches anything at all.
+    if (typeof o.value === "string") return o.value;
     if (Array.isArray(o.queryChunks)) return sqlText(o.queryChunks);
     return "";
   }
@@ -53,6 +59,16 @@ const DELTA = {
   documentsQuarantined: 3,
   documentsQuarantinedGateFailure: 2,
 };
+
+/**
+ * Type-level guard. The mapping is a pass-through, so no runtime assertion can
+ * tell `string` from `Date` here -- a stubbed Date would satisfy either. This
+ * line is the only thing that fails if someone retypes the field, and it fails
+ * at `pnpm typecheck` rather than in production on the first `.toISOString()`.
+ */
+const _lastSeenAtIsAWireString: GateFailureQuarantine["lastSeenAt"] =
+  "2026-10-06 00:00:00+00";
+void _lastSeenAtIsAWireString;
 
 const ROW = {
   documents_processed: 100,
@@ -150,7 +166,20 @@ describe("listGateFailureQuarantines — problematic documents", () => {
     expect(sql).toContain("ingest_log");
     expect(sql).toContain("action = 'blocked'");
     expect(sql).toContain("rejection_reason LIKE");
+    // Pin the ACTUAL prefix, from the shared constant. @rag/db cannot import
+    // @rag/ingestion, so before this the producer side (which writes the
+    // prefix) and the consumer side (which filters on it) were two unrelated
+    // string literals: change one and this query silently returns zero rows
+    // forever, with no error anywhere.
+    expect(sql).toContain(`${GATE_FAILURE_REASON_PREFIX}%`);
     expect(sql).toContain("source_id =");
+    // The reason must be the one seen AT last_seen_at. `max(rejection_reason)`
+    // returns the lexicographically greatest string, so a document that broke
+    // the scanner once and has quarantined on a missing pack ever since would
+    // report the stale cause forever -- in the one query whose purpose is
+    // telling an operator why a document keeps breaking the gate.
+    expect(sql).toContain("array_agg(rejection_reason ORDER BY created_at");
+    expect(sql).not.toContain("max(rejection_reason)");
   });
 
   it("returns the external id, reason and last-seen time per document", async () => {
@@ -159,7 +188,11 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         external_id: "Working Papers/ledger.xlsx",
         rejection_reason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        last_seen_at: "2026-10-06T00:00:00.000Z",
+        // The raw wire string a `db.execute()` actually yields -- NOT a Date
+        // and not ISO-8601. drizzle's NodePgPreparedQuery overrides
+        // getTypeParser to `(val) => val` for TIMESTAMPTZ, so pg never parses
+        // it. The fixture mirrors reality rather than the convenient shape.
+        last_seen_at: "2026-10-06 00:00:00+00",
       },
     ];
 
@@ -174,7 +207,7 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         externalId: "Working Papers/ledger.xlsx",
         rejectionReason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        lastSeenAt: "2026-10-06T00:00:00.000Z",
+        lastSeenAt: "2026-10-06 00:00:00+00",
       },
     ]);
   });
