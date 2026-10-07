@@ -189,3 +189,36 @@ describe("egressSafeFetch", () => {
     expect(calls[0]!.body).toBe("payload");
   });
 });
+
+describe("EgressError messages are client-safe", () => {
+  /**
+   * EGRESS_BLOCKED is in ECHOABLE_ERROR_CODES, so this message is returned to
+   * HTTP clients and MCP agents verbatim. The unparseable-URL branch used to
+   * interpolate the whole URL, which can carry userinfo credentials or a
+   * query-string token.
+   */
+  it("does not interpolate an unparseable URL carrying credentials", () => {
+    const policy = new EgressPolicy(["api.openai.com"]);
+    const secret = "s3cr3t-tok3n-value";
+
+    let thrown: unknown;
+    try {
+      policy.assertAllowed(
+        `ht!tp://user:${secret}@evil.example/x?key=${secret}`,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(EgressError);
+    expect((thrown as Error).message).not.toContain(secret);
+    expect((thrown as Error).message).not.toContain("evil.example");
+  });
+
+  it("still names the host for a parseable, disallowed URL", () => {
+    const policy = new EgressPolicy(["api.openai.com"]);
+    expect(() => policy.assertAllowed("https://evil.example/x")).toThrow(
+      /evil\.example/,
+    );
+  });
+});

@@ -47,8 +47,13 @@ export class EgressPolicy {
     try {
       hostname = new URL(url).hostname.toLowerCase();
     } catch {
-      // Unparseable URL — treat as an unknown host and block.
-      throw new EgressError(url);
+      // Unparseable URL — treat as an unknown host and block. EGRESS_BLOCKED
+      // is in ECHOABLE_ERROR_CODES, so this message reaches HTTP clients and
+      // MCP agents, and an unparseable URL can carry userinfo credentials or a
+      // query-string token. No caller catches this to log the real value, but
+      // every `assertAllowed` site passes a module constant or a configured
+      // endpoint, so the operator can still recover it from config.
+      throw new EgressError("<unparseable url>");
     }
     if (!this.allowed.has(hostname)) {
       throw new EgressError(hostname);

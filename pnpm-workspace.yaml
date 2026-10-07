@@ -3,6 +3,9 @@ packages:
   - "apps/*"
   - "tests/*"
   - "examples/*"
-  # scripts/ is a workspace package only so `pnpm -r run test` picks up the
-  # Docker build-gate tests in warm-model-verified.test.ts. It ships no code.
+  # scripts/ is a workspace package so `pnpm -r run test` picks up the Docker
+  # build-gate tests in warm-model-verified.test.ts, and `pnpm -r run
+  # typecheck` covers the .ts files here. It ships no code. The typecheck
+  # resolves workspace imports through their built dist/, so it needs
+  # `pnpm -r build` first, like every other package.
   - "scripts"

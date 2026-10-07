@@ -1,4 +1,4 @@
-import { RagError } from "@rag/core";
+import { ECHOABLE_ERROR_CODES, RagError } from "@rag/core";
 import { captureException } from "@rag/runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
@@ -7,7 +7,7 @@ import { ZodError } from "zod";
  * Map a `RagError.code` to an HTTP status. Anything we don't know about
  * falls through to 500. Keep this list aligned with `packages/core/src/errors.ts`.
  */
-const STATUS_BY_CODE: Record<string, number> = {
+export const STATUS_BY_CODE: Record<string, number> = {
   VALIDATION_ERROR: 400,
   NOT_FOUND: 404,
   // A duplicate sync was rejected by pg-boss's singletonKey dedupe — the
@@ -42,6 +42,29 @@ interface ErrorPayload {
 
 function payload(code: string, message: string): ErrorPayload {
   return { error: { code, message } };
+}
+
+/**
+ * Decide what the client is allowed to read.
+ *
+ * Gated on `ECHOABLE_ERROR_CODES` (`@rag/core`) — the audited set shared with
+ * the MCP surface — and NOT on the status, because the two do not line up:
+ * `EGRESS_BLOCKED` is a 503 whose message is audited (a hostname the operator
+ * needs), while an unaudited 4xx would otherwise echo simply for being a
+ * client fault. Everything outside the set gets fixed text and logs the real
+ * message, with `error.code` returned either way.
+ */
+function clientMessage(code: string, status: number, message: string): string {
+  if (ECHOABLE_ERROR_CODES.has(code)) return message;
+  // Every sub-500 code in STATUS_BY_CODE is echoable today, so suppression only
+  // ever reaches a 5xx; `error-handler.test.ts` pins that partition, and a new
+  // unaudited 4xx code fails it rather than landing here silently. The 4xx
+  // fallback is kept anyway so that if one ever does land here it reads as a
+  // client error instead of claiming a server fault.
+  if (status < 500) return "Bad request";
+  if (status === 502) return "Upstream service error";
+  if (status === 503) return "Service temporarily unavailable";
+  return "Internal server error";
 }
 
 /**
@@ -80,7 +103,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
             code: error.code,
           });
         }
-        return reply.code(status).send(payload(error.code, error.message));
+        return reply
+          .code(status)
+          .send(
+            payload(
+              error.code,
+              clientMessage(error.code, status, error.message),
+            ),
+          );
       }
 
       // Fastify-native validation error (e.g. malformed JSON body).

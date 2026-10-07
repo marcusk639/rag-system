@@ -58,13 +58,13 @@ export class HttpParserClient implements Parser {
       // the offending cell or line — so a 4xx *or* 5xx body may carry document
       // text.
       //
-      // Why that matters for a `RagError` specifically: both transports treat a
-      // RagError's `message` as the text they may show a caller —
-      // `apps/api/src/error-handler.ts` sends `payload(error.code,
-      // error.message)` and `apps/mcp/src/tool-error.ts` returns
-      // `toolError(err.code, err.message)`, while an unrecognized error gets a
-      // generic string. A RagError whose message carries document text breaks
-      // that contract. No route reaches a ParserError today (the parser client
+      // Why that matters for a `RagError` specifically: both transports used to
+      // treat a RagError's `message` as text they may show a caller. They now
+      // gate on `ECHOABLE_ERROR_CODES` (@rag/core), which excludes
+      // PARSER_ERROR — so document text in this message would no longer reach
+      // a client. Redacting here stays worthwhile as defence in depth: it also
+      // keeps document text out of logs and Sentry, which the allow-list does
+      // not govern. No route reaches a ParserError today (the parser client
       // is constructed only in apps/worker, and PARSER_ERROR's 502 mapping is
       // defensive), so this is keeping the contract true rather than closing a
       // live hole.

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   NotFoundError,
-  RagError,
   SourceKind,
+  StorageNotConfiguredError,
   ValidationError,
 } from "@rag/core";
 import {
@@ -235,10 +235,7 @@ export async function registerSourceRoutes(
 
       // Originals must be persisted so cited documents stay downloadable.
       if (!deps.objectStore) {
-        throw new RagError(
-          "object store is not configured; uploads are disabled",
-          "STORAGE_NOT_CONFIGURED",
-        );
+        throw new StorageNotConfiguredError();
       }
 
       const file = await request.file();
