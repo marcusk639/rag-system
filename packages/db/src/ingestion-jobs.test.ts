@@ -3,6 +3,7 @@ import { GATE_FAILURE_REASON_PREFIX } from "@rag/core";
 import {
   incrementIngestionJobCounters,
   listGateFailureQuarantines,
+  type GateFailureQuarantine,
 } from "./ingestion-jobs.js";
 import type { Db } from "./client.js";
 
@@ -58,6 +59,16 @@ const DELTA = {
   documentsQuarantined: 3,
   documentsQuarantinedGateFailure: 2,
 };
+
+/**
+ * Type-level guard. The mapping is a pass-through, so no runtime assertion can
+ * tell `string` from `Date` here -- a stubbed Date would satisfy either. This
+ * line is the only thing that fails if someone retypes the field, and it fails
+ * at `pnpm typecheck` rather than in production on the first `.toISOString()`.
+ */
+const _lastSeenAtIsAWireString: GateFailureQuarantine["lastSeenAt"] =
+  "2026-10-06 00:00:00+00";
+void _lastSeenAtIsAWireString;
 
 const ROW = {
   documents_processed: 100,
@@ -162,6 +173,13 @@ describe("listGateFailureQuarantines — problematic documents", () => {
     // forever, with no error anywhere.
     expect(sql).toContain(`${GATE_FAILURE_REASON_PREFIX}%`);
     expect(sql).toContain("source_id =");
+    // The reason must be the one seen AT last_seen_at. `max(rejection_reason)`
+    // returns the lexicographically greatest string, so a document that broke
+    // the scanner once and has quarantined on a missing pack ever since would
+    // report the stale cause forever -- in the one query whose purpose is
+    // telling an operator why a document keeps breaking the gate.
+    expect(sql).toContain("array_agg(rejection_reason ORDER BY created_at");
+    expect(sql).not.toContain("max(rejection_reason)");
   });
 
   it("returns the external id, reason and last-seen time per document", async () => {
@@ -170,10 +188,11 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         external_id: "Working Papers/ledger.xlsx",
         rejection_reason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        // node-postgres parses timestamptz to a JS Date, so the row type and
-        // the public interface must say Date -- matching the repo's precedent
-        // for raw db.execute (queries.ts staff-assignment history).
-        last_seen_at: new Date("2026-10-06T00:00:00.000Z"),
+        // The raw wire string a `db.execute()` actually yields -- NOT a Date
+        // and not ISO-8601. drizzle's NodePgPreparedQuery overrides
+        // getTypeParser to `(val) => val` for TIMESTAMPTZ, so pg never parses
+        // it. The fixture mirrors reality rather than the convenient shape.
+        last_seen_at: "2026-10-06 00:00:00+00",
       },
     ];
 
@@ -188,7 +207,7 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         externalId: "Working Papers/ledger.xlsx",
         rejectionReason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        lastSeenAt: new Date("2026-10-06T00:00:00.000Z"),
+        lastSeenAt: "2026-10-06 00:00:00+00",
       },
     ]);
   });

@@ -242,11 +242,19 @@ export async function runIngestion(
         { db: deps.db, log, sourceId, connector, docClass },
         (doc) => ingestOne(sourceId, doc, deps, docClass),
       )
-    : { retried: 0, quarantined: 0, quarantinedGateFailure: 0 };
+    : {
+        retried: 0,
+        processed: 0,
+        failed: 0,
+        quarantined: 0,
+        quarantinedGateFailure: 0,
+      };
   const documentsRetried = retryPass.retried;
   // BOTH counters, not just the gate-failure one. `documentsQuarantined` is
   // documented as the total and the worker derives the policy count by
   // subtracting; feeding only one of them made that subtraction negative.
+  documentsProcessed += retryPass.processed;
+  documentsFailed += retryPass.failed;
   documentsQuarantined += retryPass.quarantined;
   documentsQuarantinedGateFailure += retryPass.quarantinedGateFailure;
 

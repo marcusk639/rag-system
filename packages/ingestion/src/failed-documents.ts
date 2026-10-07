@@ -54,6 +54,15 @@ export interface RetryPassResult {
   /** Retried documents that did not throw. */
   retried: number;
   /**
+   * Documents this pass handled, counted the same way the page loop counts
+   * them. The pass calls the same `ingestOne`, so omitting it understated the
+   * run: with an empty first page the operator message read "a gate FAILED on
+   * 1 of 0 documents".
+   */
+  processed: number;
+  /** Retries that threw, counted like a page-loop failure. */
+  failed: number;
+  /**
    * Retries a safety gate quarantined, either cause. The caller folds this
    * into the run's total so `quarantinedGateFailure <= quarantined` holds for
    * retry-path quarantines too -- it derives the policy count by subtracting
@@ -92,6 +101,8 @@ export async function retryFailedDocuments(
     limit: MAX_RETRIES_PER_RUN,
   });
   let retried = 0;
+  let processed = 0;
+  let failed = 0;
   let quarantined = 0;
   let quarantinedGateFailure = 0;
   for (const externalId of externalIds) {
@@ -101,11 +112,13 @@ export async function retryFailedDocuments(
       // retry is reported through `quarantinedGateFailure`, not by quietly
       // shrinking a number other callers already read.
       retried++;
+      processed++;
       if (outcome.outcome === "quarantined") {
         quarantined++;
         if (outcome.cause === "gate-failure") quarantinedGateFailure++;
       }
     } catch (err) {
+      failed++;
       log.warn(
         { err, externalId, marker: "ingest.retry_failed" },
         "retry of a previously failed document failed again",
@@ -123,6 +136,8 @@ export async function retryFailedDocuments(
       {
         attempted: externalIds.length,
         retried,
+        processed,
+        failed,
         quarantined,
         quarantinedGateFailure,
         marker: "ingest.retry_pass",
@@ -130,5 +145,5 @@ export async function retryFailedDocuments(
       "retried previously failed documents",
     );
   }
-  return { retried, quarantined, quarantinedGateFailure };
+  return { retried, processed, failed, quarantined, quarantinedGateFailure };
 }

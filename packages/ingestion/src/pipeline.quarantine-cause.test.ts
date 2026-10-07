@@ -210,6 +210,10 @@ describe("runIngestion — gate-failure vs policy quarantines", () => {
     );
 
     expect(result.documentsQuarantinedGateFailure).toBe(1);
+    // The retry pass handled a document, so it must appear in the processed
+    // total too. Counting the quarantine but not the processing left the
+    // operator message reading "a gate FAILED on 1 of 0 documents".
+    expect(result.documentsProcessed).toBe(1);
     // The gate-failure count is documented as a SUBSET of the total, and the
     // worker derives `policy = total - gateFailure` for its operator message.
     // Counting a retry-path gate failure in only one of the two broke that

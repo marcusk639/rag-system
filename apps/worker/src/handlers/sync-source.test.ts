@@ -352,6 +352,24 @@ describe("handleSyncSource per-page continuation", () => {
 
     await handleSyncSource(job({}), deps);
 
+    const failure = updateIngestionJobMock.mock.calls.find(
+      (call) => (call[2] as { status?: string }).status === "failed",
+    );
+    const error = (failure?.[2] as { error: string }).error;
+    // Counts must be coherent: the retry pass contributes to documentsProcessed
+    // too, so an operator never reads "1 of 0 documents".
+    expect(error).toContain("1 of 10");
+    // Remediation must be actionable. `listGateFailureQuarantines` has no
+    // route, MCP tool or script exposing it, so naming it sent an operator
+    // mid-incident after a function they cannot invoke.
+    expect(error).not.toContain("listGateFailureQuarantines");
+    expect(error).toContain("ingest_log");
+    expect(error).toContain("gate-failure:");
+    // The cursor advanced past the UNENUMERATED remaining pages too, not just
+    // the refused documents, so a re-run is wider than the counts imply.
+    expect(error).toMatch(
+      /remaining pages|not been enumerated|were not reached/,
+    );
     expect(captureExceptionMock).toHaveBeenCalledOnce();
     expect(captureExceptionMock.mock.calls[0]![1]).toEqual(
       expect.objectContaining({
