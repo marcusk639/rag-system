@@ -7,7 +7,7 @@ import { ZodError } from "zod";
  * Map a `RagError.code` to an HTTP status. Anything we don't know about
  * falls through to 500. Keep this list aligned with `packages/core/src/errors.ts`.
  */
-const STATUS_BY_CODE: Record<string, number> = {
+export const STATUS_BY_CODE: Record<string, number> = {
   VALIDATION_ERROR: 400,
   NOT_FOUND: 404,
   // A duplicate sync was rejected by pg-boss's singletonKey dedupe — the
@@ -56,7 +56,10 @@ function payload(code: string, message: string): ErrorPayload {
  */
 function clientMessage(code: string, status: number, message: string): string {
   if (ECHOABLE_ERROR_CODES.has(code)) return message;
-  if (status < 500) return "Bad request";
+  // Every sub-500 code in STATUS_BY_CODE is echoable, so suppression only ever
+  // reaches a 5xx. `error-handler.test.ts` pins that partition, which is what
+  // keeps this exhaustive; a future unaudited 4xx code would fail that test
+  // rather than silently land on the 500 text here.
   if (status === 502) return "Upstream service error";
   if (status === 503) return "Service temporarily unavailable";
   return "Internal server error";

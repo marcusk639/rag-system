@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyBaseLogger } from "fastify";
 import pino from "pino";
-import { RagError } from "@rag/core";
-import { registerErrorHandler } from "./error-handler.js";
+import { ECHOABLE_ERROR_CODES, RagError } from "@rag/core";
+import { captureException } from "@rag/runtime";
+import { registerErrorHandler, STATUS_BY_CODE } from "./error-handler.js";
 
 vi.mock("@rag/runtime", () => ({ captureException: vi.fn() }));
 
@@ -62,8 +63,6 @@ describe("registerErrorHandler — unaudited RagError messages are not echoed", 
     ["PARSER_ERROR", 502, "Upstream service error"],
     ["EMBEDDING_ERROR", 502, "Upstream service error"],
     ["CONNECTOR_TRANSIENT_ERROR", 503, "Service temporarily unavailable"],
-    ["GENERATION_NOT_CONFIGURED", 503, "Service temporarily unavailable"],
-    ["STORAGE_NOT_CONFIGURED", 503, "Service temporarily unavailable"],
   ];
 
   it.each(suppressed)(
@@ -114,6 +113,10 @@ describe("registerErrorHandler — audited RagError messages are echoed", () => 
     ["SYNC_ALREADY_RUNNING", 409],
     ["COMPLIANCE_VIOLATION", 422],
     ["EGRESS_BLOCKED", 503],
+    // Static strings naming env vars. Suppressing these reported a permanent
+    // misconfiguration as "temporarily unavailable".
+    ["GENERATION_NOT_CONFIGURED", 503],
+    ["STORAGE_NOT_CONFIGURED", 503],
   ];
 
   it.each(echoable)("%s -> %i keeps its message", async (code, status) => {
@@ -122,5 +125,79 @@ describe("registerErrorHandler — audited RagError messages are echoed", () => 
 
     expect(res.statusCode).toBe(status);
     expect(res.json()).toEqual({ error: { code, message } });
+  });
+});
+
+describe("registerErrorHandler — the suppression policy is closed", () => {
+  /**
+   * Growing `ECHOABLE_ERROR_CODES` or `STATUS_BY_CODE` without a test row was
+   * the one way to reopen the leak while this file stayed green: neither table
+   * above enumerates itself, so a new `DB_ERROR: 500` plus an allow-list entry
+   * would have gone unnoticed. This asserts the two tables PARTITION
+   * STATUS_BY_CODE exactly, so any added code fails here until it is
+   * classified deliberately.
+   */
+  it("every STATUS_BY_CODE code is covered by exactly one table above", () => {
+    const echoed = Object.keys(STATUS_BY_CODE).filter((c) =>
+      ECHOABLE_ERROR_CODES.has(c),
+    );
+    const suppressedCodes = Object.keys(STATUS_BY_CODE).filter(
+      (c) => !ECHOABLE_ERROR_CODES.has(c),
+    );
+
+    expect(suppressedCodes.sort()).toEqual(
+      [
+        "CONNECTOR_AUTH_ERROR",
+        "CONNECTOR_TRANSIENT_ERROR",
+        "EMBEDDING_ERROR",
+        "PARSER_ERROR",
+      ].sort(),
+    );
+    expect(echoed.sort()).toEqual(
+      [
+        "COMPLIANCE_VIOLATION",
+        "EGRESS_BLOCKED",
+        "GENERATION_NOT_CONFIGURED",
+        "NOT_FOUND",
+        "STORAGE_NOT_CONFIGURED",
+        "SYNC_ALREADY_RUNNING",
+        "VALIDATION_ERROR",
+      ].sort(),
+    );
+  });
+
+  it("never sends error.cause to the client, even for an echoable code", async () => {
+    // At packages/rag/src/parser/parser-client.ts:50 the MESSAGE is already
+    // generic and the whole exposure sits in `cause` (an undici error carrying
+    // PARSER_URL). Every other case here builds errors without a cause, so a
+    // `clientMessage` that appended it would keep this file green.
+    const suppressed = await inject(
+      new RagError("Parser request failed (500)", "PARSER_ERROR", {
+        detail: LEAKY_MESSAGE,
+      }),
+    );
+    expect(suppressed.res.body).not.toContain(SENTINEL);
+
+    const echoable = await inject(
+      new RagError("sourceId must be a uuid", "VALIDATION_ERROR", {
+        detail: LEAKY_MESSAGE,
+      }),
+    );
+    expect(echoable.res.body).not.toContain(SENTINEL);
+    expect(echoable.res.json()).toEqual({
+      error: { code: "VALIDATION_ERROR", message: "sourceId must be a uuid" },
+    });
+  });
+
+  it("reports 5xx to Sentry and leaves 4xx alone", async () => {
+    // Narrowing what the client sees makes the server-side record the only
+    // record, so the record itself needs pinning.
+    vi.mocked(captureException).mockClear();
+    await inject(new RagError(LEAKY_MESSAGE, "PARSER_ERROR"));
+    expect(captureException).toHaveBeenCalledTimes(1);
+
+    vi.mocked(captureException).mockClear();
+    await inject(new RagError("sourceId must be a uuid", "VALIDATION_ERROR"));
+    expect(captureException).not.toHaveBeenCalled();
   });
 });

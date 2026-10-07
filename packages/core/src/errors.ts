@@ -132,11 +132,23 @@ export class ComplianceError extends RagError {
  * (`packages/rag/src/embeddings/gemini.ts`) on a path every search and ask
  * call takes.
  *
+ * Membership is decided by CODE, so a code is eligible only if EVERY throw
+ * site produces a safe message. That makes most exclusions permanent rather
+ * than pending-audit: `CONNECTOR_AUTH_ERROR`, `CONNECTOR_TRANSIENT_ERROR`,
+ * `PARSER_ERROR`, `EMBEDDING_ERROR` and `VALIDATION_ERROR` take their message
+ * as a constructor parameter, so "is it safe" varies per call site and cannot
+ * be settled here. The members below are either zero-argument/sole-site
+ * literals or audited interpolations.
+ *
  * It lives in core because two transports enforce it — `registerErrorHandler`
  * and `guardToolHandler` — and a security allow-list duplicated per transport
  * drifts. `STREAMABLE_ERROR_CODES` (`apps/api/src/routes/ask.ts`) is
- * deliberately NOT this set: mid-stream there is no envelope to carry a code,
- * so it stays narrower.
+ * deliberately NOT this set, but not because a stream cannot carry a code —
+ * `streamErrorPayload` does return `{ code, message }`. It is narrower because
+ * only EGRESS_BLOCKED and COMPLIANCE_VIOLATION are reachable after the 200
+ * header is written; the rest fail before the stream opens and are handled by
+ * `registerErrorHandler`. Divergence there fails closed to "Generation
+ * failed.".
  */
 export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   // Audited: a hostname, and TRI pattern labels.
@@ -147,4 +159,11 @@ export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "SYNC_ALREADY_RUNNING",
+  // Static strings naming the env vars an operator must set. Suppressing
+  // these told the caller "Service temporarily unavailable" about a permanent
+  // misconfiguration, inviting an indefinite retry; docs/API.md documents the
+  // GENERATION_NOT_CONFIGURED text as the response body, and apps/web renders
+  // both straight to the user.
+  "GENERATION_NOT_CONFIGURED",
+  "STORAGE_NOT_CONFIGURED",
 ]);

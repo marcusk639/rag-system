@@ -8,12 +8,10 @@ import {
 import type { Logger } from "pino";
 import { ZodError } from "zod";
 
-/**
- * The audited showable-message set now lives in `@rag/core` as
- * `ECHOABLE_ERROR_CODES`, because `apps/api/src/error-handler.ts` enforces the
- * same list and a security allow-list duplicated per transport drifts. The
- * rationale, and what must stay out of it, is documented there.
- */
+// The audited showable-message set lives in `@rag/core` as
+// `ECHOABLE_ERROR_CODES`, because `apps/api/src/error-handler.ts` enforces the
+// same list and a security allow-list duplicated per transport drifts. The
+// rationale, and what must stay out of it, is documented there.
 
 /**
  * `RagError.code`s that describe a fault in the *call* rather than in the
