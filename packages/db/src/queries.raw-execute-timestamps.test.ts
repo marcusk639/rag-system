@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   listAssignmentHistoryForStaff,
   listSourceAssignmentHistoryForStaff,
@@ -20,12 +20,13 @@ import type { Db } from "./client.js";
  * wrong, and why both of these row types were declared `Date` for as long as
  * they have existed.
  *
- * Nothing crashed because both consumers already wrap defensively
- * (`manage-access.ts`'s `stamp`, and `SourceAccessHistoryForm` in
- * `apps/web/src/app/admin/access/access-forms.tsx`, which calls
- * `new Date(...)`). `manage-access.ts` documented the wrong declaration and
- * asked for "a regression test [...] with a fix to the declaration" — this is
- * that test.
+ * Nothing crashed because every consumer already tolerates either shape:
+ * `manage-access.ts`'s `stamp` takes `Date | string | null`; both
+ * `SourceAccessHistoryForm` and `AccessHistoryForm` in
+ * `apps/web/src/app/admin/access/access-forms.tsx` wrap in `new Date(...)`;
+ * and the two server actions in `apps/web/src/app/admin/access/actions.ts`
+ * re-export these row types across an RSC boundary that was already carrying
+ * the string.
  *
  * The format is also NOT ISO-8601 (`2026-10-06 00:00:00+00` — a space, not a
  * `T`), so a `z.string().datetime()` boundary would reject it.
@@ -35,21 +36,33 @@ import type { Db } from "./client.js";
 const WIRE = "2026-10-06 00:00:00+00";
 
 /**
- * Type-level guards. These are the only thing that catches a re-declaration:
- * both mappings are pass-throughs, so a test stubbing a `Date` would satisfy
- * either typing and the suite would defend whichever shape is declared. These
- * fail at `pnpm typecheck`, before anything reaches production.
+ * Type-level guards — the only thing that catches a re-declaration, because
+ * both mappings are pass-throughs: a runtime test stubbing a `Date` satisfies
+ * either typing, so the suite would defend whichever shape were declared.
+ *
+ * `toEqualTypeOf`, not a bare `const x: T = WIRE` assignment. An assignment
+ * only proves the declared type ACCEPTS a string, so it passes for
+ * `Date | string`, `unknown` and `any` — and widening to `Date | string` is by
+ * far the likeliest regression here, since `stamp` is typed that way and the
+ * note on it argues for keeping the union. An exact-type assertion is
+ * two-sided and rejects the hedge.
+ *
+ * These fire under plain `tsc`, so `pnpm typecheck`, `pnpm build` (this
+ * package's tsconfig includes `src/**` and build is a real emit) and therefore
+ * pre-push and CI all catch a regression. `vitest run` does NOT — there is no
+ * `typecheck` block in the vitest config — and `expectTypeOf` is a runtime
+ * no-op, so it costs the suite nothing.
  */
-const _grantedAtIsAWireString: StaffAssignmentHistoryRow["grantedAt"] = WIRE;
-const _revokedAtIsAWireString: StaffAssignmentHistoryRow["revokedAt"] = WIRE;
-const _srcGrantedAtIsAWireString: StaffSourceAssignmentHistoryRow["grantedAt"] =
-  WIRE;
-const _srcRevokedAtIsAWireString: StaffSourceAssignmentHistoryRow["revokedAt"] =
-  WIRE;
-void _grantedAtIsAWireString;
-void _revokedAtIsAWireString;
-void _srcGrantedAtIsAWireString;
-void _srcRevokedAtIsAWireString;
+expectTypeOf<StaffAssignmentHistoryRow["grantedAt"]>().toEqualTypeOf<string>();
+expectTypeOf<StaffAssignmentHistoryRow["revokedAt"]>().toEqualTypeOf<
+  string | null
+>();
+expectTypeOf<
+  StaffSourceAssignmentHistoryRow["grantedAt"]
+>().toEqualTypeOf<string>();
+expectTypeOf<StaffSourceAssignmentHistoryRow["revokedAt"]>().toEqualTypeOf<
+  string | null
+>();
 
 function dbReturning(rows: unknown[]): Db {
   return {
