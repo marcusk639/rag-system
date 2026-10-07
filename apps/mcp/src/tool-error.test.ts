@@ -14,7 +14,7 @@ const { captureExceptionMock } = vi.hoisted(() => ({
 
 vi.mock("@rag/runtime", () => ({ captureException: captureExceptionMock }));
 
-import { guardToolHandler } from "./tool-error.js";
+import { guardResourceHandler, guardToolHandler } from "./tool-error.js";
 
 function fakeLogger() {
   return {
@@ -44,6 +44,40 @@ const LEAKY =
 
 beforeEach(() => {
   captureExceptionMock.mockClear();
+});
+
+describe("guardResourceHandler", () => {
+  // The resource guard used to nest echoability inside the client-fault check,
+  // which made the inner branch unreachable and left this path with a
+  // different echo policy than the tool path. EGRESS_BLOCKED is the code that
+  // exposes the difference: echoable, but not a client fault.
+  it("echoes an echoable non-client-fault and still reports it", async () => {
+    const logger = fakeLogger();
+    const guarded = guardResourceHandler("documents", logger, () => {
+      throw new EgressError(
+        "host not in EGRESS_ALLOWED_HOSTS: ollama.railway.internal",
+      );
+    });
+
+    const err = (await guarded().catch((e: unknown) => e)) as Error;
+
+    expect(err.message).toContain("EGRESS_ALLOWED_HOSTS");
+    // Not a client fault, so it is a server error and Sentry hears about it.
+    expect(logger.error).toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalled();
+  });
+
+  it("does not echo a non-echoable message", async () => {
+    const guarded = guardResourceHandler("documents", fakeLogger(), () => {
+      throw new EmbeddingError("Gemini failed: quota for project 12345");
+    });
+
+    const err = (await guarded().catch((e: unknown) => e)) as Error;
+
+    // McpError prefixes its message with the JSON-RPC code.
+    expect(err.message).toContain("Internal server error");
+    expect(err.message).not.toContain("12345");
+  });
 });
 
 describe("guardToolHandler", () => {
