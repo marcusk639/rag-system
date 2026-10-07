@@ -268,10 +268,20 @@ export const ingestionJobs = pgTable(
     documentsProcessed: integer("documents_processed").notNull().default(0),
     documentsFailed: integer("documents_failed").notNull().default(0),
     chunksCreated: integer("chunks_created").notNull().default(0),
-    // Layer 1.5 refused these documents; they are neither indexed nor
+    // A safety gate refused these documents; they are neither indexed nor
     // "failed". Counted separately so a run that quarantined most of a
     // source cannot read as a clean success after the process exits.
     documentsQuarantined: integer("documents_quarantined").notNull().default(0),
+    // The subset of the above that a BROKEN gate refused (scanner threw or
+    // was unreachable, redaction threw, pack missing/empty) rather than one
+    // working as designed. Only this one means a fault: Layer 3 escalation is
+    // ordinary, so a source whose documents mostly quarantine is a sensitive
+    // source, not a broken pipeline. The worker's guard keys on this column.
+    documentsQuarantinedGateFailure: integer(
+      "documents_quarantined_gate_failure",
+    )
+      .notNull()
+      .default(0),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),

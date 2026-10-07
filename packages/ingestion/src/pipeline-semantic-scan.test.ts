@@ -124,7 +124,7 @@ describe("PipelineDeps.scanner — Layer 1.5 gating", () => {
       expect.anything(),
       expect.objectContaining({
         action: "blocked",
-        rejectionReason: "semantic scan failed: unknown",
+        rejectionReason: "gate-failure: semantic scan failed: unknown",
       }),
     );
   });

@@ -1,5 +1,6 @@
 import type { Connector, DocumentClass, SourceDocument } from "@rag/core";
 import { ClassBlockedError } from "@rag/core";
+import type { IngestOutcome } from "./ingest-gates.js";
 import { listRetryableIngestFailures, logIngestEvent, type Db } from "@rag/db";
 import type { Logger } from "pino";
 
@@ -49,10 +50,23 @@ export async function recordIngestFailure(
   }
 }
 
+export interface RetryPassResult {
+  /** Retried documents that did not throw. */
+  retried: number;
+  /**
+   * Retries a broken safety gate quarantined. Reported separately because the
+   * caller's "is the gate working?" test must see these: the retry pass calls
+   * the same `ingestOne` as the page loop, so it can hit the same broken
+   * scanner, and discarding its outcomes made such a failure invisible to any
+   * count taken from the page loop alone.
+   */
+  quarantinedGateFailure: number;
+}
+
 /**
- * Re-fetch and re-ingest documents whose earlier attempts failed. Returns how
- * many succeeded; each failure is recorded again, so a permanently broken
- * document stops being retried after MAX_INGEST_ATTEMPTS.
+ * Re-fetch and re-ingest documents whose earlier attempts failed. Each failure
+ * is recorded again, so a permanently broken document stops being retried
+ * after MAX_INGEST_ATTEMPTS.
  */
 export async function retryFailedDocuments(
   args: {
@@ -62,18 +76,28 @@ export async function retryFailedDocuments(
     connector: Connector;
     docClass: DocumentClass;
   },
-  ingest: (doc: SourceDocument) => Promise<unknown>,
-): Promise<number> {
+  ingest: (doc: SourceDocument) => Promise<IngestOutcome>,
+): Promise<RetryPassResult> {
   const { db, log, sourceId, connector, docClass } = args;
   const externalIds = await listRetryableIngestFailures(db, sourceId, {
     maxAttempts: MAX_INGEST_ATTEMPTS,
     limit: MAX_RETRIES_PER_RUN,
   });
   let retried = 0;
+  let quarantinedGateFailure = 0;
   for (const externalId of externalIds) {
     try {
-      await ingest(await connector.fetch(externalId));
+      const outcome = await ingest(await connector.fetch(externalId));
+      // `retried` keeps counting "attempted without throwing" -- a quarantined
+      // retry is reported through `quarantinedGateFailure`, not by quietly
+      // shrinking a number other callers already read.
       retried++;
+      if (
+        outcome.outcome === "quarantined" &&
+        outcome.cause === "gate-failure"
+      ) {
+        quarantinedGateFailure++;
+      }
     } catch (err) {
       log.warn(
         { err, externalId, marker: "ingest.retry_failed" },
@@ -89,9 +113,14 @@ export async function retryFailedDocuments(
   }
   if (externalIds.length > 0) {
     log.info(
-      { attempted: externalIds.length, retried, marker: "ingest.retry_pass" },
+      {
+        attempted: externalIds.length,
+        retried,
+        quarantinedGateFailure,
+        marker: "ingest.retry_pass",
+      },
       "retried previously failed documents",
     );
   }
-  return retried;
+  return { retried, quarantinedGateFailure };
 }

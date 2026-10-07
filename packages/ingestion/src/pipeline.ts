@@ -21,20 +21,16 @@ import {
   recordIngestFailure,
   retryFailedDocuments,
 } from "./failed-documents.js";
-import {
-  isExcludedPath,
-  redactParsedDocument,
-  ContentSafetyError,
-  type ContentScanner,
-} from "@rag/core";
+import { isExcludedPath, type ContentScanner } from "@rag/core";
 import {
   type IngestOutcome,
+  runRedactionGate,
   runSemanticScan,
   purgeQuarantined,
 } from "./ingest-gates.js";
 // Re-exported: it is `ingestOne`'s return type, so it belongs to this
 // module's public surface regardless of which file declares it.
-export type { IngestOutcome } from "./ingest-gates.js";
+export type { IngestOutcome, QuarantineCause } from "./ingest-gates.js";
 import {
   type Db,
   clearDocumentStorage,
@@ -155,6 +151,18 @@ export interface PipelineRunResult {
    * embedder or an unreachable scanner.
    */
   documentsQuarantined: number;
+  /**
+   * The subset of `documentsQuarantined` the gate refused because it could not
+   * run — scanner threw/unreachable, redaction threw, pack missing or empty.
+   *
+   * Always `<= documentsQuarantined`. This is the one that means something is
+   * broken: a `policy` quarantine is the gate working, and a source whose
+   * documents mostly escalate to class C/D is a sensitive source, not a fault.
+   * A gate failure also has no retry path — the cursor advances past the
+   * document and its `blocked` audit row resolves it — so it is silent data
+   * loss unless a caller escalates it.
+   */
+  documentsQuarantinedGateFailure: number;
   /** Previously failed documents successfully re-ingested this run. */
   documentsRetried: number;
   /**
@@ -217,6 +225,7 @@ export async function runIngestion(
   let documentsDeleted = 0;
   let documentsSkippedOversize = 0;
   let documentsQuarantined = 0;
+  let documentsQuarantinedGateFailure = 0;
   let pageDone = false;
   let pagesProcessed = 0;
   // Layer 3: no longer defaults to "A". An undeclared source class is the
@@ -225,12 +234,17 @@ export async function runIngestion(
   // is how 858 unclassified documents were treated as public.
   const docClass: DocumentClass = deps.sourceDocClass ?? "D";
 
-  const documentsRetried = opts.retryFailed
+  // The retry pass runs `ingestOne` too, so it can hit a broken gate just as
+  // the page loop can. Its outcomes were discarded, which left a gate failure
+  // reached only through a retry invisible to every count derived below.
+  const retryPass = opts.retryFailed
     ? await retryFailedDocuments(
         { db: deps.db, log, sourceId, connector, docClass },
         (doc) => ingestOne(sourceId, doc, deps, docClass),
       )
-    : 0;
+    : { retried: 0, quarantinedGateFailure: 0 };
+  const documentsRetried = retryPass.retried;
+  documentsQuarantinedGateFailure += retryPass.quarantinedGateFailure;
 
   // Process up to `maxPages` connector pages, persisting the cursor after each
   // so a crash/retry resumes mid-source. We stop when EITHER the connector
@@ -270,7 +284,15 @@ export async function runIngestion(
         // indexed. Folding it into documentsProcessed alone is what let a
         // whole-source scanner outage report a green sync that indexed
         // nothing.
-        if (r.value.outcome === "quarantined") documentsQuarantined++;
+        if (r.value.outcome === "quarantined") {
+          documentsQuarantined++;
+          // Only a gate failure is evidence of a fault — see
+          // `QuarantineCause`. Collapsing the two is what let a guard keyed on
+          // the total fail every sync of a legitimately sensitive source.
+          if (r.value.cause === "gate-failure") {
+            documentsQuarantinedGateFailure++;
+          }
+        }
       } else {
         documentsFailed++;
         log.error({ err: r.reason }, "document failed");
@@ -345,25 +367,45 @@ export async function runIngestion(
       documentsDeleted,
       documentsSkippedOversize,
       documentsQuarantined,
+      documentsQuarantinedGateFailure,
       chunksCreated,
       done: pageDone,
       pagesProcessed,
     },
     "ingestion run complete",
   );
-  // A run whose every document was refused is the signature of a broken
-  // safety gate (scanner unreachable, egress gap, misconfigured pack), not of
-  // a corpus that is entirely sensitive. Say so at error level: the caller
-  // also refuses to mark such a run "completed".
-  if (documentsQuarantined > 0 && chunksCreated === 0) {
+  // ONE operator rule per marker. These two used to be the same line, which
+  // claimed an all-quarantined run was "the signature of a broken safety gate
+  // ... not of a corpus that is entirely sensitive". That is false: Layer 3
+  // escalates on any single identifier finding, so a source whose documents
+  // all escalate indexes nothing and is working correctly.
+  if (documentsQuarantinedGateFailure > 0) {
+    // The authoritative fault signal, and what the worker's guard keys on.
     log.error(
+      {
+        marker: "ingest.gate_failure_quarantine",
+        documentsQuarantinedGateFailure,
+        documentsQuarantined,
+        documentsProcessed,
+      },
+      "a content-safety gate could not reach a verdict and documents were " +
+        "neither indexed nor recorded as failures; check scanner " +
+        "reachability, the egress allow-list, and the identifier-scanner pack",
+    );
+  } else if (documentsQuarantined > 0 && chunksCreated === 0) {
+    // Marker kept (external alerting may key on it) but no longer an error:
+    // with zero gate failures this is a legitimate all-policy run, and the
+    // caller no longer fails it. Logging it at error level would train an
+    // operator to ignore the level that means a gate is actually down.
+    log.warn(
       {
         marker: "ingest.all_quarantined",
         documentsQuarantined,
         documentsProcessed,
       },
-      "every document this run was quarantined and nothing was indexed; " +
-        "treat this as a failed run and check the content-safety gates",
+      "every document this run was quarantined by policy and nothing was " +
+        "indexed; expected for a wholly sensitive source, but worth " +
+        "confirming the source's declared class is right",
     );
   }
   // `done: pageDone` tells the caller whether the source is fully enumerated.
@@ -376,6 +418,7 @@ export async function runIngestion(
     documentsDeleted,
     documentsSkippedOversize,
     documentsQuarantined,
+    documentsQuarantinedGateFailure,
     documentsRetried,
     done: pageDone,
     nextCursor: cursor,
@@ -473,73 +516,17 @@ export async function ingestOne(
   //     mistake is what put client data in front of an external provider on
   //     2026-08-01. Hashing the redacted text also means a document whose only
   //     change is a redaction does not silently reuse a stale embedding.
-  let redacted;
-  try {
-    if (!deps.pack || deps.pack.scanners.length === 0) {
-      // Fail CLOSED, loudly: no pack (or a pack with no scanners — just as
-      // unusable, since `scanText` would loop zero times) means we cannot
-      // tell an SSN from a form number, so every document must be
-      // quarantined until this is fixed — not silently skipped, and not
-      // indexed unredacted. Thrown as ContentSafetyError (not a bare Error)
-      // so it flows through the SAME catch below as a genuine redaction
-      // failure: quarantine, don't crash the run.
-      throw new ContentSafetyError(
-        "PipelineDeps.pack is not configured — no identifier-scanner pack " +
-          "was wired into WorkerDeps (or it declares no scanners), so " +
-          "redaction cannot run. Ingestion cannot proceed until a " +
-          "LoadedPack with at least one scanner (see @rag/core loadPack) " +
-          "is supplied to PipelineDeps.pack; every document will be " +
-          "quarantined until then.",
-      );
-    }
-    // Every text-bearing field, not only markdown: spreadsheet chunks are
-    // built from `tables`, and the title is stored, cited, and sent to the
-    // model. Redacting markdown alone left those fields raw.
-    redacted = redactParsedDocument(
-      {
-        title: parsed.title,
-        markdown: parsed.markdown,
-        tables: parsed.tables,
-      },
-      deps.pack,
-    );
-  } catch (err) {
-    // Fail CLOSED: quarantine by skipping, never index raw.
-    log.error(
-      { err, marker: "ingest.redaction_failed" },
-      "redaction failed; quarantining document rather than indexing it",
-    );
-    if (err instanceof ContentSafetyError) {
-      // ⚠ The audit event is not optional here either (Ruling R8) — same
-      // standard as the Layer 3 quarantine below: "Quarantining without a
-      // durable record would prevent the disclosure but destroy the evidence
-      // that the pipeline saw sensitive content... A logger warning is not
-      // an audit trail." Two distinct causes reach this branch — an unusable
-      // pack (a config gap, nothing about THIS document — missing OR
-      // declaring zero scanners) and a genuine redactOrThrow failure
-      // (something about this document's content) — so the reason string
-      // names which one, rather than reusing one generic phrase for both.
-      const packUsable = !!deps.pack && deps.pack.scanners.length > 0;
-      const rejectionReason = packUsable
-        ? `redaction threw while processing this document: ${
-            err.cause instanceof Error ? err.cause.message : err.message
-          }`
-        : "no identifier-scanner pack was configured on PipelineDeps.pack " +
-          "(or it declares no scanners); redaction cannot run until a " +
-          "usable one is wired in";
-      await logIngestEvent(deps.db, {
-        sourceId,
-        docId: null,
-        externalId: source.externalId,
-        docClass,
-        action: "blocked",
-        rejectionReason,
-      });
-      await purgeQuarantined(deps.db, sourceId, source.externalId, log);
-      return { outcome: "quarantined", chunksCreated: 0 };
-    }
-    throw err;
-  }
+  const redactionStage = await runRedactionGate({
+    parsed,
+    pack: deps.pack,
+    db: deps.db,
+    sourceId,
+    externalId: source.externalId,
+    docClass,
+    log,
+  });
+  if (!redactionStage.ok) return redactionStage.outcome;
+  const redacted = redactionStage.redacted;
   if (redacted.totalRedacted > 0) {
     log.warn(
       { findings: redacted.findings, marker: "ingest.redacted" },
@@ -615,7 +602,10 @@ export async function ingestOne(
       "quarantining document: " + reason,
     );
     await purgeQuarantined(deps.db, sourceId, source.externalId, log);
-    return { outcome: "quarantined", chunksCreated: 0 };
+    // POLICY, not a fault: the gate reached a verdict and refused this
+    // document. Deliberately left unprefixed above so the gate-failure prefix
+    // selects only genuine faults.
+    return { outcome: "quarantined", cause: "policy", chunksCreated: 0 };
   }
 
   // 2. Compute content hash on parsed markdown so unchanged-but-touched

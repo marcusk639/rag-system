@@ -28,6 +28,7 @@ const accumulated = {
   documentsFailed: 0,
   chunksCreated: 0,
   documentsQuarantined: 0,
+  documentsQuarantinedGateFailure: 0,
 };
 function resetAccumulated() {
   for (const k of Object.keys(accumulated) as (keyof typeof accumulated)[]) {
@@ -41,6 +42,8 @@ function installIncrementFake() {
       accumulated.documentsFailed += delta.documentsFailed ?? 0;
       accumulated.chunksCreated += delta.chunksCreated ?? 0;
       accumulated.documentsQuarantined += delta.documentsQuarantined ?? 0;
+      accumulated.documentsQuarantinedGateFailure +=
+        delta.documentsQuarantinedGateFailure ?? 0;
       return Promise.resolve({ ...accumulated });
     },
   );
@@ -85,6 +88,17 @@ function fakeLogger() {
   return l;
 }
 
+/**
+ * Sentinels, not `undefined`. `makeDeps()` previously declared no `scanner`
+ * key at all, so `objectContaining({ scanner: deps.scanner })` expanded to
+ * `objectContaining({ scanner: undefined })` -- which vitest satisfies with a
+ * mere hasProperty check. Both "the wire was dropped" and "the wrong object
+ * was passed" survived that assertion. Identity-comparable objects make the
+ * wiring assertions mean what they say.
+ */
+const SCANNER_SENTINEL = { name: "sentinel-scanner", scan: vi.fn() };
+const PACK_SENTINEL = { id: "sentinel-pack", version: "1.0.0", scanners: [] };
+
 function makeDeps() {
   const connector = {
     kind: "sharepoint",
@@ -102,6 +116,8 @@ function makeDeps() {
     queue: {},
     config: { worker: { concurrency: 2 } },
     makeConnector: vi.fn(() => connector),
+    scanner: SCANNER_SENTINEL,
+    pack: PACK_SENTINEL,
     close: vi.fn(),
   } as unknown as WorkerDeps;
   return { deps, connector };
@@ -119,6 +135,7 @@ function runResult(
     documentsDeleted: 0,
     documentsSkippedOversize: 0,
     documentsQuarantined: 0,
+    documentsQuarantinedGateFailure: 0,
     done,
     nextCursor,
     ...extra,
@@ -198,19 +215,20 @@ describe("handleSyncSource per-page continuation", () => {
     );
   });
 
-  it("records a run that quarantined everything as FAILED, not completed", async () => {
-    // A run that refused every document and indexed nothing is the signature
-    // of a broken safety gate -- an unreachable scanner, an egress gap, a
-    // missing pack -- not of a corpus that is entirely sensitive. Stamping it
-    // "completed" is what let a whole-source quarantine surface as a green
-    // sync with chunksCreated: 0, which is the exact shape of the earlier
-    // index-nothing incident.
+  it("records a run a BROKEN gate refused documents in as FAILED", async () => {
+    // One gate failure is one too many. The scanner threw, was unreachable,
+    // redaction threw, or the pack was unusable -- none of which says anything
+    // about the documents. And unlike a fetch/parse failure there is no retry
+    // path: the cursor has advanced past the document and its `blocked` audit
+    // row resolves it, so nothing revisits it. Silent data loss must not be
+    // stamped "completed".
     const { deps } = makeDeps();
     runIngestionMock.mockResolvedValue(
       runResult(true, "cur1", {
         documentsProcessed: 47,
         chunksCreated: 0,
         documentsQuarantined: 47,
+        documentsQuarantinedGateFailure: 47,
       }),
     );
 
@@ -221,7 +239,7 @@ describe("handleSyncSource per-page continuation", () => {
       "ing-1",
       expect.objectContaining({
         status: "failed",
-        error: expect.stringContaining("47 of 47 documents were quarantined"),
+        error: expect.stringContaining("47 of 47"),
       }),
     );
     expect(updateIngestionJobMock).not.toHaveBeenCalledWith(
@@ -229,20 +247,25 @@ describe("handleSyncSource per-page continuation", () => {
       "ing-1",
       expect.objectContaining({ status: "completed" }),
     );
-    // "last synced" must not advance for a run that indexed nothing.
+    // "last synced" must not advance for a run whose gate was down.
     expect(markSyncedMock).not.toHaveBeenCalled();
   });
 
-  it("fails a run that quarantined most of the source but indexed something", async () => {
-    // The case the all-or-nothing test missed, and the likelier one: a local
-    // model degrades rather than dies, so one document succeeds out of 858 and
-    // `chunksCreated === 0` is false. 857/858 is a broken gate, not a sync.
+  it("fails on a SINGLE gate failure, even with everything else indexed", async () => {
+    // Pins the lower boundary of the rule. The dominant failure of a local
+    // model is degradation, not death -- one timeout among 857 successes -- and
+    // a share-based threshold cannot see that at all. It is also what makes
+    // the rule safe to state this strongly: a gate failure is a property of
+    // the pipeline, so once the gate is fixed a re-run produces none, and
+    // nothing re-trips. That is exactly what a ratio over policy quarantines
+    // could not promise.
     const { deps } = makeDeps();
     runIngestionMock.mockResolvedValue(
       runResult(true, "cur1", {
         documentsProcessed: 858,
-        chunksCreated: 2,
-        documentsQuarantined: 857,
+        chunksCreated: 1714,
+        documentsQuarantined: 1,
+        documentsQuarantinedGateFailure: 1,
       }),
     );
 
@@ -256,16 +279,24 @@ describe("handleSyncSource per-page continuation", () => {
     expect(markSyncedMock).not.toHaveBeenCalled();
   });
 
-  it("completes an all-unchanged incremental sync with one quarantine", async () => {
-    // The mirror false positive of the old guard: every document `unchanged`
-    // means chunksCreated 0 legitimately, so `quarantined > 0 && chunks === 0`
-    // marked a healthy sync as a total gate failure. 1/47 is under the ratio.
+  it("completes a run where MOST documents were quarantined by POLICY", async () => {
+    // THE REGRESSION TEST. A 25%-share guard over all quarantines asserted that
+    // "Phase 1 refuses C/D sources outright, so there is no legitimate
+    // mostly-quarantine run". That is false for per-document escalation, which
+    // is the common path: classify-document.ts escalates to class D on ANY
+    // Layer 1 identifier finding, and an EIN- or SSN-shaped number is ordinary
+    // in a CPA firm's working papers. Such a source was recorded failed on
+    // EVERY sync, lastSyncedAt never advanced again, and the error's own
+    // remedy -- re-run with mode "full" -- reprocessed everything and
+    // re-tripped the guard. The share was a stable property of the corpus, so
+    // there was no escape.
     const { deps } = makeDeps();
     runIngestionMock.mockResolvedValue(
       runResult(true, "cur1", {
-        documentsProcessed: 47,
-        chunksCreated: 0,
-        documentsQuarantined: 1,
+        documentsProcessed: 50,
+        chunksCreated: 48,
+        documentsQuarantined: 26,
+        documentsQuarantinedGateFailure: 0,
       }),
     );
 
@@ -279,17 +310,43 @@ describe("handleSyncSource per-page continuation", () => {
     expect(markSyncedMock).toHaveBeenCalled();
   });
 
-  it("stops a multi-page sync mid-run instead of re-enqueueing every page", async () => {
+  it("completes a run where EVERY document was quarantined by policy", async () => {
+    // The extreme of the same case, and the one the original all-or-nothing
+    // guard was written for: a source whose every document legitimately
+    // escalates indexes nothing, and that is a correct sync, not a fault.
+    // Nothing about a policy quarantine may fail a run.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValue(
+      runResult(true, "cur1", {
+        documentsProcessed: 47,
+        chunksCreated: 0,
+        documentsQuarantined: 47,
+        documentsQuarantinedGateFailure: 0,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    expect(updateIngestionJobMock).toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "completed" }),
+    );
+    expect(markSyncedMock).toHaveBeenCalled();
+  });
+
+  it("stops a multi-page sync at the first gate failure instead of re-enqueueing", async () => {
     // The guard used to be gated on `result.done`, so a scanner down for the
     // first nineteen continuations of a twenty-job sync never reached it and
-    // each job queued the next. Checked per run now, against the accumulated
-    // row, so the first refusing page ends the job.
+    // each job queued the next, burning through the source while indexing
+    // nothing. Checked on EVERY run, so the first refusing page ends the job.
     const { deps } = makeDeps();
     runIngestionMock.mockResolvedValue(
       runResult(false, "cur1", {
         documentsProcessed: 50,
         chunksCreated: 0,
         documentsQuarantined: 50,
+        documentsQuarantinedGateFailure: 50,
       }),
     );
 
@@ -301,6 +358,59 @@ describe("handleSyncSource per-page continuation", () => {
       expect.objectContaining({ status: "failed" }),
     );
     expect(enqueueContinuationMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the ACCUMULATED totals, not the last page's, when a later page breaks", async () => {
+    // Why incrementIngestionJobCounters RETURNs the accumulated row. Page 1 is
+    // healthy apart from ten policy quarantines and must not fail; page 2 hits
+    // one gate failure. Swapping `totals.*` for `result.*` in the report leaves
+    // page 2's 50/1 in the error instead of the sync's real 100/11, which is
+    // the number an operator sizes the problem from.
+    const { deps } = makeDeps();
+    runIngestionMock.mockResolvedValueOnce(
+      runResult(false, "cur1", {
+        documentsProcessed: 50,
+        chunksCreated: 80,
+        documentsQuarantined: 10,
+        documentsQuarantinedGateFailure: 0,
+      }),
+    );
+
+    await handleSyncSource(job({}), deps);
+
+    // Page 1: policy quarantines only -> the chain continues.
+    expect(enqueueContinuationMock).toHaveBeenCalledOnce();
+    expect(updateIngestionJobMock).not.toHaveBeenCalledWith(
+      {},
+      "ing-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+
+    runIngestionMock.mockResolvedValueOnce(
+      runResult(true, "cur2", {
+        documentsProcessed: 50,
+        chunksCreated: 70,
+        documentsQuarantined: 1,
+        documentsQuarantinedGateFailure: 1,
+      }),
+    );
+
+    await handleSyncSource(
+      job({ continuation: true, continuationCount: 1 }),
+      deps,
+    );
+
+    const failure = updateIngestionJobMock.mock.calls.find(
+      (call) => (call[2] as { status?: string }).status === "failed",
+    );
+    const error = (failure?.[2] as { error: string }).error;
+    // "1 of 100" could not come from page 2 alone (which saw 50), and the ten
+    // policy quarantines are not in page 2's result at ALL -- it reported one
+    // quarantine, the gate failure. Both numbers exist only on the
+    // accumulated row, so `result.*` in place of `totals.*` cannot produce
+    // this string.
+    expect(error).toContain("1 of 100");
+    expect(error).toContain("10 further documents were quarantined by policy");
   });
 
   it("persists the quarantine count to the durable row", async () => {
@@ -320,26 +430,39 @@ describe("handleSyncSource per-page continuation", () => {
     expect(incrementMock).toHaveBeenCalledWith(
       {},
       "ing-1",
-      expect.objectContaining({ documentsQuarantined: 3 }),
+      expect.objectContaining({
+        documentsQuarantined: 3,
+        // Both counters must reach the durable row: the guard reads the
+        // gate-failure one back out of RETURNING, so a dropped delta here
+        // silences it for the rest of the sync.
+        documentsQuarantinedGateFailure: 0,
+      }),
     );
   });
 
-  it("passes the configured scanner into runIngestion", async () => {
-    // Nothing asserted this, and after the absent-scanner contract was
-    // relaxed, a dropped wire is indistinguishable from the intended default:
-    // Layer 1.5 would be off in every deployment with a green suite.
+  it("wires the scanner and the pack into runIngestion BY IDENTITY", async () => {
+    // Asserted by identity against the sentinels, not with
+    // `objectContaining({ scanner: deps.scanner })`: when makeDeps() declared
+    // no scanner key that expanded to `{ scanner: undefined }`, which vitest
+    // satisfies with a hasProperty check, so a dropped wire passed. After the
+    // absent-scanner contract was relaxed, a dropped wire is indistinguishable
+    // from the intended default -- Layer 1.5 would be off in every deployment
+    // with a green suite. The pack (Layer 1) was unasserted entirely.
     const { deps } = makeDeps();
 
     await handleSyncSource(job({}), deps);
 
-    expect(runIngestionMock.mock.calls[0]![4]).toEqual(
-      expect.objectContaining({ scanner: deps.scanner }),
-    );
+    const pipelineDeps = runIngestionMock.mock.calls[0]![4] as {
+      scanner: unknown;
+      pack: unknown;
+    };
+    expect(pipelineDeps.scanner).toBe(SCANNER_SENTINEL);
+    expect(pipelineDeps.pack).toBe(PACK_SENTINEL);
   });
 
   it("still completes when some documents were quarantined but others indexed", async () => {
-    // Quarantining is normal and expected; only quarantining EVERYTHING with
-    // nothing indexed is the broken-gate signal.
+    // Quarantining is normal and expected. runResult() defaults the
+    // gate-failure count to 0, so this is the ordinary policy case.
     const { deps } = makeDeps();
     runIngestionMock.mockResolvedValue(
       runResult(true, "cur1", {

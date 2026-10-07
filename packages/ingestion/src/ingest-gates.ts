@@ -1,6 +1,12 @@
 import type { Logger } from "pino";
-import type { ParsedDocument } from "@rag/core";
+import type {
+  LoadedPack,
+  ParsedDocument,
+  RedactedParsedDocument,
+} from "@rag/core";
 import {
+  ContentSafetyError,
+  redactParsedDocument,
   classifyScanFailure,
   scanForClientContextOrThrow,
   type ContentScanner,
@@ -17,11 +23,41 @@ import { type Db, deleteDocumentByExternalId, logIngestEvent } from "@rag/db";
  * worth reading.
  */
 
+/**
+ * WHY a document was quarantined. Three structurally different outcomes used
+ * to share one `{ outcome: "quarantined" }` shape, so no caller could tell
+ * "the safety net is down" from "the safety net caught something":
+ *
+ *  - `gate-failure` — the gate could not reach a verdict. The scanner threw or
+ *    was unreachable, redaction threw, or the identifier pack was missing or
+ *    empty. This says NOTHING about the document; it says the pipeline is
+ *    broken, and the document was dropped from the index with no retry path
+ *    (the cursor advances past it and its audit row resolves it), so it is
+ *    the one quarantine a caller must escalate.
+ *  - `policy` — the gate worked and refused the document. Layer 3 escalated it
+ *    to class C/D. This is ordinary and common: `classifyDocument` escalates on
+ *    ANY Layer 1 identifier finding, so one EIN-shaped number is enough. A
+ *    source where most documents escalate is a legitimately sensitive source,
+ *    not a fault, and must never fail a run.
+ */
+export type QuarantineCause = "gate-failure" | "policy";
+
+/**
+ * Prefix on `ingest_log.rejection_reason` for every `gate-failure` quarantine.
+ *
+ * The action stays `"blocked"` for both causes, deliberately: a compliance
+ * query for refused documents must keep seeing gate failures too. So the
+ * reason prefix is the only durable discriminator, and it is what makes a
+ * document that reliably breaks the gate findable in `ingest_log` instead of
+ * something an operator has to guess at.
+ */
+export const GATE_FAILURE_REASON_PREFIX = "gate-failure: ";
+
 export type IngestOutcome =
   /** Chunks were written (or the document legitimately produced none). */
   | { outcome: "indexed"; chunksCreated: number }
   /** A safety gate refused it; nothing of it remains in the index. */
-  | { outcome: "quarantined"; chunksCreated: 0 }
+  | { outcome: "quarantined"; cause: QuarantineCause; chunksCreated: 0 }
   /** Content hash matched the stored row -- already indexed, no work needed. */
   | { outcome: "unchanged"; chunksCreated: 0 }
   /** Deliberately not ingested (excluded path), not a safety refusal. */
@@ -133,10 +169,10 @@ export async function quarantineForScanFailure(opts: {
     externalId,
     docClass,
     action: "blocked",
-    rejectionReason: `semantic scan failed: ${cause}`,
+    rejectionReason: `${GATE_FAILURE_REASON_PREFIX}semantic scan failed: ${cause}`,
   });
   await purgeQuarantined(db, sourceId, externalId, log);
-  return { outcome: "quarantined", chunksCreated: 0 };
+  return { outcome: "quarantined", cause: "gate-failure", chunksCreated: 0 };
 }
 
 /**
@@ -198,4 +234,113 @@ export async function runSemanticScan(opts: {
     );
   }
   return { ok: true, scan };
+}
+
+/**
+ * Layer 1 as one stage: redact structured identifiers before ANYTHING
+ * downstream sees the document.
+ *
+ * This must precede embedding, not merely storage: embeddings go to a third
+ * party, so redacting on the way into Postgres while embedding raw text
+ * protects the database and discloses the document. That ordering mistake is
+ * what put client data in front of an external provider on 2026-08-01.
+ * Hashing the redacted text also means a document whose only change is a
+ * redaction does not silently reuse a stale embedding.
+ *
+ * Returns the redaction result, or the caller's terminal outcome when the gate
+ * could not run. Both failure modes here are `gate-failure`, never `policy`:
+ * neither says anything about this document's content.
+ */
+export async function runRedactionGate(opts: {
+  parsed: ParsedDocument;
+  pack: LoadedPack | undefined;
+  db: Db;
+  sourceId: string;
+  externalId: string;
+  docClass: DocumentClass;
+  log: Logger;
+}): Promise<
+  | { ok: true; redacted: RedactedParsedDocument }
+  | { ok: false; outcome: IngestOutcome }
+> {
+  const { parsed, pack, db, sourceId, externalId, docClass, log } = opts;
+  let redacted: RedactedParsedDocument;
+  try {
+    if (!pack || pack.scanners.length === 0) {
+      // Fail CLOSED, loudly: no pack (or a pack with no scanners — just as
+      // unusable, since `scanText` would loop zero times) means we cannot
+      // tell an SSN from a form number, so every document must be
+      // quarantined until this is fixed — not silently skipped, and not
+      // indexed unredacted. Thrown as ContentSafetyError (not a bare Error)
+      // so it flows through the SAME catch below as a genuine redaction
+      // failure: quarantine, don't crash the run.
+      throw new ContentSafetyError(
+        "PipelineDeps.pack is not configured — no identifier-scanner pack " +
+          "was wired into WorkerDeps (or it declares no scanners), so " +
+          "redaction cannot run. Ingestion cannot proceed until a " +
+          "LoadedPack with at least one scanner (see @rag/core loadPack) " +
+          "is supplied to PipelineDeps.pack; every document will be " +
+          "quarantined until then.",
+      );
+    }
+    // Every text-bearing field, not only markdown: spreadsheet chunks are
+    // built from `tables`, and the title is stored, cited, and sent to the
+    // model. Redacting markdown alone left those fields raw.
+    redacted = redactParsedDocument(
+      {
+        title: parsed.title,
+        markdown: parsed.markdown,
+        tables: parsed.tables,
+      },
+      pack,
+    );
+  } catch (err) {
+    // Fail CLOSED: quarantine by skipping, never index raw.
+    log.error(
+      { err, marker: "ingest.redaction_failed" },
+      "redaction failed; quarantining document rather than indexing it",
+    );
+    if (err instanceof ContentSafetyError) {
+      // ⚠ The audit event is not optional here either (Ruling R8) — same
+      // standard as the Layer 3 quarantine: "Quarantining without a durable
+      // record would prevent the disclosure but destroy the evidence that the
+      // pipeline saw sensitive content... A logger warning is not an audit
+      // trail." Two distinct causes reach this branch — an unusable pack (a
+      // config gap, nothing about THIS document — missing OR declaring zero
+      // scanners) and a genuine redactOrThrow failure (something about this
+      // document's content) — so the reason string names which one, rather
+      // than reusing one generic phrase for both. Both are gate FAILURES, so
+      // the reason also carries the machine-readable prefix that makes the
+      // document findable in `ingest_log`.
+      const packUsable = !!pack && pack.scanners.length > 0;
+      const rejectionReason =
+        GATE_FAILURE_REASON_PREFIX +
+        (packUsable
+          ? `redaction threw while processing this document: ${
+              err.cause instanceof Error ? err.cause.message : err.message
+            }`
+          : "no identifier-scanner pack was configured on PipelineDeps.pack " +
+            "(or it declares no scanners); redaction cannot run until a " +
+            "usable one is wired in");
+      await logIngestEvent(db, {
+        sourceId,
+        docId: null,
+        externalId,
+        docClass,
+        action: "blocked",
+        rejectionReason,
+      });
+      await purgeQuarantined(db, sourceId, externalId, log);
+      return {
+        ok: false,
+        outcome: {
+          outcome: "quarantined",
+          cause: "gate-failure",
+          chunksCreated: 0,
+        },
+      };
+    }
+    throw err;
+  }
+  return { ok: true, redacted };
 }

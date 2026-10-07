@@ -8,7 +8,6 @@ import {
   docsGapDigestRuns,
   documents,
   ingestLog,
-  ingestionJobs,
   pendingUploads,
   sources,
   type AuditLog,
@@ -19,7 +18,6 @@ import {
   type NewChunk,
   type NewDocsGapDigestRun,
   type NewDocument,
-  type NewIngestionJob,
   type NewIngestLog,
   type NewPendingUpload,
   type NewSource,
@@ -481,90 +479,19 @@ export async function setDocumentStorage(
 export { hybridSearch, type HybridSearchOptions } from "./hybrid-search.js";
 
 // ============================================================================
-// Ingestion jobs (history table — pg-boss owns runtime job state separately)
+// Ingestion jobs — extracted to ./ingestion-jobs.ts (file-size cap).
+// Re-exported here so existing importers of "./queries.js" are unaffected.
 // ============================================================================
 
-export async function createIngestionJob(db: Db, row: NewIngestionJob) {
-  const [created] = await db.insert(ingestionJobs).values(row).returning();
-  if (!created) throw new Error("createIngestionJob: insert returned no row");
-  return created;
-}
-
-export async function updateIngestionJob(
-  db: Db,
-  id: string,
-  patch: Partial<NewIngestionJob>,
-) {
-  await db.update(ingestionJobs).set(patch).where(eq(ingestionJobs.id, id));
-}
-
-/**
- * Add to an ingestion job's running totals. Used by per-page sync continuations
- * so the single history row accumulates counts across pages instead of the
- * last page overwriting earlier ones.
- *
- * NOTE: additive updates are NOT crash-safe / exactly-once — if the worker
- * crashes after incrementing but before the job is marked complete, pg-boss
- * retries the page and adds its counts again. These counters are observability,
- * not billing; for an exact count, COUNT over `documents`/`chunks` instead.
- */
-/** Accumulated counters on an `ingestion_jobs` row, after an increment. */
-export interface IngestionJobCounters {
-  documentsProcessed: number;
-  documentsFailed: number;
-  chunksCreated: number;
-  documentsQuarantined: number;
-}
-
-export async function incrementIngestionJobCounters(
-  db: Db,
-  id: string,
-  delta: {
-    documentsProcessed: number;
-    documentsFailed: number;
-    chunksCreated: number;
-    // Optional so existing callers compile unchanged; a run that never
-    // quarantines contributes 0 either way.
-    documentsQuarantined?: number;
-  },
-): Promise<IngestionJobCounters> {
-  // RETURNING the accumulated totals rather than a second SELECT: a multi-page
-  // sync runs this once per continuation job, and the caller's "did this whole
-  // sync refuse most of the source?" test has to read the accumulated row, not
-  // the one run's in-memory result. One statement keeps the two consistent.
-  const result = await db.execute<{
-    documents_processed: number;
-    documents_failed: number;
-    chunks_created: number;
-    documents_quarantined: number;
-  }>(sql`
-    UPDATE ${ingestionJobs}
-    SET documents_processed = documents_processed + ${delta.documentsProcessed},
-        documents_failed = documents_failed + ${delta.documentsFailed},
-        chunks_created = chunks_created + ${delta.chunksCreated},
-        documents_quarantined = documents_quarantined + ${delta.documentsQuarantined ?? 0}
-    WHERE id = ${id}
-    RETURNING documents_processed, documents_failed, chunks_created,
-              documents_quarantined
-  `);
-  const row = result.rows[0];
-  return {
-    documentsProcessed: Number(row?.documents_processed ?? 0),
-    documentsFailed: Number(row?.documents_failed ?? 0),
-    chunksCreated: Number(row?.chunks_created ?? 0),
-    documentsQuarantined: Number(row?.documents_quarantined ?? 0),
-  };
-}
-
-/**
- * Delete an ingestion-job history row by id. Used to clean up a `pending` row
- * that was created optimistically but whose queue hand-off failed (e.g. a
- * duplicate sync rejected by the pg-boss singleton guard), so no orphaned
- * `pending` rows linger for syncs that never ran.
- */
-export async function deleteIngestionJob(db: Db, id: string) {
-  await db.delete(ingestionJobs).where(eq(ingestionJobs.id, id));
-}
+export {
+  createIngestionJob,
+  updateIngestionJob,
+  incrementIngestionJobCounters,
+  deleteIngestionJob,
+  listGateFailureQuarantines,
+  type IngestionJobCounters,
+  type GateFailureQuarantine,
+} from "./ingestion-jobs.js";
 
 // ============================================================================
 // Public projections
