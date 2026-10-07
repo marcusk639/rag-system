@@ -389,6 +389,18 @@ describe("LocalEmbeddingProvider", () => {
    * than an allow-list anyway: the request is never attempted.
    */
   describe("compliance mode — offline weight loading", () => {
+    // A client-data provider now refuses to construct without a durable
+    // HF_CACHE_DIR (an implicit node_modules cache cannot survive a rebuild,
+    // and this mode forbids re-downloading). These tests are about what
+    // _loadPipeline does to allowRemoteModels, so give them the realistic
+    // setup a client-data deployment must have rather than relying on unset.
+    beforeEach(() => {
+      process.env["HF_CACHE_DIR"] = "/tmp/hf-cache-test";
+    });
+    afterEach(() => {
+      delete process.env["HF_CACHE_DIR"];
+    });
+
     it("disables remote model fetches under client-data", async () => {
       const p = new LocalEmbeddingProvider({ complianceMode: "client-data" });
       await p.embed("warmup");
@@ -520,5 +532,60 @@ describe("LocalEmbeddingProvider", () => {
 
       expect(logger.warn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("LocalEmbeddingProvider — HF_CACHE_DIR under client-data", () => {
+  const saved = process.env["HF_CACHE_DIR"];
+  afterEach(() => {
+    if (saved === undefined) delete process.env["HF_CACHE_DIR"];
+    else process.env["HF_CACHE_DIR"] = saved;
+  });
+
+  // @huggingface/transformers' default cache lives INSIDE node_modules, so it
+  // does not survive `pnpm install` or a container rebuild. Under client-data
+  // `allowRemoteModels` is false, so relying on that path is not a slow first
+  // query -- it is a hard failure with a message that points nowhere near the
+  // cause. Fail at construction instead, per this repo's fail-loud convention.
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["whitespace", "   "],
+  ])("throws when HF_CACHE_DIR is %s", (_label, value) => {
+    if (value === undefined) delete process.env["HF_CACHE_DIR"];
+    else process.env["HF_CACHE_DIR"] = value;
+    expect(
+      () =>
+        new LocalEmbeddingProvider({
+          model: "Xenova/bge-base-en-v1.5",
+          dimensions: 768,
+          complianceMode: "client-data",
+        }),
+    ).toThrow(/HF_CACHE_DIR/);
+  });
+
+  it("constructs when HF_CACHE_DIR names a durable path", () => {
+    process.env["HF_CACHE_DIR"] = "/app/.hf-cache";
+    expect(
+      () =>
+        new LocalEmbeddingProvider({
+          model: "Xenova/bge-base-en-v1.5",
+          dimensions: 768,
+          complianceMode: "client-data",
+        }),
+    ).not.toThrow();
+  });
+
+  it("does NOT require HF_CACHE_DIR outside client-data", () => {
+    // Local dev must stay frictionless: the implicit cache is fine when
+    // remote downloads are still permitted.
+    delete process.env["HF_CACHE_DIR"];
+    expect(
+      () =>
+        new LocalEmbeddingProvider({
+          model: "Xenova/bge-base-en-v1.5",
+          dimensions: 768,
+        }),
+    ).not.toThrow();
   });
 });

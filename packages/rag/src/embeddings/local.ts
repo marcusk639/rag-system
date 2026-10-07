@@ -1,5 +1,5 @@
 import type { Embedding, EmbeddingProvider } from "@rag/core";
-import { EmbeddingError } from "@rag/core";
+import { EmbeddingError, ComplianceError } from "@rag/core";
 
 /**
  * Local (on-process) embedding provider using @huggingface/transformers.
@@ -120,6 +120,36 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     this.logger = opts.logger ?? defaultLogger;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.complianceMode = opts.complianceMode ?? "none";
+
+    // Fail at CONSTRUCTION when client-data has no durable cache path.
+    //
+    // With HF_CACHE_DIR unset, @huggingface/transformers computes its default
+    // cache directory from its own installed location -- INSIDE node_modules
+    // (see its src/env.js). That path does not survive `pnpm install` or a
+    // fresh container build. An empty or whitespace value is the same case:
+    // `_loadPipeline` only sets `env.cacheDir` when the variable is truthy, so
+    // "" silently takes the implicit path too -- which is exactly what a
+    // Compose `environment:` entry of `${HF_CACHE_DIR:-}` produces, since that
+    // overrides the image's own ENV rather than deferring to it.
+    //
+    // Outside client-data that is merely a slow first query. Under client-data
+    // `_loadPipeline` sets `allowRemoteModels = false`, so a cache miss has no
+    // network fallback: the service cannot embed at all, and the failure
+    // surfaces as a model-load error that points nowhere near the cause.
+    if (
+      this.complianceMode === "client-data" &&
+      !process.env["HF_CACHE_DIR"]?.trim()
+    ) {
+      throw new ComplianceError(
+        `COMPLIANCE_MODE=client-data requires HF_CACHE_DIR to name a durable ` +
+          `cache directory holding the model weights. Unset or empty, ` +
+          `@huggingface/transformers caches inside node_modules, which does ` +
+          `not survive an install or an image rebuild -- and this mode ` +
+          `forbids re-downloading. Point it at the path the image bakes the ` +
+          `pre-warmed cache into (/app/.hf-cache) or at a volume holding the ` +
+          `weights, and populate it with scripts/warm-model-verified.sh.`,
+      );
+    }
   }
 
   /** Return the cached pipeline, loading it on first access. */

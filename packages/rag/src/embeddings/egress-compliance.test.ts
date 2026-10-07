@@ -10,7 +10,7 @@
  */
 
 import { ComplianceError, EgressError, EgressPolicy } from "@rag/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { createEmbeddingProvider } from "./factory.js";
 import { GeminiEmbeddingProvider } from "./gemini.js";
 import { OpenAIEmbeddingProvider } from "./openai.js";
@@ -115,6 +115,18 @@ describe("OpenAIEmbeddingProvider — egress policy (finding 1)", () => {
 // ── Finding 3: compliance-mode hard gate in the factory ─────────────────────
 
 describe("createEmbeddingProvider — compliance mode gate (finding 3)", () => {
+  // A client-data LOCAL provider now refuses to construct without a durable
+  // HF_CACHE_DIR: the implicit @huggingface/transformers cache lives inside
+  // node_modules and cannot survive a rebuild, and this mode forbids
+  // re-downloading. These tests are about the factory's compliance gate, so
+  // give them the setup a real client-data deployment must have.
+  beforeEach(() => {
+    process.env["HF_CACHE_DIR"] = "/tmp/hf-cache-test";
+  });
+  afterEach(() => {
+    delete process.env["HF_CACHE_DIR"];
+  });
+
   const baseCfg = {
     model: "gemini-embedding-001",
     dimensions: 768,
