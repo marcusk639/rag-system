@@ -113,6 +113,22 @@ export class ComplianceError extends RagError {
 }
 
 /**
+ * Thrown when an upload arrives but no object store is configured to persist
+ * the original bytes. Zero-argument by design: `STORAGE_NOT_CONFIGURED` is in
+ * {@link ECHOABLE_ERROR_CODES}, so this message reaches clients — a free-form
+ * parameter here could echo an endpoint or credential without failing a test.
+ */
+export class StorageNotConfiguredError extends RagError {
+  constructor() {
+    super(
+      "object store is not configured; uploads are disabled",
+      "STORAGE_NOT_CONFIGURED",
+      undefined,
+    );
+  }
+}
+
+/**
  * `RagError.code`s whose MESSAGE has been audited as safe to return to a
  * caller. Every other code gets a generic string; the CODE is always returned
  * either way, so callers can still branch on the category.
@@ -138,13 +154,19 @@ export class ComplianceError extends RagError {
  * `packages/connectors/src/git-markdown/index.ts:96` interpolates a server
  * filesystem path and `String(err)` into one, and
  * `packages/rag/src/content-scanning/ollama-scanner.ts:409` puts a configured
- * base URL into a `COMPLIANCE_VIOLATION`. Neither can reach a client: connector
- * `validate()` runs only in the worker (`apps/worker/src/handlers/
- * sync-source.ts`), and the rag factories throw at `buildCoreDeps`, so the
- * process fails to boot rather than answering a request.
+ * base URL into a `COMPLIANCE_VIOLATION`. Neither can reach a client, and in
+ * both cases because of the WORKER, not the request path: connector
+ * `validate()` has one production call site,
+ * `apps/worker/src/handlers/sync-source.ts:103`, and `createContentScanner` has
+ * one, `apps/worker/src/deps.ts:115` — api and mcp never construct a scanner at
+ * all. The sibling rag factories (`embeddings/factory.ts`,
+ * `retrieval/reranker.ts`) do throw inside `buildCoreDeps`, so those fail the
+ * process at boot rather than answering a request.
  *
  * What disqualifies the excluded codes is therefore stronger than "takes a
- * constructor parameter" — two members take one. `CONNECTOR_AUTH_ERROR`,
+ * constructor parameter" — five of the seven members take one, and three of
+ * those (`VALIDATION_ERROR`, `NOT_FOUND`, `COMPLIANCE_VIOLATION`) take a
+ * free-form message; only the two *_NOT_CONFIGURED classes are zero-argument. `CONNECTOR_AUTH_ERROR`,
  * `CONNECTOR_TRANSIENT_ERROR`, `PARSER_ERROR` and `EMBEDDING_ERROR` are built
  * by internal code out of upstream state (a provider's rejection, the parser
  * sidecar's response, a failed connection) ON REQUEST-SERVING PATHS, so no
@@ -170,16 +192,6 @@ export class ComplianceError extends RagError {
  * "Generation failed." — the one surface here where the code is not always
  * returned. A higher bar for a lossier envelope, decided separately.
  */
-export class StorageNotConfiguredError extends RagError {
-  constructor() {
-    super(
-      "object store is not configured; uploads are disabled",
-      "STORAGE_NOT_CONFIGURED",
-      undefined,
-    );
-  }
-}
-
 export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   // Audited. EGRESS_BLOCKED is a hostname (its full-URL path was removed; see
   // egress-policy.ts). COMPLIANCE_VIOLATION is TRI pattern labels on the
