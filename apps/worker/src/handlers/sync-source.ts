@@ -217,6 +217,29 @@ export async function handleSyncSource(
         },
         "a content-safety gate failed during this sync; recorded as failed",
       );
+      // Alert, even though nothing threw. This path deliberately RETURNS
+      // rather than throwing -- throwing would have pg-boss retry the whole
+      // sync, which cannot help when the gate itself is down -- and that also
+      // skips the captureException in the catch below. Without this, the one
+      // outcome this handler treats as silent data loss was its only terminal
+      // failure with no alert. It is terminal by construction, so there is no
+      // retry-exhaustion check to make first.
+      captureException(
+        new Error(
+          `content-safety gate failed on ` +
+            `${totals.documentsQuarantinedGateFailure} of ` +
+            `${totals.documentsProcessed} documents`,
+        ),
+        {
+          sourceId,
+          ingestionId,
+          jobId: job.id,
+          documentsQuarantinedGateFailure:
+            totals.documentsQuarantinedGateFailure,
+          documentsQuarantined: totals.documentsQuarantined,
+          documentsProcessed: totals.documentsProcessed,
+        },
+      );
       return;
     }
 

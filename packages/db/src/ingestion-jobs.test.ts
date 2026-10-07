@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GATE_FAILURE_REASON_PREFIX } from "@rag/core";
 import {
   incrementIngestionJobCounters,
   listGateFailureQuarantines,
@@ -26,6 +27,10 @@ function sqlText(node: unknown): string {
     if (Array.isArray(o.value) && o.value.every((v) => typeof v === "string")) {
       return (o.value as string[]).join(" ");
     }
+    // Bind parameters too: the gate-failure prefix is passed as a param, so a
+    // helper that only walked literal chunks could not see the one value that
+    // decides whether this query matches anything at all.
+    if (typeof o.value === "string") return o.value;
     if (Array.isArray(o.queryChunks)) return sqlText(o.queryChunks);
     return "";
   }
@@ -150,6 +155,12 @@ describe("listGateFailureQuarantines — problematic documents", () => {
     expect(sql).toContain("ingest_log");
     expect(sql).toContain("action = 'blocked'");
     expect(sql).toContain("rejection_reason LIKE");
+    // Pin the ACTUAL prefix, from the shared constant. @rag/db cannot import
+    // @rag/ingestion, so before this the producer side (which writes the
+    // prefix) and the consumer side (which filters on it) were two unrelated
+    // string literals: change one and this query silently returns zero rows
+    // forever, with no error anywhere.
+    expect(sql).toContain(`${GATE_FAILURE_REASON_PREFIX}%`);
     expect(sql).toContain("source_id =");
   });
 
@@ -159,7 +170,10 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         external_id: "Working Papers/ledger.xlsx",
         rejection_reason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        last_seen_at: "2026-10-06T00:00:00.000Z",
+        // node-postgres parses timestamptz to a JS Date, so the row type and
+        // the public interface must say Date -- matching the repo's precedent
+        // for raw db.execute (queries.ts staff-assignment history).
+        last_seen_at: new Date("2026-10-06T00:00:00.000Z"),
       },
     ];
 
@@ -174,7 +188,7 @@ describe("listGateFailureQuarantines — problematic documents", () => {
         externalId: "Working Papers/ledger.xlsx",
         rejectionReason: "gate-failure: semantic scan failed: too-large",
         attempts: 4,
-        lastSeenAt: "2026-10-06T00:00:00.000Z",
+        lastSeenAt: new Date("2026-10-06T00:00:00.000Z"),
       },
     ]);
   });

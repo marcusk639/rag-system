@@ -6,6 +6,7 @@ import type {
 } from "@rag/core";
 import {
   ContentSafetyError,
+  GATE_FAILURE_REASON_PREFIX,
   redactParsedDocument,
   classifyScanFailure,
   scanForClientContextOrThrow,
@@ -42,16 +43,9 @@ import { type Db, deleteDocumentByExternalId, logIngestEvent } from "@rag/db";
  */
 export type QuarantineCause = "gate-failure" | "policy";
 
-/**
- * Prefix on `ingest_log.rejection_reason` for every `gate-failure` quarantine.
- *
- * The action stays `"blocked"` for both causes, deliberately: a compliance
- * query for refused documents must keep seeing gate failures too. So the
- * reason prefix is the only durable discriminator, and it is what makes a
- * document that reliably breaks the gate findable in `ingest_log` instead of
- * something an operator has to guess at.
- */
-export const GATE_FAILURE_REASON_PREFIX = "gate-failure: ";
+// Re-exported: declared in @rag/core because @rag/db filters on it too and
+// cannot import this package. See the constant's docblock there.
+export { GATE_FAILURE_REASON_PREFIX };
 
 export type IngestOutcome =
   /** Chunks were written (or the document legitimately produced none). */

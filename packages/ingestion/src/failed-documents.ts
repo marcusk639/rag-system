@@ -54,7 +54,15 @@ export interface RetryPassResult {
   /** Retried documents that did not throw. */
   retried: number;
   /**
-   * Retries a broken safety gate quarantined. Reported separately because the
+   * Retries a safety gate quarantined, either cause. The caller folds this
+   * into the run's total so `quarantinedGateFailure <= quarantined` holds for
+   * retry-path quarantines too -- it derives the policy count by subtracting
+   * the two, and counting a retry in only one of them printed a NEGATIVE
+   * policy count into the operator-facing error.
+   */
+  quarantined: number;
+  /**
+   * The subset a BROKEN gate quarantined. Reported separately because the
    * caller's "is the gate working?" test must see these: the retry pass calls
    * the same `ingestOne` as the page loop, so it can hit the same broken
    * scanner, and discarding its outcomes made such a failure invisible to any
@@ -84,6 +92,7 @@ export async function retryFailedDocuments(
     limit: MAX_RETRIES_PER_RUN,
   });
   let retried = 0;
+  let quarantined = 0;
   let quarantinedGateFailure = 0;
   for (const externalId of externalIds) {
     try {
@@ -92,11 +101,9 @@ export async function retryFailedDocuments(
       // retry is reported through `quarantinedGateFailure`, not by quietly
       // shrinking a number other callers already read.
       retried++;
-      if (
-        outcome.outcome === "quarantined" &&
-        outcome.cause === "gate-failure"
-      ) {
-        quarantinedGateFailure++;
+      if (outcome.outcome === "quarantined") {
+        quarantined++;
+        if (outcome.cause === "gate-failure") quarantinedGateFailure++;
       }
     } catch (err) {
       log.warn(
@@ -116,11 +123,12 @@ export async function retryFailedDocuments(
       {
         attempted: externalIds.length,
         retried,
+        quarantined,
         quarantinedGateFailure,
         marker: "ingest.retry_pass",
       },
       "retried previously failed documents",
     );
   }
-  return { retried, quarantinedGateFailure };
+  return { retried, quarantined, quarantinedGateFailure };
 }

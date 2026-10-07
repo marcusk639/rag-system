@@ -280,6 +280,23 @@ export function isExcludedPath(
 
 // ── Fail-closed wrapper ────────────────────────────────────────────────────
 
+/**
+ * Prefix on `ingest_log.rejection_reason` for a quarantine caused by a safety
+ * gate FAILING (scanner threw or unreachable, redaction threw, identifier pack
+ * missing or empty) rather than by a gate refusing a document on policy.
+ *
+ * Lives in `@rag/core` because it is a genuine cross-package contract with no
+ * compile-time link otherwise: `@rag/ingestion` WRITES it and `@rag/db`'s
+ * `listGateFailureQuarantines` FILTERS on it, and `@rag/db` cannot import
+ * `@rag/ingestion`. Held as two independent string literals, changing one left
+ * the query silently matching zero rows forever -- an empty result, not an
+ * error.
+ *
+ * `action` stays `"blocked"` for both causes so a compliance query for refused
+ * documents keeps seeing both; this prefix is the only discriminator.
+ */
+export const GATE_FAILURE_REASON_PREFIX = "gate-failure: ";
+
 export class ContentSafetyError extends Error {
   readonly code = "CONTENT_SAFETY_FAILED";
   constructor(

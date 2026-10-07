@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { GATE_FAILURE_REASON_PREFIX } from "@rag/core";
 import type { Db } from "./client.js";
 import { ingestionJobs, type NewIngestionJob } from "./schema.js";
 
@@ -126,7 +127,8 @@ export interface GateFailureQuarantine {
   externalId: string;
   rejectionReason: string;
   attempts: number;
-  lastSeenAt: string;
+  /** node-postgres parses `timestamptz` to a JS Date, not a string. */
+  lastSeenAt: Date;
 }
 
 /**
@@ -152,7 +154,7 @@ export async function listGateFailureQuarantines(
     external_id: string;
     rejection_reason: string;
     attempts: number;
-    last_seen_at: string;
+    last_seen_at: Date;
   }>(sql`
     SELECT external_id,
            max(rejection_reason) AS rejection_reason,
@@ -161,7 +163,7 @@ export async function listGateFailureQuarantines(
     FROM ingest_log
     WHERE source_id = ${sourceId}::uuid
       AND action = 'blocked'
-      AND rejection_reason LIKE ${"gate-failure: %"}
+      AND rejection_reason LIKE ${`${GATE_FAILURE_REASON_PREFIX}%`}
     GROUP BY external_id
     ORDER BY max(created_at) DESC
     LIMIT ${opts.limit}
