@@ -512,6 +512,30 @@ describe("loadConfig — RETRIEVAL_MIN_DENSE_SIMILARITY", () => {
   });
 });
 
+describe("loadConfig — EMBEDDING_MODEL fallthrough", () => {
+  // Compose and Railway commonly inject an always-present but EMPTY env var
+  // rather than omitting it. `??` only falls through on undefined, so an empty
+  // string became the literal embedding model id -- wrong for every provider.
+  it("falls back to the provider default when EMBEDDING_MODEL is empty", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "local",
+      EMBEDDING_MODEL: "",
+    });
+    expect(cfg.embedding.model).not.toBe("");
+    expect(cfg.embedding.model).toContain("bge");
+  });
+
+  it("still honours an explicitly set EMBEDDING_MODEL", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      EMBEDDING_PROVIDER: "local",
+      EMBEDDING_MODEL: "Xenova/all-MiniLM-L6-v2",
+    });
+    expect(cfg.embedding.model).toBe("Xenova/all-MiniLM-L6-v2");
+  });
+});
+
 describe("loadConfig — contentScan (Layer 1.5)", () => {
   it("defaults to provider 'none'", () => {
     const cfg = loadConfig({ ...BASE_ENV });
