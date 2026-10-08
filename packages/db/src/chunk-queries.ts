@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "./client.js";
+import { chunks } from "./schema.js";
 
 export interface NeighborChunk {
   id: string;
@@ -75,10 +76,10 @@ export async function documentHasChunksForModel(
 ): Promise<boolean> {
   const result = await db.execute<{ exists: boolean }>(sql`
     SELECT EXISTS (
-      SELECT 1 FROM chunks
-      WHERE document_id = ${documentId}
-        AND embedding_provider = ${embeddingProvider}
-        AND embedding_model = ${embeddingModel}
+      SELECT 1 FROM ${chunks}
+      WHERE ${chunks.documentId} = ${documentId}
+        AND ${chunks.embeddingProvider} = ${embeddingProvider}
+        AND ${chunks.embeddingModel} = ${embeddingModel}
     ) AS exists
   `);
   return result.rows[0]?.exists ?? false;
