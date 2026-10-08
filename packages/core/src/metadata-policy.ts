@@ -32,6 +32,21 @@ import type {
  *   - sizeBytes  document size (display only)
  *   - createdAt  ISO timestamp (display / sort)
  *   - modifiedAt ISO timestamp (display / sort)
+ *   - docClass   A/B/C/D classification tag — non-PII; drives the class label
+ *                on the staff surfaces and the `url` gate below. See the note
+ *                on the array entry itself.
+ *
+ * `url` is allowlisted but CONDITIONAL, because the connector URL embeds the
+ * same client-named folder path that `path` is stripped for. It has THREE
+ * carriers, each gated by `isSourceUrlExposable(docClass)` in a different
+ * place — an exposure fix has to cover all three, and this allowlist governs
+ * only the first:
+ *   1. `metadata.url`          — `sanitizeMetadata` (below)
+ *   2. `document.url`          — `sanitizeRetrievalResult` (below); NOT an
+ *                                allowlist entry, so this list never reached it
+ *   3. `Citation.url`          — `buildCitations` (@rag/rag prompt-context),
+ *                                built from the RAW `RetrievalResult`, so
+ *                                neither function above reaches it
  *
  * STRIPPED (PII or unvetted):
  *   - path       folder location — at a CPA firm folder names routinely carry

@@ -363,3 +363,70 @@ describe("review follow-ups", () => {
     ]);
   });
 });
+
+/**
+ * The both-gates-at-once seam. `askQuestion` builds `citations` from the RAW
+ * `retrieved` and sanitizes the `retrieved` payload separately, three lines
+ * apart (`ask.ts:447-451`). Two independent gates, one object literal.
+ *
+ * Neither was exercised before: the shared fixture is blank
+ * (`ask.test-harness.ts:19-20` sets `url: undefined`, `metadata: {}`), so
+ * every other test here runs against an untagged document with no link. That
+ * made `sanitizeRetrievalResults` deletable with NO test in the repo failing —
+ * verified by mutation, 70/70 services tests and the whole non-e2e suite still
+ * green with the call removed. A shared predicate change is caught by the core
+ * and rag suites; removing a CALL SITE was caught by nothing.
+ *
+ * Do not move this url/class onto the `retrievalResult` factory: `ask.test.ts`'s
+ * `toEqual` against the raw `retrieved` array (above) would start failing,
+ * because sanitization would then have something to strip.
+ */
+describe("askQuestion — source URL class gate at the service seam", () => {
+  const SHAREPOINT_WEBURL =
+    "https://firm.sharepoint.com/sites/Tax/Shared%20Documents/Clients/Smith%20Family/2024/return.pdf";
+  const CLIENT_PATH_SEGMENT = "Smith%20Family";
+
+  async function askTagged(docClass: string) {
+    const r = retrievalResult("1");
+    r.document.url = SHAREPOINT_WEBURL;
+    r.document.metadata = { url: SHAREPOINT_WEBURL, docClass } as never;
+    const search = vi.fn().mockResolvedValue([r]);
+    // The answer MUST cite `[1]`: `filterCitationsToAnswer` drops uncited
+    // citations, and an empty citation list would make every assertion below
+    // vacuously true.
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "grounded [1]", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search,
+    });
+    return askQuestion(deps, { question: "q" }, DEFAULT_TOP_K, ADMIN_SCOPE);
+  }
+
+  it("withholds the source URL from both payloads for a class B document", async () => {
+    const result = await askTagged("B");
+
+    // Citation survives — only the link is withheld. Asserting length first
+    // keeps the `in` check below from passing against an empty list.
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]).toMatchObject({
+      index: 1,
+      documentId: "doc-1",
+    });
+    expect("url" in result.citations[0]!).toBe(false);
+    expect(result.retrieved[0]!.document.url).toBeUndefined();
+
+    // Key-name-independent, and the assertion that actually fails if EITHER
+    // gate is removed — it covers `citations[].url`, `retrieved[].document.url`
+    // and `retrieved[].document.metadata.url` at once.
+    expect(JSON.stringify(result)).not.toContain(CLIENT_PATH_SEGMENT);
+  });
+
+  it("keeps the source URL on both payloads for a class A document", async () => {
+    const result = await askTagged("A");
+
+    expect(result.citations[0]?.url).toBe(SHAREPOINT_WEBURL);
+    expect(result.retrieved[0]?.document.url).toBe(SHAREPOINT_WEBURL);
+  });
+});

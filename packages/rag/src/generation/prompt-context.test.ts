@@ -142,3 +142,108 @@ describe("buildCitations — data classification label", () => {
     expect("docClass" in (buildCitations([r])[0] ?? {})).toBe(false);
   });
 });
+
+describe("buildCitations — source URL class gate", () => {
+  /**
+   * Mirrors `packages/core/src/metadata-policy.url-class.test.ts` on the
+   * citation path.
+   *
+   * `metadata.url` is the connector's link and embeds the folder path, which at
+   * this firm is named for clients — the same reason `metadata.path` is
+   * stripped. `sanitizeRetrievalResult` withholds it above class A, but
+   * citations are built from the RAW `RetrievalResult`, so until this gate the
+   * link reached every surface that renders a citation (Teams as a clickable
+   * OpenUrl action, MCP as printed text) regardless of class.
+   */
+  /**
+   * A realistic SharePoint `webUrl`, mirroring `SHAREPOINT_WEBURL` in
+   * `metadata-policy.url-class.test.ts`. The client-named path segment is the
+   * thing that actually leaks, so the whole-object assertion below is only
+   * meaningful if the fixture carries one — against the shared `chunk()`
+   * helper's placeholder (`https://x/A`) it would pass while proving nothing.
+   */
+  const SHAREPOINT_WEBURL =
+    "https://firm.sharepoint.com/sites/Tax/Shared%20Documents/Clients/Smith%20Family/2024/return.pdf";
+  const CLIENT_PATH_SEGMENT = "Smith%20Family";
+
+  function citationFor(docClass: unknown) {
+    const r = chunk("A", 0, 0.9);
+    r.document.url = SHAREPOINT_WEBURL;
+    r.document.metadata = docClass === undefined ? {} : ({ docClass } as never);
+    return buildCitations([r])[0];
+  }
+
+  /**
+   * Positive control. Without it the absence assertions below would pass
+   * against a `buildCitations` that never set `url` at all, proving nothing
+   * about whether the gate discriminates.
+   */
+  it("keeps the source URL for a class A document", () => {
+    expect(citationFor("A")?.url).toBe(SHAREPOINT_WEBURL);
+  });
+
+  it("omits the source URL for a class B document", () => {
+    expect("url" in (citationFor("B") ?? {})).toBe(false);
+  });
+
+  /**
+   * Second positive control, and the one that rules out the plausible
+   * OVER-correction. Every absence assertion here reads
+   * `buildCitations([r])[0]`, so a `buildCitations` that filtered non-A
+   * documents out of the citation list entirely would return `[]`, make
+   * `undefined ?? {}` the subject, and keep all of them green — while
+   * silently gutting the audit trail citations exist to be. Withholding the
+   * LINK is the fix; dropping the CITATION is a different bug.
+   */
+  it("still emits the citation for a class B document, minus the link", () => {
+    const c = citationFor("B");
+    expect(c).toBeDefined();
+    expect(c?.index).toBe(1);
+    expect(c?.documentId).toBe("A");
+    expect(c?.title).toBe("Title A");
+  });
+
+  /**
+   * Key-name-independent leak check: asserts the client-named segment appears
+   * NOWHERE in the serialized citation, rather than that one named key is
+   * absent. This is what survives someone later adding a second carrier for
+   * the same path (a `sourcePath`, a passthrough `document`) — the exact
+   * mistake that produced this bug, where `metadata.path` was stripped while
+   * `document.url` carried the same path in a different field.
+   */
+  it("leaks the client-named path segment nowhere in a class B citation", () => {
+    expect(JSON.stringify(citationFor("B"))).not.toContain(CLIENT_PATH_SEGMENT);
+  });
+
+  /**
+   * An absent class is stricter than A on purpose (`isSourceUrlExposable`): an
+   * untagged row is not evidence that it is class A.
+   */
+  it("omits the source URL when the document is untagged", () => {
+    expect("url" in (citationFor(undefined) ?? {})).toBe(false);
+  });
+
+  /**
+   * `document.metadata` is `.passthrough()` and is never zod-parsed on the read
+   * path, so `docClass` can hold anything the jsonb column holds. The gate must
+   * fail CLOSED on a value the enum does not know, not fall through to a
+   * truthiness check.
+   */
+  it("omits the source URL for an unrecognized class value", () => {
+    expect("url" in (citationFor("E") ?? {})).toBe(false);
+    expect("url" in (citationFor("a") ?? {})).toBe(false);
+  });
+
+  /**
+   * Non-string values a jsonb cell can hold. `["A"]` is the load-bearing case:
+   * `String(["A"]) === "A"`, so rewriting the predicate as
+   * `String(docClass).toUpperCase() === "A"` — a plausible "be lenient about
+   * casing" change — would start passing an array-valued cell, and the `"E"` /
+   * `"a"` cases above would still fail correctly and hide it.
+   */
+  it("omits the source URL for a non-string class value", () => {
+    for (const value of [["A"], null, 0, true]) {
+      expect("url" in (citationFor(value) ?? {})).toBe(false);
+    }
+  });
+});

@@ -1,3 +1,4 @@
+import { isSourceUrlExposable } from "@rag/core";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 
 /**
@@ -210,7 +211,17 @@ export function buildCitations(
       index,
       documentId: document.id,
       title: document.title,
-      url: document.url,
+      // Gated here as well as in core's `sanitizeRetrievalResult`, because
+      // citations are built from the RAW `RetrievalResult` (see
+      // packages/services/src/ask.ts) — the sanitizer never runs on this path,
+      // so without this gate the link reached every surface that renders a
+      // citation regardless of class. The policy itself lives in
+      // `isSourceUrlExposable`; deliberately not restated here.
+      // Spread rather than assigned so the key is ABSENT, not `undefined`.
+      ...(isSourceUrlExposable(document.metadata?.docClass) &&
+      document.url !== undefined
+        ? { url: document.url }
+        : {}),
       downloadable: document.hasOriginal ?? false,
       chunkId: best.chunk.id,
       chunkIds: chunks.map((c) => c.chunk.id),
