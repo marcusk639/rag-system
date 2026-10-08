@@ -6,8 +6,18 @@
  *   1. The column definition in `schema.ts` (`vector("embedding", { dimensions })`).
  *   2. `assertEmbeddingDimensions()` below, called at app startup.
  *
- * The column is `vector(768)` to match Gemini `text-embedding-004`. The system
- * is provider-pluggable (e.g. `EMBEDDING_PROVIDER=openai` is 1536 dims), but the
+ * The column is `vector(768)` to match Gemini `gemini-embedding-001`, the
+ * current default. It is NOT sized for `text-embedding-004`, which this file
+ * named until 2026-10-07: that model is retired and must never be configured
+ * (see CLAUDE.md). The coincidence of dimensions made the stale reference
+ * harmless to run but dangerous to read, since this is the file someone
+ * consults before changing the column.
+ *
+ * The system is provider-pluggable, and the other defaults reach 768 by
+ * different routes: `Xenova/bge-base-en-v1.5` is natively 768, while OpenAI's
+ * `text-embedding-3-small` is natively 1536 and is truncated to 768 by the
+ * provider via the `dimensions` parameter. So a 1536-dim model is not a
+ * mismatch to "fix" — but the
  * physical column type is fixed by the migration. Switching providers WITHOUT
  * re-typing this column would otherwise only fail at the first INSERT — after
  * embedding credits are spent and a sync is half-done, leaving partial state.

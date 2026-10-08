@@ -113,3 +113,32 @@ describe("buildCitations — modified date", () => {
     expect(buildCitations([r])[0]?.modifiedAt).toBeUndefined();
   });
 });
+
+describe("buildCitations — data classification label", () => {
+  /**
+   * `docClass` is already permitted across the output boundary
+   * (`EXPOSABLE_METADATA_FIELDS`, packages/core/src/metadata-policy.ts) but had
+   * no consumer: the label was computed at ingest, stored, allowed through
+   * sanitization, and then ignored by every staff surface. Carrying it on the
+   * citation is what lets web, Teams and MCP show the same provenance.
+   */
+  it("carries the document's class when the metadata has one", () => {
+    const r = chunk("A", 0, 0.9);
+    r.document.metadata = { docClass: "B" };
+    expect(buildCitations([r])[0]?.docClass).toBe("B");
+  });
+
+  /**
+   * The load-bearing case. `isSourceUrlExposable`
+   * (packages/core/src/metadata-policy.ts) treats an ABSENT class as STRICTER
+   * than A, because an untagged row is not evidence that it is class A. A
+   * display that defaulted to "A" would therefore invent a reassurance the
+   * data does not support — so absence must stay absent all the way out.
+   */
+  it("omits the class entirely when the document is untagged", () => {
+    const r = chunk("A", 0, 0.9);
+    r.document.metadata = {};
+    expect(buildCitations([r])[0]?.docClass).toBeUndefined();
+    expect("docClass" in (buildCitations([r])[0] ?? {})).toBe(false);
+  });
+});

@@ -54,8 +54,11 @@ export const EXPOSABLE_METADATA_FIELDS = [
   "sizeBytes",
   "createdAt",
   "modifiedAt",
-  // Classification tag — non-PII; needed for citation display and
-  // index-boundary enforcement at the retrieval layer.
+  // Classification tag — non-PII. Consumed for citation display on all three
+  // staff surfaces (web chip, Teams card, MCP Sources footer) and for
+  // index-boundary enforcement at the retrieval layer. Note an ABSENT class is
+  // stricter than A (see `isSourceUrlExposable`), so a display must omit the
+  // label rather than default it.
   "docClass",
 ] as const satisfies readonly (keyof DocumentMetadata)[];
 

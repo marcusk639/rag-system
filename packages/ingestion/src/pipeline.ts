@@ -35,7 +35,7 @@ import {
   type Db,
   clearDocumentStorage,
   deleteDocumentByExternalId,
-  documentHasChunks,
+  documentHasChunksForModel,
   documentHasStorage,
   logIngestEvent,
   replaceChunks,
@@ -731,7 +731,13 @@ export async function ingestOne(
     // hash set but the chunks table empty. Skipping such a document forever
     // would make it permanently un-retrievable, so we re-embed when chunks are
     // absent despite a matching hash.
-    if (await documentHasChunks(db, documentId)) {
+    const embedded = await documentHasChunksForModel(
+      db,
+      documentId,
+      embedder.name,
+      embedder.model,
+    );
+    if (embedded) {
       log.debug("content unchanged, skipping chunk/embed");
       return { outcome: "unchanged", chunksCreated: 0 };
     }

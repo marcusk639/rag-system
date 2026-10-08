@@ -141,6 +141,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                 · {c.modifiedAt}
                               </span>
                             )}
+                            {c.docClass && (
+                              <span
+                                data-testid="citation-class"
+                                className="ml-1 rounded bg-blue-200 px-1 text-[10px] font-semibold text-blue-800"
+                              >
+                                {c.docClass}
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>

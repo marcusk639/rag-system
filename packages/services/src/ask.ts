@@ -14,6 +14,7 @@ import type {
 import {
   ComplianceError,
   EgressError,
+  MAX_ASK_TOP_K,
   sanitizeRetrievalResults,
 } from "@rag/core";
 import { getChunksByOrdinals } from "@rag/db";
@@ -264,7 +265,19 @@ export async function expandWithNeighbors(
         }));
       }),
     );
-    return [...results, ...added.flat()];
+    // `MAX_ASK_TOP_K` is justified in TOKENS (~800 per chunk, see
+    // packages/core/src/validation.ts), but it bounds only the `topK` slice —
+    // this function appends AFTER it, so without a backstop the prompt could
+    // carry `documents × chunksPerDocument` more chunks than the stated bound
+    // (38 at the defaults, 44 measured in ask-neighbors.test.ts).
+    //
+    // `Math.max` guards the sign deliberately: with a set already at or over
+    // the budget a bare `slice(0, budget)` would take a NEGATIVE count and
+    // silently drop real retrieved chunks off the end, which is worse than the
+    // overrun it is meant to fix. Neighbours are flattened in top-document
+    // order, so truncating from the end drops the least-relevant context.
+    const budget = Math.max(0, MAX_ASK_TOP_K - results.length);
+    return [...results, ...added.flat().slice(0, budget)];
   } catch (err) {
     deps.logger.warn(
       { err, marker: "ask.neighbor_expansion_failed" },

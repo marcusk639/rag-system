@@ -216,6 +216,14 @@ export function buildCitations(
       chunkIds: chunks.map((c) => c.chunk.id),
       score: best.score,
       ...citationDate(document.metadata?.modifiedAt),
+      // Spread conditionally rather than assigning `undefined`: an untagged
+      // document must carry NO class, because an absent class is treated as
+      // stricter than A (metadata-policy.ts). A surface that received
+      // `docClass: undefined` could render a default; one that receives no key
+      // at all cannot.
+      ...(document.metadata?.docClass
+        ? { docClass: document.metadata.docClass }
+        : {}),
     }),
   );
 }

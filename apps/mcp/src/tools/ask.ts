@@ -60,6 +60,7 @@ function renderAnswer(
     url?: string;
     documentId: string;
     downloadable?: boolean;
+    docClass?: string;
   }>,
 ): string {
   if (citations.length === 0) return answer;
@@ -71,7 +72,11 @@ function renderAnswer(
       const dl = c.downloadable
         ? ` — download: /documents/${c.documentId}/download`
         : "";
-      return `[${c.index}] ${c.title}${link}${dl}`;
+      // §7216/GLBA class, shown only when the document carries one. An absent
+      // class is treated as stricter than A server-side, so there is no
+      // default to fall back on here.
+      const cls = c.docClass ? ` — Class ${c.docClass}` : "";
+      return `[${c.index}] ${c.title}${link}${dl}${cls}`;
     })
     .join("\n");
   return `${answer}\n\nSources:\n${block}`;
