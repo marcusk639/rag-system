@@ -1,3 +1,4 @@
+import { isSourceUrlExposable } from "@rag/core";
 import type { GenerationResult, RetrievalResult } from "@rag/core";
 
 /**
@@ -210,7 +211,18 @@ export function buildCitations(
       index,
       documentId: document.id,
       title: document.title,
-      url: document.url,
+      // Class-gated, and spread conditionally for the same reason as
+      // `docClass` below. `sanitizeRetrievalResult` withholds this link above
+      // class A because the connector URL embeds the client-named folder path
+      // that `metadata.path` is stripped for; citations are built from the RAW
+      // `RetrievalResult`, so without this gate the link reached every surface
+      // that renders a citation. `isSourceUrlExposable` compares against "A"
+      // exactly, so an absent class — or any value the enum does not know,
+      // which `.passthrough()` metadata permits — withholds the link.
+      ...(isSourceUrlExposable(document.metadata?.docClass) &&
+      document.url !== undefined
+        ? { url: document.url }
+        : {}),
       downloadable: document.hasOriginal ?? false,
       chunkId: best.chunk.id,
       chunkIds: chunks.map((c) => c.chunk.id),

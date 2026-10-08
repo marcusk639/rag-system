@@ -32,6 +32,13 @@ import type {
  *   - sizeBytes  document size (display only)
  *   - createdAt  ISO timestamp (display / sort)
  *   - modifiedAt ISO timestamp (display / sort)
+ *   - docClass   A/B/C/D classification tag — non-PII; drives the class label
+ *                on the staff surfaces and the `url` gate below. See the note
+ *                on the array entry itself.
+ *
+ * `url` is allowlisted but CONDITIONAL: `sanitizeMetadata` withholds it unless
+ * `isSourceUrlExposable(docClass)` passes, because the connector URL embeds the
+ * same client-named folder path that `path` is stripped for.
  *
  * STRIPPED (PII or unvetted):
  *   - path       folder location — at a CPA firm folder names routinely carry

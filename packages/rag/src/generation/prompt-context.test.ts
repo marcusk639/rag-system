@@ -142,3 +142,53 @@ describe("buildCitations — data classification label", () => {
     expect("docClass" in (buildCitations([r])[0] ?? {})).toBe(false);
   });
 });
+
+describe("buildCitations — source URL class gate", () => {
+  /**
+   * Mirrors `metadata-policy.url-class.test.ts` on the citation path.
+   *
+   * `metadata.url` is the connector's link and embeds the folder path, which at
+   * this firm is named for clients — the same reason `metadata.path` is
+   * stripped. `sanitizeRetrievalResult` withholds it above class A, but
+   * citations are built from the RAW `RetrievalResult`, so until this gate the
+   * link reached every surface that renders a citation (Teams as a clickable
+   * OpenUrl action, MCP as printed text) regardless of class.
+   */
+  function citationFor(docClass: unknown) {
+    const r = chunk("A", 0, 0.9);
+    r.document.metadata = docClass === undefined ? {} : ({ docClass } as never);
+    return buildCitations([r])[0];
+  }
+
+  /**
+   * Positive control. Without it the absence assertions below would pass
+   * against a `buildCitations` that never set `url` at all, proving nothing
+   * about whether the gate discriminates.
+   */
+  it("keeps the source URL for a class A document", () => {
+    expect(citationFor("A")?.url).toBe("https://x/A");
+  });
+
+  it("omits the source URL for a class B document", () => {
+    expect("url" in (citationFor("B") ?? {})).toBe(false);
+  });
+
+  /**
+   * An absent class is stricter than A on purpose (`isSourceUrlExposable`): an
+   * untagged row is not evidence that it is class A.
+   */
+  it("omits the source URL when the document is untagged", () => {
+    expect("url" in (citationFor(undefined) ?? {})).toBe(false);
+  });
+
+  /**
+   * `document.metadata` is `.passthrough()` and is never zod-parsed on the read
+   * path, so `docClass` can hold anything the jsonb column holds. The gate must
+   * fail CLOSED on a value the enum does not know, not fall through to a
+   * truthiness check.
+   */
+  it("omits the source URL for an unrecognized class value", () => {
+    expect("url" in (citationFor("E") ?? {})).toBe(false);
+    expect("url" in (citationFor("a") ?? {})).toBe(false);
+  });
+});
