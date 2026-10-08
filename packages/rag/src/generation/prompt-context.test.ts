@@ -145,7 +145,8 @@ describe("buildCitations — data classification label", () => {
 
 describe("buildCitations — source URL class gate", () => {
   /**
-   * Mirrors `metadata-policy.url-class.test.ts` on the citation path.
+   * Mirrors `packages/core/src/metadata-policy.url-class.test.ts` on the
+   * citation path.
    *
    * `metadata.url` is the connector's link and embeds the folder path, which at
    * this firm is named for clients — the same reason `metadata.path` is

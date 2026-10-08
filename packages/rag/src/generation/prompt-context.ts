@@ -211,14 +211,13 @@ export function buildCitations(
       index,
       documentId: document.id,
       title: document.title,
-      // Class-gated, and spread conditionally for the same reason as
-      // `docClass` below. `sanitizeRetrievalResult` withholds this link above
-      // class A because the connector URL embeds the client-named folder path
-      // that `metadata.path` is stripped for; citations are built from the RAW
-      // `RetrievalResult`, so without this gate the link reached every surface
-      // that renders a citation. `isSourceUrlExposable` compares against "A"
-      // exactly, so an absent class — or any value the enum does not know,
-      // which `.passthrough()` metadata permits — withholds the link.
+      // Gated here as well as in core's `sanitizeRetrievalResult`, because
+      // citations are built from the RAW `RetrievalResult` (see
+      // packages/services/src/ask.ts) — the sanitizer never runs on this path,
+      // so without this gate the link reached every surface that renders a
+      // citation regardless of class. The policy itself lives in
+      // `isSourceUrlExposable`; deliberately not restated here.
+      // Spread rather than assigned so the key is ABSENT, not `undefined`.
       ...(isSourceUrlExposable(document.metadata?.docClass) &&
       document.url !== undefined
         ? { url: document.url }
