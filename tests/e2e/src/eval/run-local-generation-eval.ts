@@ -29,8 +29,9 @@
  * llama3.2:3b measured 19/20 and 16/20 on identical inputs across two runs.
  *
  * ⚠ `answered` counts coverage A + B. A B response -- a cited partial answer
- * naming its gap -- is a SUCCESS, not a refusal. Scoring it as a refusal is a
- * mistake this harness made for a whole session; see `classify`.
+ * naming its gap -- is a SUCCESS, not a refusal. An earlier single-predicate
+ * version of this harness scored paraphrased B markers as refusals; see
+ * `classify` for what it did and did not get wrong.
  *
  * ⚠ TRUNCATES the target database. Point `DATABASE_URL` at a local dev DB.
  *
@@ -66,20 +67,45 @@ const VERBOSE = process.argv.includes("--verbose");
  *
  * ## Why this is three-way and not a single refusal predicate
  *
- * It was a single predicate, and it produced a wrong result that stood for a
- * whole session. The prompt prescribes `"Not covered by the documents:"` as the
- * marker for case **B** -- a correct PARTIAL answer: substantive cited content
- * plus an explicit statement of the gap. One refusal regex matching
- * /not covered/ scores every well-formed B as a refusal, so a model that
- * follows the rubric exactly is punished for doing so.
+ * By construction, not by measurement. The prompt prescribes gap language --
+ * `"Not covered by the documents:"` -- as the marker for case **B**, a correct
+ * PARTIAL answer: substantive cited content plus an explicit statement of what
+ * is missing. The prompt also says "Prefer B over C". Any predicate that treats
+ * gap language as refusal therefore scores a success as a failure, and that is
+ * wrong regardless of how often it fires.
  *
- * That is not hypothetical. It read qwen2.5:3b at 11/20 "answered" while the
- * same run measured 17/20 SELF-RETRIEVAL -- at least six of the nine supposed
- * refusals had cited a labeled-relevant document, i.e. they were B responses.
- * The conclusion drawn from it ("qwen has an over-refusal problem") was mostly
- * an artifact of the measurement. It survived an earlier round of fixing
- * because that round added missing patterns rather than questioning the
- * category.
+ * What the previous single predicate actually did, verified by running all
+ * eleven of its patterns against the prescribed strings:
+ *
+ *   - the EXACT B marker "Not covered by the documents:"  -> NOT matched
+ *   - "not covered in the documents"                      -> matched (refusal)
+ *   - "...is not explicitly stated in the documents"      -> matched (refusal)
+ *   - the exact C sentence                                -> matched (refusal)
+ *
+ * So a model reproducing the B marker verbatim escaped it; a model PARAPHRASING
+ * the marker -- which small models do constantly -- was scored as refusing. The
+ * defect was real but narrower than "punishes rubric compliance", and the fix
+ * is to key C off the prescribed refusal sentence rather than off gap wording.
+ *
+ * ## What the numbers can and cannot tell you about this
+ *
+ * `selfRetrieved` is incremented independently of coverage, so a run with
+ * 11 answered / 9 C / 17 self-retrieved does imply that >=6 of the nine C's
+ * cited a labeled-relevant document. It is tempting to read that as proof those
+ * nine were really B's. It is not: `generator.ts:71` instructs case C to append
+ * `"Closest related material: <title> [N]"`, and `filterCitationsToAnswer`
+ * (packages/services/src/ask.ts:447) keeps any citation whose index appears in
+ * the text, so a textbook C emits exactly one citation -- very likely the
+ * labeled-relevant document, since retrieval ranks it highly for an in-corpus
+ * question. All nine could have been correct C's with that number unchanged.
+ * The self-retrieval column carries NO information about the A/B/C split.
+ *
+ * Empirically the correction barely moved anything: qwen2.5:3b measured 11/20
+ * answered both before and after, llama3.2:3b 16 -> 17. **The conservatism
+ * these models show is real, not an artifact of this function.** Prompt density
+ * is the cause -- a ~290-token lean prompt took qwen to 19/20 -- but it is not
+ * adoptable, because it also collapsed llama3.2:3b from 24 citations and 17/20
+ * self-retrieval to 2 and 2/20.
  *
  * So: C is detected by the PRESCRIBED REFUSAL SENTENCE (and the rubric-label
  * echo small models emit in its place), never by gap language. B is detected by
