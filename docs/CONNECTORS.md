@@ -32,7 +32,21 @@ Reads files from a SharePoint site's document libraries. Uses the Microsoft Grap
 5. **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**:
    - `Sites.Read.All`
    - `Files.Read.All`
+   - `User.Read.All` — required by `apps/web`, not by this connector (see note below)
+   - `GroupMember.Read.All` — likewise
 6. **Grant admin consent** for the tenant.
+
+> **`User.Read.All` / `GroupMember.Read.All` are for the web app, not ingestion.**
+> `apps/web` reuses these same `MS_*` credentials to resolve a staff email to an
+> Entra `oid` when granting source access, and to confirm `RAG-Admins` membership
+> when a user hits Entra's groups overage (`resolveOidByEmail` / `isUserInGroup`,
+> `apps/web/src/lib/graph-client.ts`). They are listed here because this is the
+> registration that holds them — omitting them does not break any connector, so
+> the failure surfaces much later: `grantSourceAccessAction` does not catch the
+> Graph throw, so `/admin/access` returns an opaque 500 instead of a permissions
+> error. Adding them without clicking **Grant admin consent** has no effect at
+> all — an un-consented application permission is indistinguishable from an
+> absent one at the API.
 
 ### Environment
 

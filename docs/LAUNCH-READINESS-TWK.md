@@ -33,7 +33,7 @@ what TWK actually expects to query.
 **Blockers: 3. Pre-launch: 7. Post-launch: 3. Accepted: 3.** _(as first written — see
 below for the current count)_
 
-> **Revised twice on 2026-10-08. Current state: 1 open blocker.**
+> **Revised three times on 2026-10-08. Current state: 0 open blockers; 2 new pre-launch gates.**
 >
 > - **§1a** (live Railway values read) — B2 resolved, B3 confirmed and narrowed, new
 >   blocker B4 found. Net 3.
@@ -42,6 +42,14 @@ below for the current count)_
 >   one-variable change. Two new findings added: N1 (`document.title` carries the email
 >   subject — latent, gates enabling the email connectors) and N2 (tests are excluded
 >   from typecheck repo-wide).
+> - **§1c** (first live end-to-end use) — **all four blockers now closed and B1/B4
+>   exercised against real traffic.** Six findings added, every one of them
+>   configuration rather than code, and none of them visible to a code review: C1
+>   (`RAG_API_URL` port — the web app had never once reached the API), C2 (scanner
+>   switched off), C3 (`CONTENT_SCAN_MODEL` is research-licensed), C4 (the two Entra
+>   registrations collapsed into one), C5 (two Graph permissions required by code and
+>   absent from every doc), C6 (rag grants do not track SharePoint ACLs). C4 and C6 are
+>   the new pre-launch gates.
 
 ---
 
@@ -184,6 +192,116 @@ discriminated unions — is unverified. Not a launch blocker; it does mean CI gr
 weaker evidence than it appears.
 
 ---
+
+---
+
+## 1c. Revision 3 — 2026-10-08, first live end-to-end use
+
+Everything in this section was found by **operating** the system, not by reading it. That
+is the finding behind the findings: §1 through §1b were produced by a code-first audit
+that read every authorization path in the repo, and all six items below sat outside its
+reach, because in each case the code was already correct and the deployed configuration
+was not. "Configured" and "working" came apart six times in one day. A code review cannot
+catch any of these; only a request through the real surface can.
+
+**B3 CLOSED.** `CONTENT_SCAN_PROVIDER=ollama` was applied to `rag-worker` and verified
+active. **B4 CLOSED.** Both `generativelanguage.googleapis.com` and
+`ollama.railway.internal` are confirmed in the allow-list, and a live question has now
+run through the pipeline, which is what §1b said was still needed. With B1 and B2 already
+closed, **no blockers remain open.**
+
+### C1 — `RAG_API_URL` named a port the API has never listened on (was a live outage)
+
+`rag-web` had `RAG_API_URL=http://rag-api.railway.internal:3000`. `packages/core/src/config.ts:303`
+resolves `port: Number(env.API_PORT ?? env.PORT ?? 3000)`, and Railway injects `PORT=8080`,
+so `rag-api` has always bound 8080. Every web request failed in `proxyJsonGet`/`proxyDownload`
+and surfaced as `jsonError(502, "UPSTREAM_UNREACHABLE", "RAG API is unreachable.")`.
+
+This was not a regression — **the web surface had never successfully reached the API in
+this deployment.** The audit called the web→api secret chain "unverified" in §1a and could
+not do better, because both halves were individually correct: the URL was well-formed and
+the API was healthy and serving on 8080. Only the pairing was wrong. Fixed on
+`RAG_API_URL` (now `:8080`), deliberately **not** on `API_PORT` — overriding the injected
+`PORT` would break Railway's healthcheck, trading a 502 for a crash-loop.
+
+Worth generalizing: a healthcheck that passes while every caller gets a 502 is a
+healthcheck measuring the wrong thing. Nothing in the stack compares the port the API
+binds against the port its clients are told to use.
+
+### C2 — the content scanner was configured but switched off
+
+Covered as B3 above; recorded here as part of the pattern. The ollama service was
+deployed and Online, the base URL and model were set, and the egress entry was present —
+only `CONTENT_SCAN_PROVIDER` was still `none`, so none of it ran.
+
+### C3 — `CONTENT_SCAN_MODEL` is under a research-only licence
+
+`CONTENT_SCAN_MODEL=qwen2.5:3b`. Of the Qwen 2.5 family, **only the 3B and 72B sizes are
+not Apache 2.0** — they ship under the Qwen Research Licence, which prohibits commercial
+use (confirmed against Qwen's own release notes). This model is in the production ingest
+path for a paying CPA firm, which is commercial use.
+
+This is a licence defect, not a technical one, and it is cheap to fix: move to an
+Apache-2.0 size (1.5B or 7B) and re-verify scan behaviour, since the classification
+boundary will shift. No code change — it is one env var and a re-scan.
+
+### C4 — the web and connector Entra registrations have been collapsed into one (PRE-LAUNCH GATE)
+
+`env.example:514-520` and `docs/AZURE-DEPLOY-RUNBOOK.md` §2 specify two deliberately
+separate registrations: `MS_*` holding **application** permissions for the connectors,
+and `AUTH_ENTRA_*` holding a **delegated** auth-code+PKCE registration for interactive
+sign-in. In the live deployment `AUTH_ENTRA_CLIENT_ID`/`_SECRET` and
+`MS_CLIENT_ID`/`_SECRET` are byte-identical.
+
+It works — one registration can legitimately hold both — but it widens the blast radius
+materially. That single registration carries `Sites.Read.All`, `Files.Read.All`,
+`Mail.Read`, `User.Read.All` and `GroupMember.Read.All` as _application_ permissions,
+which is tenant-wide SharePoint, mailbox and directory read, and its secret is deployed
+to the public-facing web service. A leak of the web app's client secret becomes a leak of
+the firm's entire SharePoint and mail corpus, not merely of sign-in.
+
+Acceptable in the throwaway test tenant where it was found. **Must be split before TWK's
+real tenant holds client data.**
+
+### C5 — two Graph permissions are required by code and documented nowhere
+
+`apps/web/src/lib/graph-client.ts` needs `User.Read.All` (`resolveOidByEmail`, `:84`) and
+`GroupMember.Read.All` (`isUserInGroup`, `:117`). Neither appears in
+`docs/CONNECTORS.md`, `env.example`, or the Azure runbook — all three list only the three
+connector permissions. The admin-access feature was added later and its Graph
+requirements never reached the docs.
+
+The failure mode is badly shaped. Without them the token still mints successfully and
+Graph returns **403**, `resolveOidByEmail` throws at `:90`, and `grantSourceAccessAction`
+(`apps/web/src/app/admin/access/actions.ts:110`) does not catch it — so the admin UI
+returns an **opaque 500 with only a digest**, giving no indication that the cause is a
+missing directory permission. Note also that an added-but-un-consented application
+permission is indistinguishable from an absent one at the API, so "I added it" is not
+sufficient; consent is a separate action.
+
+Both lists are fixed in this change. Two code-level follow-ups, neither a launch blocker:
+catch the Graph throw in `grantSourceAccessAction` and return a structured error, and
+assert the required permissions at startup rather than on first admin use.
+
+### C6 — rag access grants do not track SharePoint ACLs (PRE-LAUNCH GATE)
+
+rag's authorization is **its own** database layer: `resolveSourceIdsForUser` reads
+`staff_source_assignments` / `staff_client_assignments` in Postgres. It never consults
+SharePoint, and Microsoft Graph is used here _only_ to resolve an email to an `oid` and to
+check group membership — never to authorize document access.
+
+Two consequences, pulling opposite ways. It is why a test account with no SharePoint
+access at all can still be granted and query the full index, which made today's
+end-to-end verification possible. It is also a real confidentiality gap: **a staff member
+who loses SharePoint access to a client folder keeps their rag grant until someone
+manually revokes the row**, so answers keep flowing, with citations, from documents they
+can no longer open at source. Nothing reconciles the two systems and nothing detects the
+divergence.
+
+§1's data-lifecycle section flagged the departing-employee case, but it did not establish
+that the two permission systems are fully decoupled. They are. Before launch this needs a
+named revocation step in the firm's offboarding and role-change process — a documented
+human step is sufficient; automated reconciliation is the better post-launch answer.
 
 ---
 
