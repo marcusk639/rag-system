@@ -13,7 +13,14 @@
  * ## What it measures (and what it does not)
  *
  * Tier-1 grounding only, the same three properties as
- * `scripts/check-kb-grounding.mjs`:
+ * `scripts/check-kb-grounding.mjs` -- with one deliberate difference: that
+ * script reports self-retrieval over the questions that ANSWERED and keeps it
+ * out of its exit gate, because title-derived questions share vocabulary with
+ * their targets and the rate is therefore a ceiling. This harness reports it
+ * over ALL positives regardless of coverage, so it can exceed `answered`: a
+ * refusal still counts when its "Closest related material" citation happens to
+ * be the labeled-relevant document. The two columns are not a partition.
+ *
  *   - CITATION VALIDITY — does every citation resolve to a seeded document?
  *   - SELF-RETRIEVAL     — is a labeled-relevant document among the citations?
  *   - REFUSAL            — on the 8 out-of-corpus negatives, does it decline?
@@ -26,8 +33,10 @@
  * ⚠ Coverage is classified by REGEX over the answer text (see `classify`).
  * That is a heuristic, not ground truth. Read `--verbose` output before
  * trusting a regression, and treat single-run deltas under ~3 as noise --
- * llama3.2:3b measured 19/20, 16/20, 17/20 and 20/20 across four runs on
- * identical inputs.
+ * llama3.2:3b's ANSWERED count measured 19, 16, 17 and 20 out of 20 across
+ * four runs on identical inputs. Part of that spread was this file's own
+ * classifier changing between runs, not model nondeterminism, so read it as an
+ * upper bound on noise until two runs are compared under one classifier.
  *
  * ⚠ KNOW WHICH WAY THE ERROR RUNS. `classify` requires the prescribed refusal
  * sentence (or the rubric label) on the OPENING line, so a model that declines
@@ -87,10 +96,10 @@ const VERBOSE = process.argv.includes("--verbose");
  * invented a looser one. PR review caught four misclassifications in it,
  * including a safety-critical inversion. The prior art:
  *
- *   - `gold-eval.ts:48-55` anchors on the OPENING LINE, because case C opens
+ *   - `gold-eval.ts`'s `isRefusal` anchors on the OPENING LINE, because case C opens
  *     with the prescribed sentence. Matching anywhere misreads an answer that
- *     merely quotes it. Pinned by `specs/gold-eval.spec.ts:56,95`.
- *   - `scripts/check-kb-grounding.mjs:195-205` additionally caps length and
+ *     merely quotes it. Pinned by two tests in `specs/gold-eval.spec.ts`.
+ *   - `scripts/check-kb-grounding.mjs` additionally caps length and
  *     rejects continuation words, with a comment naming the exact attack:
  *     "...do not contain a 2025 deadline, BUT the standard deadline is April
  *     15" is a confabulation, and counting it as a refusal scores the very
@@ -104,13 +113,13 @@ const VERBOSE = process.argv.includes("--verbose");
  *
  * Citation count is deliberately NOT a signal. The retriever always returns
  * its top-k, so "cited something" is normal even when the corpus cannot answer
- * (`check-kb-grounding.mjs:195-197`). The previous `citationCount > 1`
+ * (same reasoning, in `check-kb-grounding.mjs`). The previous `citationCount > 1`
  * discriminator also scored a one-citation case B as C, which deflated the
  * headline `answered` metric.
  *
  * These three predicates should be consolidated into `@rag/core` or
  * `@rag/services`; `EMPTY_ANSWER` is now importable here (this package gained
- * `@rag/services`), which removes the stated reason `gold-eval.ts:43` restates
+ * `@rag/services`), which removes the stated reason `gold-eval.ts` restates
  * the sentence by hand. Left as a follow-up rather than done here so this
  * change does not alter `eval:gold` behaviour.
  */
@@ -119,7 +128,7 @@ type Coverage = "A" | "B" | "C";
 /**
  * The prescribed case-C sentence, taken from the single source of truth rather
  * than re-encoded: `@rag/services` EMPTY_ANSWER is byte-identical to the
- * sentence `generator.ts:71` prescribes.
+ * sentence the SYSTEM_PROMPT's case-C clause prescribes.
  */
 const REFUSAL_SENTENCE = EMPTY_ANSWER.replace(/\.$/, "");
 
@@ -160,7 +169,8 @@ function classify(answer: string): Coverage {
 
 /**
  * Whether this answer is the service-level short-circuit rather than anything a
- * model produced. `ask.ts:429-438` returns `EMPTY_ANSWER` WITHOUT calling the
+ * model produced. `askQuestion`'s `retrieved.length === 0` branch returns `EMPTY_ANSWER`
+ * WITHOUT calling the
  * generator when retrieval comes back empty, and that string is byte-identical
  * to the prescribed case-C sentence. So a totally broken retrieval path (parser
  * container down, stale MIN_DENSE_SIMILARITY, embedding dimension mismatch)
