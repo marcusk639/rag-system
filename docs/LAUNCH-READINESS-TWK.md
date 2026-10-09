@@ -307,24 +307,30 @@ human step is sufficient; automated reconciliation is the better post-launch ans
 
 ## 2. Findings table
 
-| ID  | Title                                                                             | Severity    | Area                | Anchor                                                                        |
-| --- | --------------------------------------------------------------------------------- | ----------- | ------------------- | ----------------------------------------------------------------------------- |
-| B1  | Citation source-URL class gate is written but uncommitted; leak is live on `main` | BLOCKER     | Confidentiality     | `packages/rag/src/generation/prompt-context.ts:214`                           |
-| B2  | `API_ENFORCE_SCOPING=false` default makes every static token an all-corpus admin  | BLOCKER     | Authorization       | `env.example:194`, `packages/core/src/access-control.ts:189-196`              |
-| B3  | Shipped egress/compliance defaults send client text to third-party APIs unscanned | BLOCKER     | Egress / compliance | `env.example:400,419,429`, `packages/ingestion/src/classify-document.ts:9-17` |
-| P1  | MCP surface writes `principalSubject: null` — no per-user attribution             | PRE-LAUNCH  | Auditability        | `apps/mcp/src/tools/ask.ts:102`                                               |
-| P2  | `AUDIT_LOG_CONTENT=none` default retains no question/answer text                  | PRE-LAUNCH  | Auditability        | `env.example:639`, `packages/core/src/config-schema.ts:224`                   |
-| P3  | MCP stdio grants `ADMIN_SCOPE` unconditionally                                    | PRE-LAUNCH  | Authorization       | `apps/mcp/src/main.ts:59-67`                                                  |
-| P4  | No worker healthcheck, no metrics, no sync-failure surface or alert               | PRE-LAUNCH  | Observability       | `apps/worker/railway.json:7-10`                                               |
-| P5  | `WEB_AUTH_MODE=static-fallback` collapses all users to one shared principal       | PRE-LAUNCH  | Authorization       | `apps/web/src/lib/rag-api.ts:70-85`                                           |
-| P6  | Class C/D quarantine refuses client-engagement material by design                 | PRE-LAUNCH  | Product scope       | `packages/ingestion/src/classify-document.ts:106-123`                         |
-| P7  | Automated PITR restore is broken; only a manual root procedure exists             | PRE-LAUNCH  | Backup / DR         | `CLAUDE.md` Railway-Postgres note, `docs/BACKUP-SCHEDULE-RUNBOOK.md`          |
-| L1  | Generation spend is untracked and unbounded per-firm                              | POST-LAUNCH | Cost                | `apps/api/src/routes/ask.ts:184`                                              |
-| L2  | `audit_log.channel` is caller-asserted for `api`/`teams`                          | POST-LAUNCH | Auditability        | `apps/api/src/routes/ask.ts:36-50`                                            |
-| L3  | `DEPLOYMENT-TARGET.md` states a data-sensitivity posture the code contradicts     | POST-LAUNCH | Docs accuracy       | `docs/DEPLOYMENT-TARGET.md` §Rationale                                        |
-| A1  | Railway vs local/CI Postgres image divergence                                     | ACCEPTED    | Deployment          | `CLAUDE.md`                                                                   |
-| A2  | `DocumentClass` collapses C and D at the ingest gate                              | ACCEPTED    | Ingestion           | `packages/ingestion/src/classify-document.ts:123`                             |
-| A3  | Rate-limit bucket key reads an unverified JWT `sub`                               | ACCEPTED    | Abuse control       | `apps/api/src/server.ts:58-63`                                                |
+| ID  | Title                                                                                | Severity    | Area                | Anchor                                                                        |
+| --- | ------------------------------------------------------------------------------------ | ----------- | ------------------- | ----------------------------------------------------------------------------- |
+| B1  | Citation source-URL class gate is written but uncommitted; leak is live on `main`    | BLOCKER     | Confidentiality     | `packages/rag/src/generation/prompt-context.ts:214`                           |
+| B2  | `API_ENFORCE_SCOPING=false` default makes every static token an all-corpus admin     | BLOCKER     | Authorization       | `env.example:194`, `packages/core/src/access-control.ts:189-196`              |
+| B3  | Shipped egress/compliance defaults send client text to third-party APIs unscanned    | BLOCKER     | Egress / compliance | `env.example:400,419,429`, `packages/ingestion/src/classify-document.ts:9-17` |
+| P1  | MCP surface writes `principalSubject: null` — no per-user attribution                | PRE-LAUNCH  | Auditability        | `apps/mcp/src/tools/ask.ts:102`                                               |
+| P2  | `AUDIT_LOG_CONTENT=none` default retains no question/answer text                     | PRE-LAUNCH  | Auditability        | `env.example:639`, `packages/core/src/config-schema.ts:224`                   |
+| P3  | MCP stdio grants `ADMIN_SCOPE` unconditionally                                       | PRE-LAUNCH  | Authorization       | `apps/mcp/src/main.ts:59-67`                                                  |
+| P4  | No worker healthcheck, no metrics, no sync-failure surface or alert                  | PRE-LAUNCH  | Observability       | `apps/worker/railway.json:7-10`                                               |
+| P5  | `WEB_AUTH_MODE=static-fallback` collapses all users to one shared principal          | PRE-LAUNCH  | Authorization       | `apps/web/src/lib/rag-api.ts:70-85`                                           |
+| P6  | Class C/D quarantine refuses client-engagement material by design                    | PRE-LAUNCH  | Product scope       | `packages/ingestion/src/classify-document.ts:106-123`                         |
+| P7  | Automated PITR restore is broken; only a manual root procedure exists                | PRE-LAUNCH  | Backup / DR         | `CLAUDE.md` Railway-Postgres note, `docs/BACKUP-SCHEDULE-RUNBOOK.md`          |
+| L1  | Generation spend is untracked and unbounded per-firm                                 | POST-LAUNCH | Cost                | `apps/api/src/routes/ask.ts:184`                                              |
+| L2  | `audit_log.channel` is caller-asserted for `api`/`teams`                             | POST-LAUNCH | Auditability        | `apps/api/src/routes/ask.ts:36-50`                                            |
+| L3  | `DEPLOYMENT-TARGET.md` states a data-sensitivity posture the code contradicts        | POST-LAUNCH | Docs accuracy       | `docs/DEPLOYMENT-TARGET.md` §Rationale                                        |
+| C1  | `RAG_API_URL` named port 3000; API binds injected `PORT=8080` — web never reached it | RESOLVED    | Deployment          | `packages/core/src/config.ts:303`, `rag-web` env                              |
+| C2  | Content scanner fully configured but `CONTENT_SCAN_PROVIDER` left `none`             | RESOLVED    | Ingestion           | `rag-worker` env (was B3)                                                     |
+| C3  | `CONTENT_SCAN_MODEL=qwen2.5:3b` is Qwen-Research-licensed — no commercial use        | PRE-LAUNCH  | Licensing           | `rag-worker` env `CONTENT_SCAN_MODEL`                                         |
+| C4  | Web and connector Entra registrations collapsed into one; secret leak = tenant read  | PRE-LAUNCH  | Authorization       | `env.example:514-520`, `docs/AZURE-DEPLOY-RUNBOOK.md` §2                      |
+| C5  | `User.Read.All`/`GroupMember.Read.All` required by code, absent from every doc       | RESOLVED    | Docs accuracy       | `apps/web/src/lib/graph-client.ts:84,117`                                     |
+| C6  | rag grants never track SharePoint ACLs; revocation does not propagate                | PRE-LAUNCH  | Authorization       | `packages/db` `staff_source_assignments`, `apps/web/src/lib/graph-client.ts`  |
+| A1  | Railway vs local/CI Postgres image divergence                                        | ACCEPTED    | Deployment          | `CLAUDE.md`                                                                   |
+| A2  | `DocumentClass` collapses C and D at the ingest gate                                 | ACCEPTED    | Ingestion           | `packages/ingestion/src/classify-document.ts:123`                             |
+| A3  | Rate-limit bucket key reads an unverified JWT `sub`                                  | ACCEPTED    | Abuse control       | `apps/api/src/server.ts:58-63`                                                |
 
 ---
 
@@ -635,6 +641,46 @@ table so nobody reasons from the stale line.
   `apps/api/src/server.ts:58-71` reasons it correctly — a forged `sub` only lets an
   attacker dodge their own limit — and explains why the naive byte-offset alternative is
   worse (internal-scope tokens share an identical 48-char prefix). Sound as written.
+
+---
+
+## 3a. Launch gates added 2026-10-08 (from §1c)
+
+Two items from §1c are gates rather than findings: neither is a defect in the code,
+both are decisions someone has to make and record before TWK's own data is in play.
+
+### GATE-1 — split the Entra app registrations (C4)
+
+**Blocking on:** TWK's real tenant. Fine as-is in the test tenant.
+**Why it is a gate and not a bug:** nothing is broken. One registration legitimately
+holds both the delegated sign-in config and the application permissions. The problem is
+concentration: that single secret, deployed to the public-facing web service, carries
+`Sites.Read.All` + `Files.Read.All` + `Mail.Read` + `User.Read.All` +
+`GroupMember.Read.All`. Compromise of the web app stops being a sign-in incident and
+becomes disclosure of the firm's whole SharePoint and mail corpus — a §7216 event.
+**Done when:** `AUTH_ENTRA_CLIENT_ID` differs from `MS_CLIENT_ID` in the production
+environment, the web registration holds only the delegated scopes plus
+`User.Read.All`/`GroupMember.Read.All`, and the connector registration holds no redirect
+URI. Verify from the live environment, not the portal — §1c exists because configuration
+and intent diverged six times in one day.
+
+### GATE-2 — name a rag-grant revocation step in offboarding (C6)
+
+**Blocking on:** the first staff member who leaves or changes role.
+**Why it is a gate and not a bug:** the decoupling is deliberate and useful — it is what
+lets rag index a shared corpus without re-implementing SharePoint's ACL model. But it
+means SharePoint is not the system of record for rag access, and nothing reconciles them.
+A revoked SharePoint permission leaves the rag grant intact, so the system keeps
+answering, with citations, from documents the person can no longer open at source.
+**Done when:** TWK's offboarding and role-change checklists contain an explicit "revoke
+rag source/client assignments" step with a named owner. A documented human step closes
+this gate; automated reconciliation against Graph is the better post-launch answer and
+should be tracked separately, not used to defer the manual step.
+
+**Note on scope:** neither gate was reachable by the §1-§1b code audit. GATE-1 is a
+property of the deployed environment, and GATE-2 is a property of a process that lives
+outside the repo entirely. A launch review that reads only code will miss both every
+time.
 
 ---
 
