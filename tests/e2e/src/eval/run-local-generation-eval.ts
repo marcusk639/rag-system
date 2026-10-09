@@ -26,7 +26,22 @@
  * ⚠ Coverage is classified by REGEX over the answer text (see `classify`).
  * That is a heuristic, not ground truth. Read `--verbose` output before
  * trusting a regression, and treat single-run deltas under ~3 as noise --
- * llama3.2:3b measured 19/20 and 16/20 on identical inputs across two runs.
+ * llama3.2:3b measured 19/20, 16/20, 17/20 and 20/20 across four runs on
+ * identical inputs.
+ *
+ * ⚠ KNOW WHICH WAY THE ERROR RUNS. `classify` requires the prescribed refusal
+ * sentence (or the rubric label) on the OPENING line, so a model that declines
+ * in gap language -- "X is not explicitly covered by the available documents"
+ * -- scores as B, i.e. ANSWERED. Therefore:
+ *   - `refused (of neg)` is a FLOOR. Real refusal is >= the number shown.
+ *   - the `confabulated` list is an UPPER BOUND and will contain genuine
+ *     refusals phrased in gap language. Read them before believing them; two
+ *     of llama3.2:3b's appeared there and both were real declines.
+ * This is deliberate. The predicate it replaced erred the other way, scoring
+ * "<refusal sentence>. However, <fabricated answer> [1]" as a correct refusal
+ * -- a confabulation counted as the thing the negatives exist to catch. Being
+ * wrong toward "flag it for a human" is recoverable; being wrong toward
+ * "scored green" is not.
  *
  * ⚠ `answered` counts coverage A + B. A B response -- a cited partial answer
  * naming its gap -- is a SUCCESS, not a refusal. An earlier single-predicate
@@ -49,7 +64,7 @@
  */
 import { ADMIN_SCOPE, loadConfig } from "@rag/core";
 import { buildCoreDeps } from "@rag/runtime";
-import { askQuestion } from "@rag/services";
+import { EMPTY_ANSWER, askQuestion } from "@rag/services";
 import pino from "pino";
 import { createCustomSource, truncateAll } from "../helpers/db.js";
 import { seedEvalCorpus } from "./run-eval.js";
@@ -65,93 +80,104 @@ const VERBOSE = process.argv.includes("--verbose");
  * Classify an answer into the prompt's own three coverage cases
  * (generator.ts SYSTEM_PROMPT, "## Coverage — pick one of three").
  *
- * ## Why this is three-way and not a single refusal predicate
+ * ## This is the third refusal predicate in the repo, and deliberately the
+ * ## strictest. Read before changing it.
  *
- * By construction, not by measurement. The prompt prescribes gap language --
- * `"Not covered by the documents:"` -- as the marker for case **B**, a correct
- * PARTIAL answer: substantive cited content plus an explicit statement of what
- * is missing. The prompt also says "Prefer B over C". Any predicate that treats
- * gap language as refusal therefore scores a success as a failure, and that is
- * wrong regardless of how often it fires.
+ * Two already existed, and an earlier version of this file ignored both and
+ * invented a looser one. PR review caught four misclassifications in it,
+ * including a safety-critical inversion. The prior art:
  *
- * What the previous single predicate actually did, verified by running all
- * eleven of its patterns against the prescribed strings:
+ *   - `gold-eval.ts:48-55` anchors on the OPENING LINE, because case C opens
+ *     with the prescribed sentence. Matching anywhere misreads an answer that
+ *     merely quotes it. Pinned by `specs/gold-eval.spec.ts:56,95`.
+ *   - `scripts/check-kb-grounding.mjs:195-205` additionally caps length and
+ *     rejects continuation words, with a comment naming the exact attack:
+ *     "...do not contain a 2025 deadline, BUT the standard deadline is April
+ *     15" is a confabulation, and counting it as a refusal scores the very
+ *     failure the check exists to catch.
  *
- *   - the EXACT B marker "Not covered by the documents:"  -> NOT matched
- *   - "not covered in the documents"                      -> matched (refusal)
- *   - "...is not explicitly stated in the documents"      -> matched (refusal)
- *   - the exact C sentence                                -> matched (refusal)
+ * This predicate applies all three guards. The loose version scored
+ * `"<refusal sentence>. However, the standard IRS mileage rate for 2025 is 70
+ * cents per mile [1]."` as a CORRECT REFUSAL on a negative. That is the worst
+ * possible direction to be wrong in: the negatives column exists precisely to
+ * catch a model answering an out-of-corpus question confidently.
  *
- * So a model reproducing the B marker verbatim escaped it; a model PARAPHRASING
- * the marker -- which small models do constantly -- was scored as refusing. The
- * defect was real but narrower than "punishes rubric compliance", and the fix
- * is to key C off the prescribed refusal sentence rather than off gap wording.
+ * Citation count is deliberately NOT a signal. The retriever always returns
+ * its top-k, so "cited something" is normal even when the corpus cannot answer
+ * (`check-kb-grounding.mjs:195-197`). The previous `citationCount > 1`
+ * discriminator also scored a one-citation case B as C, which deflated the
+ * headline `answered` metric.
  *
- * ## What the numbers can and cannot tell you about this
- *
- * `selfRetrieved` is incremented independently of coverage, so a run with
- * 11 answered / 9 C / 17 self-retrieved does imply that >=6 of the nine C's
- * cited a labeled-relevant document. It is tempting to read that as proof those
- * nine were really B's. It is not: `generator.ts:71` instructs case C to append
- * `"Closest related material: <title> [N]"`, and `filterCitationsToAnswer`
- * (packages/services/src/ask.ts:447) keeps any citation whose index appears in
- * the text, so a textbook C emits exactly one citation -- very likely the
- * labeled-relevant document, since retrieval ranks it highly for an in-corpus
- * question. All nine could have been correct C's with that number unchanged.
- * The self-retrieval column carries NO information about the A/B/C split.
- *
- * Empirically the correction barely moved anything: qwen2.5:3b measured 11/20
- * answered both before and after, llama3.2:3b 16 -> 17. **The conservatism
- * these models show is real, not an artifact of this function.** Prompt density
- * is the cause -- a ~290-token lean prompt took qwen to 19/20 -- but it is not
- * adoptable, because it also collapsed llama3.2:3b from 24 citations and 17/20
- * self-retrieval to 2 and 2/20.
- *
- * So: C is detected by the PRESCRIBED REFUSAL SENTENCE (and the rubric-label
- * echo small models emit in its place), never by gap language. B is detected by
- * gap language and counts as ANSWERED. Anything else is A.
+ * These three predicates should be consolidated into `@rag/core` or
+ * `@rag/services`; `EMPTY_ANSWER` is now importable here (this package gained
+ * `@rag/services`), which removes the stated reason `gold-eval.ts:43` restates
+ * the sentence by hand. Left as a follow-up rather than done here so this
+ * change does not alter `eval:gold` behaviour.
  */
 type Coverage = "A" | "B" | "C";
 
-/** The prescribed case-C sentence, plus the rubric label models echo instead. */
-const REFUSAL_PATTERNS: RegExp[] = [
-  /do(es)? not contain enough information/i,
-  /do not bear on the question/i,
-  /Closest related material:/i,
-  /(cannot|can't|unable to) (be )?(answer|determine|find|locate)/i,
-  /(not|no) (enough|sufficient) (information|context|detail)/i,
-  /(don't|do not) have (enough |sufficient )?(information|context)/i,
-  /no (relevant |supporting )?(information|documents?|context) (was |were )?found/i,
-  /the (provided )?(context|documents?|corpus) does not/i,
-];
+/**
+ * The prescribed case-C sentence, taken from the single source of truth rather
+ * than re-encoded: `@rag/services` EMPTY_ANSWER is byte-identical to the
+ * sentence `generator.ts:71` prescribes.
+ */
+const REFUSAL_SENTENCE = EMPTY_ANSWER.replace(/\.$/, "");
+
+/** The rubric LABEL, which small models echo in place of the sentence. */
+const REFUSAL_LABEL = "do not bear on the question";
 
 /**
- * Case-B gap language. Deliberately NOT a refusal: these mark a partial answer,
- * which is a success -- the prompt itself says "Prefer B over C".
+ * A real case C is short and is nothing but a refusal, optionally plus the
+ * prescribed "Closest related material" line. A continuation word after the
+ * refusal sentence means the model kept going -- i.e. answered anyway.
  */
+const CONTINUATION = /\b(however|but|that said|based on|according to)\b/i;
+const MAX_REFUSAL_CHARS = 400;
+
+/** Case-B gap language. A partial answer is a SUCCESS; the prompt prefers B over C. */
 const PARTIAL_PATTERNS: RegExp[] = [
   /not covered by the documents/i,
   /(is |are )?not (covered|addressed|mentioned|available) in/i,
   /not explicitly (covered|stated|mentioned|addressed)/i,
 ];
 
-function classify(answer: string, citationCount: number): Coverage {
-  const refused = REFUSAL_PATTERNS.some((re) => re.test(answer));
-  const partial = PARTIAL_PATTERNS.some((re) => re.test(answer));
+function isRefusal(answer: string): boolean {
+  const trimmed = answer.trim();
+  const opening = trimmed.split("\n")[0] ?? "";
+  if (
+    !opening.includes(REFUSAL_SENTENCE) &&
+    !opening.toLowerCase().includes(REFUSAL_LABEL)
+  ) {
+    return false;
+  }
+  return trimmed.length <= MAX_REFUSAL_CHARS && !CONTINUATION.test(trimmed);
+}
 
-  // A refusal-shaped answer that also carries substantive cited content is a B
-  // whose gap statement happened to use refusal wording -- score the citations,
-  // not the phrasing. Case C legitimately carries at most the single
-  // "Closest related material" citation, so >1 is the discriminator.
-  if (refused && citationCount > 1) return "B";
-  if (refused) return "C";
-  return partial ? "B" : "A";
+function classify(answer: string): Coverage {
+  if (isRefusal(answer)) return "C";
+  return PARTIAL_PATTERNS.some((re) => re.test(answer)) ? "B" : "A";
+}
+
+/**
+ * Whether this answer is the service-level short-circuit rather than anything a
+ * model produced. `ask.ts:429-438` returns `EMPTY_ANSWER` WITHOUT calling the
+ * generator when retrieval comes back empty, and that string is byte-identical
+ * to the prescribed case-C sentence. So a totally broken retrieval path (parser
+ * container down, stale MIN_DENSE_SIMILARITY, embedding dimension mismatch)
+ * yields `refused 8/8` -- a perfect safety score -- and `answered 0/20`, which
+ * a reader naturally attributes to the model refusing everything. It would do
+ * that for a model name that does not exist, because nothing is ever called.
+ * Counted separately so the run can fail loudly instead.
+ */
+function isEmptyRetrieval(answer: string, citationCount: number): boolean {
+  return answer.trim() === EMPTY_ANSWER.trim() && citationCount === 0;
 }
 
 interface ModelScore {
   model: string;
   positives: number;
   answered: number;
+  emptyRetrieval: number;
   full: number;
   partial: number;
   selfRetrieved: number;
@@ -213,6 +239,7 @@ async function main(): Promise<void> {
       model,
       positives: EVAL_QUESTIONS_CPA.length,
       answered: 0,
+      emptyRetrieval: 0,
       full: 0,
       partial: 0,
       selfRetrieved: 0,
@@ -242,7 +269,10 @@ async function main(): Promise<void> {
       process.stdout.write(`${model}: positives `);
       for (const q of EVAL_QUESTIONS_CPA) {
         const r = await ask(q.query);
-        const coverage = classify(r.answer, r.citations.length);
+        const coverage = classify(r.answer);
+        if (isEmptyRetrieval(r.answer, r.citations.length)) {
+          score.emptyRetrieval += 1;
+        }
         if (coverage === "A") score.full += 1;
         if (coverage === "B") score.partial += 1;
         // B is a success: a cited partial answer naming its gap is exactly what
@@ -270,7 +300,10 @@ async function main(): Promise<void> {
       process.stdout.write(" negatives ");
       for (const q of EVAL_NEGATIVES_CPA) {
         const r = await ask(q.query);
-        if (classify(r.answer, r.citations.length) === "C") {
+        if (isEmptyRetrieval(r.answer, r.citations.length)) {
+          score.emptyRetrieval += 1;
+        }
+        if (classify(r.answer) === "C") {
           score.refused += 1;
         } else {
           // The failure that matters: an out-of-corpus question answered
@@ -286,6 +319,38 @@ async function main(): Promise<void> {
       await deps.close();
     }
     scores.push(score);
+  }
+
+  // Fail loudly rather than printing a plausible table. If every question hit
+  // the `EMPTY_ANSWER` short-circuit, the generator was never called and the
+  // numbers describe a broken retrieval path, not a model -- see
+  // `isEmptyRetrieval`. Reported per model because a single model failing this
+  // way (bad model name) is a different fault from all of them failing (corpus
+  // or embedder).
+  const totalQuestions = EVAL_QUESTIONS_CPA.length + EVAL_NEGATIVES_CPA.length;
+  const blind = scores.filter((s) => s.emptyRetrieval === totalQuestions);
+  if (blind.length > 0) {
+    throw new Error(
+      `Retrieval returned nothing for EVERY question on: ${blind
+        .map((s) => s.model)
+        .join(
+          ", ",
+        )}. The generator was never invoked, so no measurement here ` +
+        `describes a model. Check the parser container is up, that the corpus ` +
+        `seeded (documents/chunks non-empty), that MIN_DENSE_SIMILARITY is not ` +
+        `set from a hosted-embedder run, and that seed and query embedding ` +
+        `models match.`,
+    );
+  }
+  const partiallyBlind = scores.filter(
+    (s) => s.emptyRetrieval > 0 && s.emptyRetrieval < totalQuestions,
+  );
+  for (const s of partiallyBlind) {
+    console.log(
+      `⚠ ${s.model}: ${s.emptyRetrieval}/${totalQuestions} questions hit the ` +
+        `EMPTY_ANSWER short-circuit (no generator call). Those are counted as ` +
+        `refusals below and inflate the refusal column.`,
+    );
   }
 
   console.log("\n=== Tier-1 grounding by generation model ===\n");
