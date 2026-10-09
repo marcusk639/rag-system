@@ -1,0 +1,28 @@
+{
+  "query": "How can a solo, newly-forming SDVOSB founder (staff engineer, agentic-AI skills, no clearance, VetCert + SAM pending) realistically earn substantial, sustainable revenue selling RAG/agentic-AI software and services to the US federal government (VA first, others second) as of Oct 2026?",
+  "mode": "deep",
+  "date": "2026-10-09",
+  "audience": "The founder; informs a go-to-market plan built on the rag-system repo",
+  "materiality_assumptions": [
+    "In scope: unclassified federal civilian (VA priority), unclassified DoD/DHA, veteran-ecosystem adjacent markets (VSOs, state VA depts, accredited agents)",
+    "Out of scope: classified work, state/local outside veterans affairs, international",
+    "Figures must be current to 2025-2026; anything changed by the 2025 FAR overhaul or 2025 EOs flagged"
+  ],
+  "angles": {
+    "A1": "SDVOSB mechanics: VetCert, Vets First/rule of two, FAR 19 thresholds, RFO changes, MPT/SAT, VA goals, mentor-protege, LoS",
+    "A2": "Demand: VA AI strategy/inventory, VBA/VHA AI initiatives, OMB M-25-21/22, 2025 EOs + GSA consolidation, OneGov AI deals, DoD/DHA demand",
+    "A3": "Vehicles and entry paths: T4NG2, GSA MAS/AI SIN, SEWP VI, Polaris, CIO-SP4, SBIR status, OTA/CSO/DIU/Tradewinds, VA innovation, subcontracting",
+    "A4": "Compliance: FedRAMP 20x, inherited GovCloud, VA ATO, 508, FIPS, CMMC, LLM availability in FedRAMP High/GovCloud, air-gapped",
+    "A5": "Competition, pricing, labor rates, small-firm VA AI wins, new-entrant failure modes",
+    "A6": "Adjacent veteran-ecosystem markets: VSOs, accredited agents, state DVAs/state SDVOSB prefs, 38 CFR 14.629 + GUARD Act limits"
+  },
+  "id_ranges": {
+    "A1": "S100-199/E100-199",
+    "A2": "S200-299/E200-299",
+    "A3": "S300-399/E300-399",
+    "A4": "S400-499/E400-499",
+    "A5": "S500-599/E500-599",
+    "A6": "S600-699/E600-699"
+  },
+  "tools": "built-in WebSearch + WebFetch only"
+}
