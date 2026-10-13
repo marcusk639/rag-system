@@ -152,6 +152,29 @@ export function filterCitationsToAnswer(
 }
 
 /**
+ * Bracketed numbers above this are never read as citations when REPORTING
+ * fabricated ones. `citedIndices` may over-collect because filtering discards
+ * strays, but a report must not flag `[2019-2024]` or `Form [1040]` as six
+ * hallucinated sources. Retrieval never yields this many documents.
+ */
+const MAX_PLAUSIBLE_CITATION = 99;
+
+/**
+ * Citation indices the answer references that match no retrieved document —
+ * the model cited a source it was never given. Sorted ascending, deduplicated.
+ * `filterCitationsToAnswer` silently drops these; this makes them observable.
+ */
+export function findInvalidCitations(
+  answer: string,
+  citations: GenerationResult["citations"],
+): number[] {
+  const valid = new Set(citations.map((c) => c.index));
+  return [...citedIndices(answer)]
+    .filter((n) => n <= MAX_PLAUSIBLE_CITATION && !valid.has(n))
+    .sort((a, b) => a - b);
+}
+
+/**
  * Upper bound on how many indices one `[a-b]` range may contribute. Guards
  * against a pathological `[1-99999]` (or a year range like `[2019-2024]`)
  * inflating the set. Over-collecting is otherwise harmless — an index that

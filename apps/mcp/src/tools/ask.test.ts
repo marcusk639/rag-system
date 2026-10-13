@@ -70,6 +70,7 @@ function askResultFixture() {
     reviewStatus: "pending" as const,
     disclaimer: "Draft — review before use.",
     answerId: "answer-id-fixture-1",
+    citationWarnings: [{ kind: "uncited_answer" as const }],
   };
 }
 
@@ -83,7 +84,9 @@ describe("ask tool — audit logging", () => {
 
     const result = (await handlers.get("ask")!({
       question: "what is our refund policy",
-    })) as { structuredContent?: { answerId?: string } };
+    })) as {
+      structuredContent?: { answerId?: string; citationWarnings?: unknown };
+    };
     await new Promise((r) => setImmediate(r));
 
     expect(logAskEventMock).toHaveBeenCalledTimes(1);
@@ -103,6 +106,10 @@ describe("ask tool — audit logging", () => {
     // Task 4: structuredContent must also carry the answerId so a consuming
     // agent (or the web UI) can reference it when submitting feedback.
     expect(result.structuredContent?.answerId).toBe("answer-id-fixture-1");
+    // An agent must be able to see that the answer's citations failed to verify.
+    expect(result.structuredContent?.citationWarnings).toEqual([
+      { kind: "uncited_answer" },
+    ]);
   });
 
   it("does not audit-log when generation is not configured (isError short-circuit)", async () => {

@@ -128,7 +128,7 @@ export function registerAsk(
     {
       title: "Ask a grounded question",
       description:
-        'Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), and retrievedCount. Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case. When nothing relevant is retrieved the answer is exactly "The available documents do not contain enough information to answer that." Every answer is a DRAFT requiring practitioner review (see reviewStatus). A question containing taxpayer identifiers may be refused before retrieval.',
+        'Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), retrievedCount, and citationWarnings (non-empty when the answer cites a source that was not retrieved, or makes uncited claims — treat such an answer as unverified). Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case. When nothing relevant is retrieved the answer is exactly "The available documents do not contain enough information to answer that." Every answer is a DRAFT requiring practitioner review (see reviewStatus). A question containing taxpayer identifiers may be refused before retrieval.',
       inputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -176,6 +176,7 @@ export function registerAsk(
           reviewStatus,
           disclaimer,
           answerId,
+          citationWarnings,
         } = result;
         auditAsk(
           deps,
@@ -202,6 +203,7 @@ export function registerAsk(
             reviewStatus,
             disclaimer,
             answerId,
+            citationWarnings,
           },
         };
       },

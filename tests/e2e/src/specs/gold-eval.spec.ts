@@ -53,6 +53,23 @@ describe("scoreGoldRun", () => {
     expect(report.wrongRefusals).toEqual(["a"]);
   });
 
+  // Regression: the old first-line-only predicate scored this as a correct
+  // refusal, inflating coverage with the very confabulation it should catch.
+  it("does not count a refusal followed by a fabricated answer as a correct refusal", () => {
+    const report = scoreGoldRun(
+      [q("n", [])],
+      [
+        obs(
+          "n",
+          ["doc-1"],
+          ["doc-1"],
+          `${REFUSAL} However, the 2025 mileage rate is 70 cents per mile [1].`,
+        ),
+      ],
+    );
+    expect(report.coverage).toEqual({ total: 1, correctlyRefused: 0 });
+  });
+
   it("counts partial answers (the 'Not covered by the documents:' shape) as answers, not refusals", () => {
     const report = scoreGoldRun(
       [q("a", ["doc-1"])],

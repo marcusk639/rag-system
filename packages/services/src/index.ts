@@ -11,7 +11,9 @@ export {
   type AskInput,
   type AskResult,
   type AskStreamEvent,
+  type CitationWarning,
 } from "./ask.js";
+export { isRefusal } from "./refusal.js";
 export {
   triggerSync,
   listPublicSources,

@@ -144,6 +144,7 @@ export async function pumpAskStream(
       sink.write(
         `event: done\ndata: ${JSON.stringify({
           citations: event.citations,
+          citationWarnings: event.citationWarnings,
           retrieved: event.retrieved,
           reviewStatus: event.reviewStatus,
           disclaimer: event.disclaimer,
@@ -217,7 +218,7 @@ export async function registerAskRoute(
   //
   // SSE event contract (consumed by apps/web/src/lib/stream-chat.ts):
   //   event: token  data: <JSON-encoded string chunk>
-  //   event: done   data: {citations, retrieved, reviewStatus, disclaimer, answerId}
+  //   event: done   data: {citations, citationWarnings, retrieved, reviewStatus, disclaimer, answerId}
   //   event: error  data: {message}
   typed.post(
     "/ask/stream",

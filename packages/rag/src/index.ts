@@ -62,6 +62,7 @@ export {
   createGenerator,
   buildCitations,
   filterCitationsToAnswer,
+  findInvalidCitations,
   TRUNCATION_NOTICE,
   type Generator,
   type GenerationResult,

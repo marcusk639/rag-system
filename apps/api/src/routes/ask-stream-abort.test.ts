@@ -53,6 +53,7 @@ describe("pumpAskStream", () => {
       yield {
         type: "done",
         citations: [],
+        citationWarnings: [],
         retrieved: [],
         reviewStatus: "draft_requires_practitioner_review",
         disclaimer: "d",
@@ -64,5 +65,30 @@ describe("pumpAskStream", () => {
     await pumpAskStream(gen(), { write, isClosed: () => true, onDone });
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("forwards citationWarnings on the SSE done event", async () => {
+    async function* gen(): AsyncGenerator<AskStreamEvent> {
+      yield {
+        type: "done",
+        citations: [],
+        citationWarnings: [{ kind: "invalid_citation", indices: [7] }],
+        retrieved: [],
+        reviewStatus: "draft_requires_practitioner_review",
+        disclaimer: "d",
+        answerId: "a",
+      };
+    }
+    const write = vi.fn();
+    await pumpAskStream(gen(), {
+      write,
+      isClosed: () => false,
+      onDone: vi.fn(),
+    });
+    const frame = String(write.mock.calls[0]?.[0]);
+    const data = JSON.parse(frame.slice(frame.indexOf("data: ") + 6).trim());
+    expect(data.citationWarnings).toEqual([
+      { kind: "invalid_citation", indices: [7] },
+    ]);
   });
 });

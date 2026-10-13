@@ -20,6 +20,7 @@ export {
   buildCitations,
   buildPrompt,
   filterCitationsToAnswer,
+  findInvalidCitations,
   groupContextByDocument,
   type ContextDocument,
 } from "./prompt-context.js";
