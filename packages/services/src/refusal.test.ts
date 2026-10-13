@@ -17,6 +17,30 @@ describe("isRefusal", () => {
   });
 
   // The confabulation the strict predicate exists to catch (commit 17e80bd).
+  it("accepts case C whose related-material title contains a continuation word", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nClosest related material: Based on Facts and Circumstances memo [2]`,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a fabricated answer smuggled into the related-material line", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nClosest related material: Mileage memo [1]. However, the 2025 rate is 70 cents per mile.`,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a fabricated answer on the line after the refusal sentence", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nHowever, the standard IRS mileage rate for 2025 is 70 cents per mile [1].`,
+      ),
+    ).toBe(false);
+  });
+
   it("rejects a refusal followed by a fabricated answer", () => {
     expect(
       isRefusal(

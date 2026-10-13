@@ -8,7 +8,7 @@ import { AnswerFeedback } from "@/components/answer-feedback";
 import type { ChatSession, Citation, Message, Source } from "@/types";
 
 /**
- * Mirrors `EMPTY_ANSWER` from `@rag/services` (packages/services/src/ask.ts).
+ * Mirrors `EMPTY_ANSWER` from `@rag/services` (packages/services/src/refusal.ts).
  * Duplicated as a literal instead of imported: `@rag/services` re-exports the
  * whole service module graph, which pulls the local ONNX embedder
  * (onnxruntime-node's native binding) into this client bundle and breaks

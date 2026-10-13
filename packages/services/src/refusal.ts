@@ -19,6 +19,14 @@ const REFUSAL_LABEL = "do not bear on the question";
  */
 const CONTINUATION = /\b(however|but|that said|based on|according to)\b/i;
 
+/**
+ * The optional case-C line prescribed by the generation prompt, in exactly its
+ * prescribed shape: a title ending in its `[N]` citation. Anything after the
+ * citation is prose, so the line is no longer exempt from the continuation
+ * check — otherwise a fabricated answer could ride along on it.
+ */
+const RELATED_MATERIAL = /^\s*closest related material:.*\[\d+\]\s*\.?\s*$/i;
+
 /** A real case C is the sentence plus at most one "Closest related material" line. */
 const MAX_REFUSAL_CHARS = 400;
 
@@ -40,5 +48,12 @@ export function isRefusal(answer: string): boolean {
   ) {
     return false;
   }
-  return trimmed.length <= MAX_REFUSAL_CHARS && !CONTINUATION.test(trimmed);
+  // The prescribed related-material line holds a document title, which may
+  // itself start "Based on…"; only the model's own prose is checked for
+  // continuation words.
+  const prose = trimmed
+    .split("\n")
+    .filter((line) => !RELATED_MATERIAL.test(line))
+    .join("\n");
+  return trimmed.length <= MAX_REFUSAL_CHARS && !CONTINUATION.test(prose);
 }
