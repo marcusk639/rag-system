@@ -32,16 +32,17 @@ complete. Status lives in `PILOT-LAUNCH-STATUS.md`.
 
 Describes how the system works today. Should be correct; correct it if not.
 
-| Document                                                             | Covers                                                      |
-| -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md)                               | System model, data flow, design tradeoffs. **Canonical.**   |
-| [`RAG-ARCHITECTURE-GUIDE.md`](./RAG-ARCHITECTURE-GUIDE.md)           | Repo layout, conventions, gotchas. Subordinate to the above |
-| [`API.md`](./API.md)                                                 | HTTP endpoint reference                                     |
-| [`MCP.md`](./MCP.md)                                                 | Agent-facing tool reference                                 |
-| [`CONNECTORS.md`](./CONNECTORS.md)                                   | All six connectors: auth, config, gotchas                   |
-| [`DEPLOYMENT.md`](./DEPLOYMENT.md)                                   | Production deployment; Railway is the live target           |
-| [`CONFIGURE-PRINCIPALS.md`](./CONFIGURE-PRINCIPALS.md)               | Per-token source-ID access control                          |
-| [`CPA-COMPLIANCE-REQUIREMENTS.md`](./CPA-COMPLIANCE-REQUIREMENTS.md) | The CR-1…CR-20 control matrix. Cited across the corpus      |
+| Document                                                             | Covers                                                                |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md)                               | System model, data flow, design tradeoffs. **Canonical.**             |
+| [`RAG-ARCHITECTURE-GUIDE.md`](./RAG-ARCHITECTURE-GUIDE.md)           | Repo layout, conventions, gotchas. Subordinate to the above           |
+| [`API.md`](./API.md)                                                 | HTTP endpoint reference                                               |
+| [`MCP.md`](./MCP.md)                                                 | Agent-facing tool reference                                           |
+| [`CONNECTORS.md`](./CONNECTORS.md)                                   | All six connectors: auth, config, gotchas                             |
+| [`DEPLOYMENT.md`](./DEPLOYMENT.md)                                   | Production deployment; Railway is the live target                     |
+| [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md)                   | From-zero live deploy: Entra apps + permissions, every service, order |
+| [`CONFIGURE-PRINCIPALS.md`](./CONFIGURE-PRINCIPALS.md)               | Per-token source-ID access control                                    |
+| [`CPA-COMPLIANCE-REQUIREMENTS.md`](./CPA-COMPLIANCE-REQUIREMENTS.md) | The CR-1…CR-20 control matrix. Cited across the corpus                |
 
 ## Current — status and operations
 

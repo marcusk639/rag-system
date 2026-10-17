@@ -80,6 +80,7 @@ The Teams bot needs its own identity (an Azure Bot resource, which creates/uses 
      - `1fec8e78-bce4-4aaf-ab1b-5451cc387264` (Teams desktop/mobile)
      - `5e3ce6c0-2b1f-4285-8d4b-75ee78787346` (Teams web)
    - **API permissions**: add delegated `openid`, `profile`, `email`, `offline_access`; grant admin consent.
+5. **Redirect URI** (on the bot's Entra app → **Authentication → Add a platform → Web**): `https://token.botframework.com/.auth/web/redirect`. The Bot Framework token service completes the §4 OAuth connection through this URI; without it, **Test Connection** fails with a redirect mismatch.
 
 ---
 
@@ -107,7 +108,7 @@ The web app, the Teams bot, and the API all use one HS256 secret to sign/verify 
 openssl rand -hex 32   # produces exactly 64 hex chars
 ```
 
-Set the output as `INTERNAL_SCOPE_JWT_SECRET` on **rag-api, rag-web, and rag-teams-bot** (same value). Rotating it later is a coordinated redeploy (add new secret to the api's accepted list, deploy all, drop old — see `packages/core/src/internal-scope-auth.ts` rotation note).
+Set the output as `INTERNAL_SCOPE_JWT_SECRET` on **rag-web** and **rag-teams-bot**, and as **`INTERNAL_SCOPE_JWT_SECRETS`** (plural — the API's verify list, comma-separated for rotation) on **rag-api** — the same value in all three. The API does not read the singular; setting only that on rag-api makes every web and Teams request fail auth. Rotating it later is a coordinated redeploy (add new secret to the api's accepted list, deploy all, drop old — see `packages/core/src/internal-scope-auth.ts` rotation note).
 
 ---
 
@@ -117,7 +118,7 @@ Both apps already have `Dockerfile` + `railway.json` (healthcheck `/api/health` 
 
 ### 6a. `rag-web` service
 
-Env vars: `AUTH_ENTRA_CLIENT_ID`, `AUTH_ENTRA_CLIENT_SECRET`, `AUTH_ENTRA_TENANT_ID`, `AUTH_SECRET`, `RAG_ADMINS_GROUP_ID`, `INTERNAL_SCOPE_JWT_SECRET`, `RAG_API_URL` (the internal api URL), `DATABASE_URL`, `DATABASE_SSL`. Leave `WEB_AUTH_MODE` unset (defaults to Entra; `static-fallback` is the emergency bypass only).
+Env vars: `AUTH_ENTRA_CLIENT_ID`, `AUTH_ENTRA_CLIENT_SECRET`, `AUTH_ENTRA_TENANT_ID`, `AUTH_SECRET`, `AUTH_URL` (the public base URL — Auth.js builds the redirect URI from it behind Railway's proxy) and/or `AUTH_TRUST_HOST=true`, `RAG_ADMINS_GROUP_ID`, `INTERNAL_SCOPE_JWT_SECRET`, `RAG_API_URL` (the internal api URL), `DATABASE_URL`, `DATABASE_SSL`, and `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` (the ingestion app's credentials — `src/lib/graph-client.ts` uses them for the `/admin/access` email→oid lookup and the group-overage check, which need **`User.Read.All`** application permission with admin consent on that app). Leave `WEB_AUTH_MODE` unset (defaults to Entra; `static-fallback` is the emergency bypass only).
 After deploy, note the domain and go back to §2 step 1 to set the redirect URI.
 
 > ✅ **Already done (2026-08-01).** `rag-web` is live at

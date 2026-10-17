@@ -1,5 +1,10 @@
 # Phase 2 — Railway Deploy Runbook (resume from here)
 
+> **Historical.** This records how the first deployment was brought up. For a new
+> deployment follow [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md). Migrations
+> are no longer run by hand as in Step 5 — `rag-worker`'s pre-deploy command runs
+> them (`apps/worker/railway.json`).
+
 Self-contained steps to finish Phase 2. Project is already created and Postgres is
 live; this covers the remaining work: Gemini key, pgvector extensions, fixing the
 parser, deploying the 3 Node services, migrations, domains, and verification.

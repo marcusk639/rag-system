@@ -32,7 +32,10 @@ Reads files from a SharePoint site's document libraries. Uses the Microsoft Grap
 5. **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**:
    - `Sites.Read.All`
    - `Files.Read.All`
+   - `User.Read.All` — not used by the connector, but `apps/web` reuses these same credentials for its `/admin/access` email→oid lookup and group-overage check
 6. **Grant admin consent** for the tenant.
+
+**Least-privilege alternative:** grant `Sites.Selected` **instead of both** `Sites.Read.All` and `Files.Read.All`, then have a SharePoint admin grant the app `read` on each source site (`POST /sites/{site-id}/permissions`). Do not keep `Files.Read.All` alongside it — that permission is tenant-wide on its own (every site and OneDrive) and cancels the scoping. Procedure and consequences: [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md) §1.2.
 
 ### Environment
 

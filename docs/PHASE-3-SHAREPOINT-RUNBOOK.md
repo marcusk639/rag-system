@@ -67,7 +67,13 @@ From the **Overview** page:
 > Tighter alternative: `Sites.Selected` grants access only to specific sites you
 > later authorize per-site (via Graph), instead of all sites. It's more secure but
 > adds a per-site grant step. Start with `Sites.Read.All` for the first launch
-> unless your tenant policy requires least-privilege from day one.
+> unless your tenant policy requires least-privilege from day one. If you choose
+> `Sites.Selected`, add it **instead of both** permissions above — `Files.Read.All`
+> is tenant-wide on its own and would cancel the scoping. Per-site grant
+> procedure: [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md) §1.2.
+>
+> Also add **`User.Read.All`** (Application) on this same app: `apps/web` reuses
+> these credentials for its `/admin/access` page.
 
 ---
 
