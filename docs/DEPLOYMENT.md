@@ -2,7 +2,7 @@
 
 **Status:** Current · **Updated:** 2026-08-03 · **Live target:** Railway
 
-How to run the RAG system in production. Local dev is covered in the root README; this doc focuses on the production picture.
+How to run the RAG system in production. Local dev is covered in the root README; this doc focuses on the production picture. For the step-by-step order of a from-zero deployment (Entra apps and permissions, every Railway service, secrets), see [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md).
 
 ## Components to deploy
 
