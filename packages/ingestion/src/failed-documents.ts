@@ -1,7 +1,12 @@
 import type { Connector, DocumentClass, SourceDocument } from "@rag/core";
 import { ClassBlockedError } from "@rag/core";
 import type { IngestOutcome } from "./ingest-gates.js";
-import { listRetryableIngestFailures, logIngestEvent, type Db } from "@rag/db";
+import {
+  invalidateDocumentContentHash,
+  listRetryableIngestFailures,
+  logIngestEvent,
+  type Db,
+} from "@rag/db";
 import type { Logger } from "pino";
 
 /** Give up on a document after this many consecutive failed attempts. */
@@ -24,6 +29,18 @@ export async function recordIngestFailure(
   err: unknown,
 ): Promise<void> {
   if (err instanceof ClassBlockedError) return;
+  try {
+    await invalidateDocumentContentHash(db, row.sourceId, row.externalId);
+  } catch (hashErr) {
+    log.error(
+      {
+        err: hashErr,
+        externalId: row.externalId,
+        marker: "ingest.hash_reset_failed",
+      },
+      "could not reset content hash after a failed ingest",
+    );
+  }
   const name = err instanceof Error ? err.name : typeof err;
   const code =
     typeof err === "object" && err !== null && "code" in err

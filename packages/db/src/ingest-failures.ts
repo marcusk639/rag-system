@@ -36,3 +36,23 @@ export async function listRetryableIngestFailures(
   `);
   return result.rows.map((r) => r.external_id);
 }
+
+/**
+ * Forget a document's recorded content hash after a failed ingest.
+ *
+ * `upsertDocument` commits the new hash before chunking and embedding run. If
+ * those then fail, the next run would see a matching hash, find the PREVIOUS
+ * version's chunks still present, report "unchanged", and keep serving stale
+ * text indefinitely. An empty hash matches no real one, so the next attempt
+ * re-chunks and re-embeds. Existing chunks keep serving until it succeeds.
+ */
+export async function invalidateDocumentContentHash(
+  db: Db,
+  sourceId: string,
+  externalId: string,
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE documents SET content_hash = ''
+    WHERE source_id = ${sourceId}::uuid AND external_id = ${externalId}
+  `);
+}

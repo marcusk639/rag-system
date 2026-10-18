@@ -113,3 +113,35 @@ describe("MarkdownChunker — overlap size", () => {
     expect(encode(overlap).length).toBeLessThanOrEqual(22);
   });
 });
+
+describe("MarkdownChunker — heading paths", () => {
+  const paths = async (markdown: string) => {
+    const chunker = new MarkdownChunker({ chunkSize: 800, chunkOverlap: 0 });
+    const chunks = await chunker.chunk(doc(markdown));
+    return chunks.map((c) => c.headingPath);
+  };
+
+  it("treats sibling H2s as siblings when the document has no H1", async () => {
+    expect(
+      await paths(
+        "## Billing\n\nInvoice monthly.\n\n## Payroll\n\nRun Fridays.\n\n## Taxes\n\nFile quarterly.",
+      ),
+    ).toEqual([["Billing"], ["Payroll"], ["Taxes"]]);
+  });
+
+  it("treats sibling headings as siblings across a skipped level", async () => {
+    expect(
+      await paths(
+        "# Guide\n\nIntro text.\n\n### Step A\n\nDo A first.\n\n### Step B\n\nThen do B.",
+      ),
+    ).toEqual([["Guide"], ["Guide", "Step A"], ["Guide", "Step B"]]);
+  });
+
+  it("pops back to the parent level", async () => {
+    expect(
+      await paths(
+        "# Guide\n\nIntro.\n\n## Setup\n\n### Detail\n\nDeep text.\n\n## Usage\n\nUse it daily.",
+      ),
+    ).toEqual([["Guide"], ["Guide", "Setup", "Detail"], ["Guide", "Usage"]]);
+  });
+});
