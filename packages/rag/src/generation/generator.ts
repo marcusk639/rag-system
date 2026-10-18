@@ -595,9 +595,11 @@ export class ClaudeGenerator implements Generator {
   /** Bare prompt in, text out, under the same pre-flight (see GeminiGenerator.complete). */
   async complete(prompt: string): Promise<string> {
     this.preFlight(prompt);
+    // Thinking is on by default and spends this budget too, so it needs
+    // headroom beyond the short rewrite itself.
     const response = await this.client.messages.create({
       model: this.opts.model,
-      max_tokens: 1_024,
+      max_tokens: 4_096,
       messages: [{ role: "user", content: prompt }],
     });
     return response.content

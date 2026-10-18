@@ -79,7 +79,8 @@ export async function contextualizeQuestion(
     const rewritten = (
       await complete(buildContextualizePrompt(question, history, opts))
     ).trim();
-    if (!rewritten || rewritten.length > MAX_REWRITE_CHARS) return question;
+    if (!rewritten) throw new Error("condensation returned no text");
+    if (rewritten.length > MAX_REWRITE_CHARS) return question;
     return rewritten;
   } catch (err) {
     // Fail open: a condensation failure must never fail the query.
