@@ -188,19 +188,34 @@ export interface AskOptions {
 }
 
 /**
+ * Share of the question's search terms a chunk must contain to bypass the
+ * cosine floor. Measured on the SOP corpus: identifier questions ("what is
+ * BK-CATCHUP") cover 0.6-1.0; an off-topic question sharing one common word
+ * ("client") covers 0.33.
+ */
+export const MIN_KEYWORD_COVERAGE = 0.5;
+
+/**
  * Hybrid search always returns its nearest neighbours, so without a floor an
  * off-topic question still reaches the model with whatever was least unlike
- * it. A chunk with a keyword match is kept regardless: identifiers and form
- * numbers score low on cosine similarity by nature.
+ * it. A chunk covering most of the question's keywords is kept regardless:
+ * identifiers and form numbers score low on cosine similarity by nature.
+ *
+ * `sparseScore > 0` alone is not that signal — the sparse arm ORs lexemes, so
+ * any single shared word scores. It is only the fallback for results that
+ * carry no `keywordCoverage`.
  */
 export function applyRelevanceFloor(
   results: RetrievalResult[],
   minDenseSimilarity: number | undefined,
 ): RetrievalResult[] {
   if (minDenseSimilarity === undefined) return results;
-  return results.filter(
-    (r) => r.sparseScore > 0 || r.denseScore >= minDenseSimilarity,
-  );
+  return results.filter((r) => {
+    if (r.denseScore >= minDenseSimilarity) return true;
+    return r.keywordCoverage === undefined
+      ? r.sparseScore > 0
+      : r.keywordCoverage >= MIN_KEYWORD_COVERAGE;
+  });
 }
 
 export const NO_NEIGHBOR_EXPANSION: NeighborExpansion = {

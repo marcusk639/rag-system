@@ -238,6 +238,7 @@ export async function hybridSearch(
         dense_score: number;
         sparse_score: number;
         rrf_score: number;
+        keyword_coverage: number;
         title: string;
         source_id: string;
         source_kind: SourceKind;
@@ -300,7 +301,8 @@ export async function hybridSearch(
                    )
                  ),
                  to_tsquery('english', 'zzzznomatchzzzz')
-               ) AS q_tsquery
+               ) AS q_tsquery,
+               tsvector_to_array(to_tsvector('english', ${opts.query})) AS q_lexemes
       ),
       dense_hits AS (
         -- Pure ANN over the HNSW index, restricted to the active embedding
@@ -360,6 +362,18 @@ export async function hybridSearch(
         f.dense_score,
         f.sparse_score,
         f.rrf_score,
+        -- Share of query lexemes this chunk contains, compared as exact
+        -- lexemes against its own tsvector. Computed for the final topK rows
+        -- only, so it costs nothing at candidate scale.
+        COALESCE(
+          cardinality(ARRAY(
+            SELECT unnest((SELECT q_lexemes FROM params))
+            INTERSECT
+            SELECT unnest(tsvector_to_array(c.tsv))
+          ))::float
+            / NULLIF(cardinality((SELECT q_lexemes FROM params)), 0),
+          0
+        ) AS keyword_coverage,
         doc.title,
         doc.source_id,
         src.kind AS source_kind,
@@ -424,6 +438,7 @@ export async function hybridSearch(
       score: Number(r.rrf_score) / maxScore,
       denseScore: Number(r.dense_score),
       sparseScore: Number(r.sparse_score),
+      keywordCoverage: Number(r.keyword_coverage),
       document: {
         id: r.document_id,
         title: r.title,

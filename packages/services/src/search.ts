@@ -1,6 +1,14 @@
 import type { AuthorizationScope, SanitizedRetrievalResult } from "@rag/core";
 import { sanitizeRetrievalResults } from "@rag/core";
+import { dropDuplicateChunks } from "./ask.js";
 import type { ServiceDeps } from "./deps.js";
+
+/**
+ * Candidates fetched per requested result. The same SOP is often indexed as
+ * several files; collapsing those copies would otherwise return fewer than
+ * `topK` distinct passages.
+ */
+const DUPLICATE_OVERFETCH_MULTIPLIER = 2;
 
 export interface SearchInput {
   query: string;
@@ -35,14 +43,15 @@ export async function searchDocuments(
   if (deps.generator && typeof deps.generator.screen === "function") {
     deps.generator.screen(input.query, []);
   }
+  const topK = input.topK ?? defaultTopK;
   const results = await deps.retriever.search(
     {
       query: input.query,
-      topK: input.topK ?? defaultTopK,
+      topK: topK * DUPLICATE_OVERFETCH_MULTIPLIER,
       ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
       ...(input.filter ? { filter: input.filter } : {}),
     },
     scope,
   );
-  return sanitizeRetrievalResults(results);
+  return sanitizeRetrievalResults(dropDuplicateChunks(results).slice(0, topK));
 }
