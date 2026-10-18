@@ -295,6 +295,60 @@ describe("relevance floor (minDenseSimilarity)", () => {
     ]);
   });
 
+  it("does not exempt a chunk that shares only one common word with the question", async () => {
+    // The sparse arm ORs lexemes, so "client" alone gives sparseScore > 0.
+    // Exemption must require the chunk to cover most of the question's terms.
+    const answer = vi.fn();
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue([
+        {
+          ...scored("one-word", 0.3, 0.1),
+          keywordCoverage: 1 / 3,
+        } as RetrievalResult,
+      ]),
+    });
+
+    const result = await askQuestion(
+      deps,
+      { question: "what is the client's favorite color" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      0,
+      { minDenseSimilarity: 0.5 },
+    );
+
+    expect(result.answer).toBe(EMPTY_ANSWER);
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("keeps a low-cosine chunk that covers the question's identifiers", async () => {
+    const answer = vi
+      .fn()
+      .mockResolvedValue({ answer: "a [1]", citations: [] });
+    const deps = makeDeps({
+      generator: { answer } as unknown as ServiceDeps["generator"],
+      search: vi.fn().mockResolvedValue([
+        {
+          ...scored("identifier", 0.2, 0.3),
+          keywordCoverage: 1,
+        } as RetrievalResult,
+      ]),
+    });
+
+    await askQuestion(
+      deps,
+      { question: "what is BK-CATCHUP" },
+      DEFAULT_TOP_K,
+      ADMIN_SCOPE,
+      0,
+      { minDenseSimilarity: 0.5 },
+    );
+
+    const context = answer.mock.calls[0]?.[1] as RetrievalResult[];
+    expect(context.map((r) => r.chunk.id)).toEqual(["chunk-identifier"]);
+  });
+
   it("answers with the fixed refusal and no model call when nothing clears the floor", async () => {
     const answer = vi.fn();
     const deps = makeDeps({

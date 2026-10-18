@@ -239,6 +239,13 @@ export interface RetrievalResult {
   /** Sparse (BM25) score component */
   sparseScore: number;
   /**
+   * Fraction (0-1) of the query's search lexemes present in this chunk. The
+   * sparse arm ORs lexemes, so `sparseScore > 0` means only "shares at least
+   * one word"; this says how much of the question the chunk actually covers.
+   * Absent on results not produced by hybrid search.
+   */
+  keywordCoverage?: number;
+  /**
    * Cross-encoder relevance from the reranker, when one ran. Kept separate
    * from `score` (RRF) so result ORDER after reranking and the displayed or
    * audited scores never silently disagree.

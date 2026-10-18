@@ -612,3 +612,35 @@ describe("loadConfig — contentScan (Layer 1.5)", () => {
     ).toThrow();
   });
 });
+
+describe("generation maxOutputTokens default", () => {
+  it("gives claude room for adaptive thinking when unset", () => {
+    // Claude 5 thinks by default and thinking counts against max_tokens, so
+    // the 2048 default truncated long procedure answers.
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "claude",
+      GENERATION_MODEL: "claude-opus-5-5",
+    });
+    expect(cfg.generation?.maxOutputTokens).toBe(16_000);
+  });
+
+  it("keeps the 2048 default for gemini", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "gemini",
+      GENERATION_MODEL: "gemini-2.5-flash",
+    });
+    expect(cfg.generation?.maxOutputTokens).toBe(2048);
+  });
+
+  it("honors an explicit value for claude", () => {
+    const cfg = loadConfig({
+      ...BASE_ENV,
+      GENERATION_PROVIDER: "claude",
+      GENERATION_MODEL: "claude-opus-5-5",
+      GENERATION_MAX_OUTPUT_TOKENS: "4000",
+    });
+    expect(cfg.generation?.maxOutputTokens).toBe(4000);
+  });
+});

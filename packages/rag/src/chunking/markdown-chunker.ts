@@ -125,6 +125,9 @@ interface Section {
 function splitByHeadings(markdown: string): Section[] {
   const lines = markdown.split("\n");
   const sections: Section[] = [];
+  // A level stack, not an array indexed by level: with a skipped level (no
+  // H1, or H1 → H3) index-based slots shift and siblings nest under each other.
+  const headingStack: { level: number; text: string }[] = [];
   let currentPath: string[] = [];
   let currentBody: string[] = [];
   let inCodeBlock = false;
@@ -145,10 +148,11 @@ function splitByHeadings(markdown: string): Section[] {
       push();
       const level = headingMatch[1]!.length;
       const text = headingMatch[2]!;
-      // Pop to the appropriate level, then push.
-      currentPath = currentPath.slice(0, level - 1);
-      currentPath[level - 1] = text;
-      currentPath = currentPath.filter((s) => s !== undefined);
+      while (headingStack.length && headingStack.at(-1)!.level >= level) {
+        headingStack.pop();
+      }
+      headingStack.push({ level, text });
+      currentPath = headingStack.map((h) => h.text);
     } else {
       currentBody.push(line);
     }

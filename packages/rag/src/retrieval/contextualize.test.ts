@@ -96,4 +96,18 @@ describe("contextualizeQuestion onError", () => {
     );
     expect(onError).toHaveBeenCalledWith(err);
   });
+
+  it("reports an empty rewrite instead of falling back silently", async () => {
+    // A thinking model that spends its whole budget returns "" — that must be
+    // as visible in the logs as a thrown error.
+    const onError = vi.fn();
+    const result = await contextualizeQuestion(
+      vi.fn().mockResolvedValue("   "),
+      "q",
+      [{ role: "user", content: "h" }],
+      { onError },
+    );
+    expect(result).toBe("q");
+    expect(onError).toHaveBeenCalledWith(expect.any(Error));
+  });
 });

@@ -64,6 +64,27 @@ export function isRateLimitError(err: unknown): boolean {
   );
 }
 
+/**
+ * True for a provider-side transient failure (5xx, gRPC UNAVAILABLE /
+ * DEADLINE_EXCEEDED). Without this a single Gemini 503 failed the document,
+ * which then left its previous chunks serving stale text.
+ */
+export function isTransientServerError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as {
+    status?: number;
+    code?: number | string;
+    message?: string;
+  };
+  const code = Number(e.status ?? e.code);
+  if ([500, 502, 503, 504].includes(code)) return true;
+  const msg = String(e.message ?? "").toUpperCase();
+  return msg.includes("UNAVAILABLE") || msg.includes("DEADLINE_EXCEEDED");
+}
+
+/** A failing server is unlikely to recover within the rate-limit budget. */
+const MAX_SERVER_ERROR_RETRIES = 2;
+
 /** Parse a `Retry-After` header (delta-seconds or HTTP-date) into ms, if any. */
 function retryAfterHeaderMs(err: unknown): number | undefined {
   const headers = (err as { headers?: Record<string, string> | Headers })
@@ -166,7 +187,8 @@ function retryAfterMs(err: unknown): number | undefined {
 
 /**
  * Run `fn`, retrying transient rate-limit errors with capped exponential
- * backoff + jitter. Non-rate-limit errors propagate immediately.
+ * backoff + jitter, and transient server errors (5xx) on a smaller budget.
+ * Anything else propagates immediately.
  */
 export async function retryOnRateLimit<T>(
   fn: () => Promise<T>,
@@ -179,11 +201,21 @@ export async function retryOnRateLimit<T>(
   const random = opts.random ?? Math.random;
 
   let attempt = 0;
+  let serverErrorRetries = 0;
   for (;;) {
     try {
       return await fn();
     } catch (err) {
-      if (attempt >= maxRetries || !isRateLimitError(err)) throw err;
+      if (attempt >= maxRetries) throw err;
+      if (!isRateLimitError(err)) {
+        if (
+          !isTransientServerError(err) ||
+          serverErrorRetries >= Math.min(maxRetries, MAX_SERVER_ERROR_RETRIES)
+        ) {
+          throw err;
+        }
+        serverErrorRetries += 1;
+      }
       const expo = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
       // Half jitter: a random point in [0.5, 1.0]x the capped exponential —
       // spreads concurrent retries without ever collapsing toward ~0ms.

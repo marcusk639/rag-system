@@ -220,4 +220,55 @@ describe("ClaudeGenerator — streaming", () => {
     expect(chunks.join("")).toBe("Step 1. Do the thing [1].");
     expect(chunks.join("")).not.toContain("SECRET REASONING");
   });
+
+  describe("complete()", () => {
+    const base = (fetchImpl: typeof fetch) => ({
+      apiKey: "test-key",
+      model: "claude-opus-5",
+      egressPolicy: new EgressPolicy(["api.anthropic.com"]),
+      triPolicy: "off" as const,
+      fetch: fetchImpl,
+    });
+    function respond(body: Record<string, unknown>): typeof fetch {
+      return (async () =>
+        new Response(
+          JSON.stringify({
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            model: "claude-opus-5",
+            usage: { input_tokens: 1, output_tokens: 1 },
+            ...body,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )) as unknown as typeof fetch;
+    }
+
+    it("requests enough tokens for thinking plus the rewrite", async () => {
+      let body: Record<string, unknown> = {};
+      const f = (async (_u: unknown, init?: { body?: string }) => {
+        body = JSON.parse(init?.body ?? "{}");
+        return respond({
+          content: [{ type: "text", text: "x" }],
+          stop_reason: "end_turn",
+        })("", init);
+      }) as unknown as typeof fetch;
+      await new ClaudeGenerator({ ...base(f) }).complete("rewrite this");
+      expect(body.max_tokens).toBe(4_096);
+    });
+
+    it("returns the text when there is some", async () => {
+      const gen = new ClaudeGenerator({
+        ...base(
+          respond({
+            content: [{ type: "text", text: "standalone question" }],
+            stop_reason: "end_turn",
+          }),
+        ),
+      });
+      await expect(gen.complete("rewrite this")).resolves.toBe(
+        "standalone question",
+      );
+    });
+  });
 });

@@ -44,6 +44,7 @@ vi.mock("@rag/db", () => ({
   setDocumentStorage: setDocumentStorageMock,
   logIngestEvent: logIngestEventMock,
   clearDocumentStorage: clearDocumentStorageMock,
+  invalidateDocumentContentHash: vi.fn().mockResolvedValue(undefined),
   listRetryableIngestFailures: listRetryableIngestFailuresMock,
 }));
 

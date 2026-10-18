@@ -32,7 +32,7 @@ const inputSchema = {
     .max(MAX_TOP_K)
     .optional()
     .describe(
-      `How many chunks to retrieve as context for the generator (default 8, max ${MAX_TOP_K}). Larger values give the model more context but slow generation and may dilute relevance.`,
+      `How many chunks to retrieve as context for the generator (default: the server's DEFAULT_TOP_K, 12 unless configured; max ${MAX_TOP_K}). Larger values give the model more context but slow generation and may dilute relevance.`,
     ),
   sourceIds: z
     .array(z.string().uuid())
@@ -128,8 +128,9 @@ export function registerAsk(
     {
       title: "Ask a grounded question",
       description:
-        "Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), and retrievedCount. Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case.",
+        'Retrieve relevant passages from the indexed corpus and generate a cited answer using the configured generation model. Use this when the user wants a written answer rather than raw search results. The model is prompted to ground every claim in numbered [N] citations and to admit ignorance when context is insufficient — it should not hallucinate. The text response contains the answer with a Sources footer; the structured payload contains the raw answer, citation list (index, documentId, title, url, chunkId, score), and retrievedCount. Returns isError when no generation provider is configured on the server (set GENERATION_PROVIDER and GENERATION_MODEL); use `search_documents` instead in that case. When nothing relevant is retrieved the answer is exactly "The available documents do not contain enough information to answer that." Every answer is a DRAFT requiring practitioner review (see reviewStatus). A question containing taxpayer identifiers may be refused before retrieval.',
       inputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     guardToolHandler(
       "ask",

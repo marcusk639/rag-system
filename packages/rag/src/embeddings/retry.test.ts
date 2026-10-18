@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { isRateLimitError, retryOnRateLimit } from "./retry.js";
+import {
+  isRateLimitError,
+  isTransientServerError,
+  retryOnRateLimit,
+} from "./retry.js";
 
 const noSleep = () => Promise.resolve();
 const noJitter = () => 0; // deterministic backoff in assertions
@@ -279,5 +283,45 @@ describe("server-provided retry guidance", () => {
       },
     ).catch(() => undefined);
     expect(sleeps).toEqual([30_000]);
+  });
+});
+
+describe("transient server errors", () => {
+  it("classifies 5xx and gRPC UNAVAILABLE / DEADLINE_EXCEEDED as transient", () => {
+    for (const status of [500, 502, 503, 504]) {
+      expect(isTransientServerError({ status })).toBe(true);
+    }
+    expect(isTransientServerError(new Error("503 UNAVAILABLE"))).toBe(true);
+    expect(isTransientServerError(new Error("DEADLINE_EXCEEDED"))).toBe(true);
+    expect(isTransientServerError({ status: 400 })).toBe(false);
+    expect(isTransientServerError(new Error("invalid api key"))).toBe(false);
+  });
+
+  it("retries a 503 and succeeds", async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 503 })
+      .mockResolvedValue("ok");
+    await expect(
+      retryOnRateLimit(fn, { sleep: noSleep, random: noJitter }),
+    ).resolves.toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up on a persistent 5xx sooner than on a 429", async () => {
+    const fn = vi.fn().mockRejectedValue({ status: 500 });
+    await expect(
+      retryOnRateLimit(fn, { sleep: noSleep, random: noJitter }),
+    ).rejects.toEqual({ status: 500 });
+    // First try + 2 server-error retries, not the 5-retry rate-limit budget.
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a 400", async () => {
+    const fn = vi.fn().mockRejectedValue({ status: 400 });
+    await expect(retryOnRateLimit(fn, { sleep: noSleep })).rejects.toEqual({
+      status: 400,
+    });
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

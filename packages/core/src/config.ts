@@ -375,9 +375,13 @@ export function loadConfig(
         ? {
             provider: env.GENERATION_PROVIDER as "gemini" | "openai" | "claude",
             model: env.GENERATION_MODEL,
+            // Claude 5 thinks by default and thinking tokens count against
+            // max_tokens, so the schema's 2048 default truncates long answers.
             maxOutputTokens: env.GENERATION_MAX_OUTPUT_TOKENS
               ? Number(env.GENERATION_MAX_OUTPUT_TOKENS)
-              : undefined,
+              : env.GENERATION_PROVIDER === "claude"
+                ? 16_000
+                : undefined,
             thinkingBudget: env.GENERATION_THINKING_BUDGET
               ? Number(env.GENERATION_THINKING_BUDGET)
               : undefined,

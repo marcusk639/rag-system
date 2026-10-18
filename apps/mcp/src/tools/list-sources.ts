@@ -14,8 +14,9 @@ export function registerListSources(
     {
       title: "List sources",
       description:
-        "List every registered ingestion source (the systems documents were pulled from: SharePoint sites, Google Drives, mailboxes, etc.). Use this to discover which sources exist and obtain their ids — those ids can be passed to `search_documents`/`ask` as `sourceIds` to restrict the search, or to `trigger_sync` to refresh a source. Returns id, kind (sharepoint|gdrive|gmail|outlook|custom), human-friendly name, and the last successful sync timestamp (null if never synced).",
+        "List every registered ingestion source (the systems documents were pulled from: SharePoint sites, Google Drives, mailboxes, etc.). Use this to discover which sources exist and obtain their ids — those ids can be passed to `search_documents`/`ask` as `sourceIds` to restrict the search, or to `trigger_sync` to refresh a source. Returns id, kind (sharepoint|gdrive|gmail|outlook|git-markdown|ecfr-part4|custom), human-friendly name, and the last successful sync timestamp (null if never synced).",
       inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     guardToolHandler("list_sources", deps.logger, async () => {
       // listPublicSources strips the `config` blob and now also enforces the
