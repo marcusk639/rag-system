@@ -33,6 +33,12 @@ export function registerTriggerSync(
       description:
         "Enqueue a background ingestion job that re-pulls documents from a source, parses them, chunks, embeds, and stores. Returns immediately with the pg-boss job id; sync runs asynchronously in the worker process. This is the correct way to refresh content — never block on sync inside a conversation. Use `list_sources` first to discover ids and check when each source was last synced. A scoped session may only sync sources within its allow-list.",
       inputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
     },
     guardToolHandler(
       "trigger_sync",

@@ -35,6 +35,11 @@ export function registerPurgeSource(
       description:
         "Permanently delete a source and all of its indexed content (documents, chunks, ingestion history, pending uploads). This is irreversible. Use `list_sources` first to confirm the correct source id before calling this tool.",
       inputSchema,
+      annotations: {
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     guardToolHandler("purge_source", deps.logger, async ({ sourceId }) => {
       // Scope check: a scoped session cannot purge sources outside its allow-list.
