@@ -1,0 +1,75 @@
+version: 2
+
+# Weekly version updates, grouped so routine bumps arrive as one PR per
+# ecosystem rather than dozens. Security updates (from Dependabot alerts) are
+# separate and are not limited by the schedule or the groups below.
+
+updates:
+  # pnpm workspace. Dependabot's "npm" ecosystem reads pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    groups:
+      production-minor-patch:
+        dependency-type: production
+        update-types: [minor, patch]
+      development-minor-patch:
+        dependency-type: development
+        update-types: [minor, patch]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: pip
+    directory: /services/parser-py
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      parser-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci(deps)
+
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/mcp
+      - /apps/teams-bot
+      - /apps/web
+      - /apps/worker
+      - /services/parser-py
+      - /services/backup
+      - /docker
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      # Built and digest-pinned by warm-base.yml; bumped deliberately.
+      - dependency-name: "*rag-warm-base*"
+      # Runtime majors are pinned on purpose (engines.node >=22, PG 16 data
+      # volume, parser on 3.12). A major/minor runtime change is a planned
+      # migration, not a routine bump.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      - dependency-name: python
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+    commit-message:
+      prefix: chore(deps)
