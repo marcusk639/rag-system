@@ -23,8 +23,8 @@
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.4",
-    "@fastify/rate-limit": "^11.0.0",
-    "@fastify/sensible": "^6.0.2",
+    "@fastify/rate-limit": "^11.2.1",
+    "@fastify/sensible": "^6.0.7",
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "@rag/ingestion": "workspace:*",

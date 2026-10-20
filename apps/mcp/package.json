@@ -19,7 +19,7 @@
     "@rag/rag": "workspace:*",
     "@rag/runtime": "workspace:*",
     "@rag/services": "workspace:*",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "pino": "^9.5.0",
     "zod": "^3.24.1"
   },
