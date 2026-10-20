@@ -6,7 +6,8 @@ import { defineConfig } from "vitest/config";
 // there, so a plain node environment is the default. Full page/user-flow
 // behavior is still covered by the e2e suite (tests/web-e2e), not here —
 // but a handful of `.test.tsx` files render a single component in isolation
-// (jsdom, via `environmentMatchGlobs` below) to pin down markup contracts
+// (jsdom, via a `// @vitest-environment jsdom` comment at the top of each
+// `.test.tsx` file) to pin down markup contracts
 // (e.g. `data-testid` hooks) that are cheap to assert without booting a
 // browser.
 export default defineConfig({
@@ -30,7 +31,6 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     environment: "node",
-    environmentMatchGlobs: [["src/**/*.test.tsx", "jsdom"]],
     setupFiles: ["./vitest.setup.ts"],
     env: {
       // auth.ts calls NextAuth(authConfig) at module-import time, and

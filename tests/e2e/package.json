@@ -19,12 +19,12 @@
     "@rag/runtime": "workspace:*",
     "@rag/services": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.2.1",
+    "fastify": "^5.12.7",
     "fastify-type-provider-zod": "^4.0.2",
     "pg": "^8.13.1",
     "pg-boss": "^10.1.5",
     "pino": "^9.5.0",
-    "undici": "^7.2.0",
+    "undici": "^7.30.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -35,6 +35,6 @@
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.12"
   }
 }

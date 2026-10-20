@@ -12,11 +12,10 @@ export default defineConfig({
     include: ["src/specs/**/*.spec.ts"],
     globals: false,
     pool: "forks",
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    // Vitest 4 replacement for poolOptions.forks.singleFork: one worker,
+    // reused across files rather than a fresh process per spec.
+    maxWorkers: 1,
+    isolate: false,
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 120_000,

@@ -203,7 +203,9 @@ describe("Layer 2 observability when path metadata is absent", () => {
       { documents: ["doc-a"], nextCursor: null, done: true },
     ]);
     // Give the emitted document a path, as the SharePoint connector does.
-    const original = connector.list as ReturnType<typeof vi.fn>;
+    const original = connector.list as unknown as (opts: {
+      cursor: string | null;
+    }) => Promise<{ documents: Array<{ metadata: unknown }> }>;
     (connector as unknown as Record<string, unknown>).list = vi.fn(
       async (opts: { cursor: string | null }) => {
         const page = await original(opts);
