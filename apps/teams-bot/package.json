@@ -15,8 +15,8 @@
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "botbuilder": "^4.23.3",
-    "express": "^5.2.1",
-    "jose": "^6.2.3",
+    "express": "^5.3.0",
+    "jose": "^6.2.12",
     "pino": "^9.5.0",
     "zod": "^3.24.1"
   },
