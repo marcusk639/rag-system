@@ -64,6 +64,41 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Blocking. Reads pnpm-lock.yaml directly; no install needed. Production
+      # dependencies only: dev tooling never ships in the images. Accepted,
+      # unfixable advisories are listed in package.json pnpm.auditConfig.
+      - name: Audit Node production dependencies
+        run: pnpm audit --prod --audit-level=high
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Report-only: the parser has known advisories (starlette via FastAPI,
+      # unstructured, markdownify, nltk) whose fixes change parsing behaviour
+      # and need their own upgrade + eval. A warning annotation keeps the
+      # check green instead of a red check everyone learns to ignore. Make
+      # this blocking (drop the `|| echo`) once that backlog is cleared.
+      - name: Audit parser dependencies (report-only)
+        run: |
+          pip install --quiet pip-audit
+          pip-audit -r services/parser-py/requirements.txt --progress-spinner off \
+            || echo "::warning title=pip-audit::pip-audit found vulnerabilities in services/parser-py dependencies (or failed to run); see the step log."
+
   parser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
