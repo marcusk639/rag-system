@@ -33,7 +33,7 @@
     "@rag/worker": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vitest": "^4.1.12"
   }
