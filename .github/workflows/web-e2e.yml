@@ -82,7 +82,7 @@ jobs:
           sudo docker image prune -af || true
           df -h /
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Apply pgvector init bootstrap to Postgres
         run: |
@@ -107,11 +107,11 @@ jobs:
           docker logs rag-parser
           exit 1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -134,7 +134,7 @@ jobs:
       # it. `runner` is not available in a job-level `env:`, hence the per-step
       # env below rather than hoisting it.
       - name: Cache Hugging Face models (ONNX embedder, ~430MB)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/hf-cache
           key: hf-${{ runner.os }}-bge-base-en-v1.5
@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload Playwright artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-e2e-artifacts
           path: |
