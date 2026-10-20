@@ -31,7 +31,7 @@
     "@rag/api": "workspace:*",
     "@rag/test-fixtures": "workspace:*",
     "@rag/worker": "workspace:*",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^5.7.2",
