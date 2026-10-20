@@ -1,9 +1,9 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-multipart==0.0.31
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
 # MarkItDown: Microsoft's universal document → markdown converter.
 # Handles docx, xlsx, pptx, pdf, html, csv, json, xml, and more.
-markitdown[all]==0.0.1a4
+markitdown[all]==0.1.8
 # markdownify is a transitive dep of markitdown, left unpinned upstream.
 # markdownify>=0.13 changed its converter calling convention to pass
 # `parent_tags=` into convert_* methods; markitdown 0.0.1a4's _CustomMarkdownify
@@ -12,7 +12,7 @@ markitdown[all]==0.0.1a4
 # docx/html containing links. Cap below 0.13 until markitdown itself is upgraded.
 markdownify<0.13
 # Unstructured: fallback for difficult/scanned docs with OCR support.
-unstructured[local-inference]==0.16.11
+unstructured[local-inference]==0.27.28
 # torch/torchvision arrive transitively via unstructured[local-inference] →
 # unstructured-inference → layoutparser, and upstream pins neither. PyPI serves
 # the CUDA build, so a plain resolve drags in the whole nvidia-*/triton stack.
@@ -30,8 +30,8 @@ unstructured[local-inference]==0.16.11
 # there and cannot silently fall back to PyPI's CUDA wheel. Keep the two
 # versions paired (torch 2.13 ↔ torchvision 0.28) when bumping.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.13.0+cpu
-torchvision==0.28.0+cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
 # openpyxl: direct XLSX parsing with formula-value access (data_only=True).
 # Pulled in transitively by markitdown but pinned here because we import it directly.
 openpyxl==3.1.5
@@ -42,9 +42,9 @@ openpyxl==3.1.5
 # the router advertised .xls as supported.
 xlrd==2.0.2
 # pydantic v2 for response models. Requires v2.5+ for alias_generators.to_camel.
-pydantic==2.10.4
+pydantic==2.14.1
 # python-magic for MIME sniffing when extension is missing
 python-magic==0.4.27
 # Sentry error reporting. The fastapi extra auto-instruments routes to capture
 # 5xx exceptions. No-op when SENTRY_DSN is absent.
-sentry-sdk[fastapi]==2.29.1
+sentry-sdk[fastapi]==2.72.0
