@@ -10,7 +10,7 @@ markitdown[all]==0.0.1a4
 # overrides convert_a() with the pre-0.13 signature, so the newer release raises
 # `convert_a() got an unexpected keyword argument 'parent_tags'` and 500s on any
 # docx/html containing links. Cap below 0.13 until markitdown itself is upgraded.
-markdownify<0.13
+markdownify<1.3
 # Unstructured: fallback for difficult/scanned docs with OCR support.
 unstructured[local-inference]==0.16.11
 # torch/torchvision arrive transitively via unstructured[local-inference] →
