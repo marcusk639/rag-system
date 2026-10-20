@@ -21,7 +21,7 @@
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "@rag/rag": "workspace:*",
-    "p-limit": "^6.2.0",
+    "p-limit": "^7.3.3",
     "pg-boss": "^10.1.6",
     "pino": "^9.5.0"
   },
