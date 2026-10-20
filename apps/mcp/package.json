@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "@rag/ingestion": "workspace:*",
@@ -27,6 +27,6 @@
     "@types/express": "^5.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.12"
   }
 }

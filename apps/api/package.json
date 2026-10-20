@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/multipart": "^10.0.0",
+    "@fastify/multipart": "^10.1.4",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/sensible": "^6.0.2",
     "@rag/core": "workspace:*",
@@ -31,7 +31,7 @@
     "@rag/rag": "workspace:*",
     "@rag/runtime": "workspace:*",
     "@rag/services": "workspace:*",
-    "fastify": "^5.2.1",
+    "fastify": "^5.12.7",
     "fastify-type-provider-zod": "^4.0.2",
     "pg-boss": "^10.1.5",
     "pino": "^9.5.0",
@@ -41,6 +41,6 @@
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.12"
   }
 }
