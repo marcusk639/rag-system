@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
+from app import main, parsing
 from app.parsing import _is_unsupported_format_error
 from app.main import (
     _GENERIC_MIMES,
@@ -166,10 +166,17 @@ def test_internal_unstructured_error_still_returns_500(monkeypatch: pytest.Monke
     assert resp.status_code == 500
 
 
-def test_control_flow_exception_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(1)])
+def test_control_flow_exception_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, exc: BaseException
+) -> None:
     # The broad BaseException catch must still let KeyboardInterrupt/SystemExit
-    # propagate, otherwise the process becomes uninterruptible.
-    monkeypatch.setattr(main.magic, "from_buffer", lambda raw, mime=False: "application/octet-stream")
-    monkeypatch.setattr(main._markitdown, "convert", _raise(KeyboardInterrupt()))
-    with pytest.raises(KeyboardInterrupt):
-        _post(b"whatever", "x.bin", "application/octet-stream")
+    # propagate, otherwise the process becomes uninterruptible. Asserted on the
+    # parse function itself, not over HTTP: parsing runs in a worker thread, and
+    # anyio reports a BaseException raised there as CancelledError, so the HTTP
+    # layer no longer shows which exception escaped.
+    monkeypatch.setattr(parsing._markitdown, "convert", _raise(exc))
+    path = tmp_path / "x.bin"
+    path.write_bytes(b"whatever")
+    with pytest.raises(type(exc)):
+        parsing._parse_with_markitdown(path, "x.bin", "application/octet-stream")
