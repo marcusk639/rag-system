@@ -3,7 +3,7 @@
  *
  * ⚠ THIS FILE IS INTENTIONALLY EMPTY OF QUESTIONS. That is not an oversight.
  *
- * The 2026-08-01 real-embedder run (docs/EVAL-BASELINE.md) established that the
+ * The 2026-08-01 real-embedder run (docs/evaluation/EVALUATION.md) established that the
  * starter corpus in `corpus.ts` cannot measure retrieval quality: the
  * dense/sparse weight sweep is completely flat, and at `dense=0` — embeddings
  * contributing nothing — the score is unchanged. A corpus with a ceiling of
@@ -25,7 +25,7 @@
  * `expectedAnswer` in particular is a **CPA judgment**. Per epistemic
  * constraint C2, AI does not make accounting or tax determinations, and that
  * applies with double force to the artifact used to *score* the system. A
- * credentialed preparer authors these. See docs/EVAL-GOLD-SET-GUIDE.md.
+ * credentialed preparer authors these. See docs/evaluation/EVAL-GOLD-SET-GUIDE.md.
  *
  * ── How to fill it ─────────────────────────────────────────────────────────
  *
@@ -33,7 +33,7 @@
  * picks them up automatically and refuses to run while the set is empty.
  */
 
-/** Tier of scoring a question supports. See docs/EVAL-GOLD-SET-GUIDE.md. */
+/** Tier of scoring a question supports. See docs/evaluation/EVAL-GOLD-SET-GUIDE.md. */
 export type ScoringTier =
   /** Retrieval + faithfulness only. Automatable, needs no CPA review. */
   | "tier1-automatable"
@@ -85,7 +85,7 @@ export interface GoldQuestion {
 }
 
 /**
- * ⚠ EMPTY BY DESIGN — see the header. Populate via docs/EVAL-GOLD-SET-GUIDE.md.
+ * ⚠ EMPTY BY DESIGN — see the header. Populate via docs/evaluation/EVAL-GOLD-SET-GUIDE.md.
  *
  * Target: 30–50 questions, of which a meaningful share carry a
  * `distractorNote`. Thirty easy questions are worth less than ten hard ones.

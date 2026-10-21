@@ -8,7 +8,7 @@ import type { Db } from "@rag/db";
 
 /**
  * `hybridSearch`'s `metadataFilter` previously had zero test coverage
- * anywhere in the repo (H2, docs/ISSUES-AND-OPTIMIZATIONS.md) — the query
+ * anywhere in the repo (H2, docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md) — the query
  * shape was changed from `metadata->>'key' IN (...)` to `metadata @>
  * jsonb_build_object(...)` so the existing `documents_metadata_gin_idx` GIN
  * index actually accelerates it (verified separately via EXPLAIN ANALYZE;

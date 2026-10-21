@@ -248,7 +248,7 @@ export interface ListDocumentsOptions {
  *
  * Exists for corpus-level analysis — claim extraction for the corpus-grounded
  * eval tier, and the client-identifier screen that ISS-05 calls "the real gate"
- * (see `docs/EVAL-CORPUS-GROUND-TRUTH.md`). Nothing else in the system needs to
+ * (see `docs/evaluation/EVAL-CORPUS-GROUND-TRUTH.md`). Nothing else in the system needs to
  * enumerate documents; ingestion addresses them by `externalId` and retrieval
  * reaches them through `hybridSearch`.
  *
@@ -256,7 +256,7 @@ export interface ListDocumentsOptions {
  * read-only in itself, but the surrounding script is the risk: the only existing
  * real-embedder runner (`tests/e2e/src/eval/run-real-eval.ts`) calls
  * `truncateAll`, and it is the obvious template to copy. See C3 in
- * `docs/ISSUES-AND-OPTIMIZATIONS.md`.
+ * `docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md`.
  *
  * Ordered by `id` so the keyset cursor is total and stable.
  */

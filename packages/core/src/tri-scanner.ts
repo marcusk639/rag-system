@@ -71,7 +71,7 @@ const TRI_PATTERNS: TRIPattern[] = [
     // every question that retrieves that chunk fail permanently. Adding a
     // proximity requirement here, or a per-label exemption, needs a decision
     // and a corpus measurement first:
-    // docs/superpowers/plans/2026-08-31-tri-identifying-pattern-exemptions.md
+    // docs/specs/tri-identifying-pattern-exemptions.md
     regex: /\b\d{2}[-\s]\d{7}\b/,
   },
   {

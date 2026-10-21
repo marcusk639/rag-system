@@ -10,7 +10,7 @@ import {
 
 /**
  * Layer 1.5 content scanner backed by a self-hosted, OpenAI-compatible server
- * (Ollama, vLLM, LM Studio, llama.cpp — see `docs/LOCAL-GENERATION.md`).
+ * (Ollama, vLLM, LM Studio, llama.cpp — see `docs/operations/LOCAL-GENERATION.md`).
  *
  * This MUST point at infrastructure the firm controls, never a third-party
  * API: the whole purpose of this scan is to decide whether content is safe to

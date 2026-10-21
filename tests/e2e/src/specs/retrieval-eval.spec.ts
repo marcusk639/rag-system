@@ -11,7 +11,7 @@ import {
 } from "../eval/run-eval.js";
 
 /**
- * Retrieval evaluation harness (§12 of ISSUES-AND-OPTIMIZATIONS.md).
+ * Retrieval evaluation harness (§12 of docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md).
  *
  * Seeds the labeled corpus ONCE, then:
  *  1. measures recall@k / precision@k / nDCG@k / MRR at the production default

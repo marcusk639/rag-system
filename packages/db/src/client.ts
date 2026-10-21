@@ -82,7 +82,7 @@ export function createDb(
  * That is correct there — it seeds a synthetic corpus and needs a clean slate —
  * but it makes it the obvious template to copy for a production script, where
  * the same line destroys the index silently. See C3 in
- * `docs/ISSUES-AND-OPTIMIZATIONS.md`.
+ * `docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md`.
  *
  * The mitigation is not a comment telling people to be careful. It is a handle
  * that physically cannot perform the destructive operation.

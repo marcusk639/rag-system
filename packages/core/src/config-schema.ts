@@ -218,7 +218,7 @@ export const Config = z
      */
     /**
      * Retain question/answer TEXT in audit_log, or only question_hash.
-     * Firm POLICY decision (PILOT-MANUAL-RUNBOOK.md item 5). Governs
+     * Firm POLICY decision (docs/launch/LAUNCH-RUNBOOK.md item 5). Governs
      * RETENTION only -- never egress; see SHIPPABLE_AUDIT_COLUMNS.
      */
     auditLogContent: z.enum(["none", "full"]).default("none"),
@@ -425,7 +425,7 @@ export const Config = z
 
     /**
      * The documentation-gap digest (Phase 4 of
-     * docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md) — the first recurring
+     * docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md) — the first recurring
      * (pg-boss `schedule()`) job in this codebase. It scans `audit_log` for
      * zero-result/weak-confidence queries and logs a structured summary.
      * All three knobs are config-driven (never hardcoded in `queue.ts`).

@@ -207,7 +207,7 @@ export const ECHOABLE_ERROR_CODES: ReadonlySet<string> = new Set([
   // the env vars to set; the second just reports uploads are disabled). Both
   // are thrown by zero-argument error classes, so neither can carry caller or
   // server data. Suppressing them reported a permanent fault as "Service
-  // temporarily unavailable", inviting an indefinite retry; docs/API.md
+  // temporarily unavailable", inviting an indefinite retry; docs/reference/API.md
   // documents the GENERATION_NOT_CONFIGURED text as the response body, and
   // apps/web renders both straight to the user.
   "GENERATION_NOT_CONFIGURED",

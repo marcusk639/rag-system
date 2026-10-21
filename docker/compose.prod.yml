@@ -15,7 +15,7 @@
 #
 # ── Tenant isolation ─────────────────────────────────────────────────────────
 # This file is the per-tenant provisioning unit. Each tenant gets:
-#   - Its own Postgres volume (encrypted at the host level; see DEPLOYMENT.md)
+#   - Its own Postgres volume (encrypted at the host level; see docs/operations/DEPLOYMENT.md#encryption-at-rest)
 #   - Its own secrets (.env.<tenant> or a secrets manager)
 #   - Its own stack instance (docker compose -p <tenant> ...)
 # Do NOT share one Postgres instance between tenants with sensitive data.
@@ -34,7 +34,7 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     volumes:
       # Named volume — pin to an encrypted disk/partition at provisioning time.
-      # See DEPLOYMENT.md §Encryption for host-level encryption setup.
+      # See docs/operations/DEPLOYMENT.md#encryption-at-rest for host-level encryption setup.
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
     healthcheck:
@@ -355,5 +355,5 @@ services:
 volumes:
   postgres_data:
     # Mount this named volume on an encrypted disk partition at the host level.
-    # See DEPLOYMENT.md §Encryption for setup instructions.
+    # See docs/operations/DEPLOYMENT.md#encryption-at-rest for setup instructions.
     driver: local

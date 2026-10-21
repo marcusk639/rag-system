@@ -82,7 +82,7 @@ ENV NODE_ENV=production
 # Worker polls pg-boss; no HTTP listener.
 # preDeployCommand on Railway runs `node node_modules/@rag/db/dist/migrate.js`
 # before this service starts — worker is the designated migration owner (see
-# DEPLOYMENT.md).
+# docs/operations/DEPLOYMENT.md).
 #
 # NOT `pnpm --filter @rag/db migrate`: this runtime stage is plain node:22-slim
 # and has no pnpm, and `pnpm deploy --prod` prunes the tsx that the `migrate`

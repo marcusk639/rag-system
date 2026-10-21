@@ -38,7 +38,7 @@ export type { Generator, GenerationResult } from "@rag/core";
  * superseded documents included.
  *
  * Three properties of this prompt are load-bearing and should not be softened
- * without re-running the answer-quality pass (docs/EVAL-AND-FEEDBACK.md):
+ * without re-running the answer-quality pass (docs/evaluation/EVALUATION.md):
  *
  * - **Near-verbatim steps.** Paraphrasing a procedure is how a subtle
  *   procedural error gets introduced, and paraphrasing an identifier
@@ -50,7 +50,7 @@ export type { Generator, GenerationResult } from "@rag/core";
  *   failure. The A/B/C decision makes the boundary explicit.
  * - **Conflicts are surfaced, never resolved.** Recency is evidence, not a
  *   verdict — a recently-touched file may be a copy while the authoritative
- *   version is older. See docs/EVAL-CORPUS-GROUND-TRUTH.md.
+ *   version is older. See docs/evaluation/EVAL-CORPUS-GROUND-TRUTH.md.
  */
 const SYSTEM_PROMPT = `You are the knowledge-base assistant for a CPA firm of roughly 20 staff. Staff ask you how the firm does things: "how do I do X", "what is the SOP for Y", "where does Z live", "what is our policy on W". You answer strictly from the firm's own documents, retrieved from SharePoint and supplied below as <document> blocks.
 

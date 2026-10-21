@@ -5,7 +5,7 @@
  * This RAG system indexes a CPA firm's confidential corpus: client emails, tax
  * workpapers, engagement documents. Different staff/partners are walled off
  * from clients they don't work. Historically ANY valid API/MCP token could read
- * the ENTIRE corpus (ARCHITECTURE.md: "Not a permission/ACL system"). That is a
+ * the ENTIRE corpus (docs/architecture/ARCHITECTURE.md: "Not a permission/ACL system"). That is a
  * confidentiality incident waiting to happen.
  *
  * This module is the PURE core of the fix:

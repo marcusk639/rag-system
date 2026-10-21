@@ -1,5 +1,5 @@
 -- Migration: librarian-facing content-type/governance taxonomy on documents
--- (Phase 2 of docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md).
+-- (Phase 2 of docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md).
 --
 -- Distinct from data_class / DocumentClass, which gate legal/regulatory
 -- access (§7216/GLBA) — this taxonomy answers "is this an SOP, a template, a

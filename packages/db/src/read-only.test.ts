@@ -3,8 +3,8 @@ import { assertReadOnly, createDb, createReadOnlyDb } from "./client.js";
 
 /**
  * DB-backed tests for the read-only guard that protects production corpus
- * walks (see `docs/EVAL-CORPUS-GROUND-TRUTH.md`, and C3 in
- * `docs/ISSUES-AND-OPTIMIZATIONS.md`).
+ * walks (see `docs/evaluation/EVAL-CORPUS-GROUND-TRUTH.md`, and C3 in
+ * `docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md`).
  *
  * These need a live PostgreSQL because the whole point is that the *server*
  * refuses the write — a stub would only prove we wrote a check, which is the

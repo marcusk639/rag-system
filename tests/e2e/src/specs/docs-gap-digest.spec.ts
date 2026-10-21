@@ -8,7 +8,7 @@ import { env } from "../env.js";
 import { openTestDb } from "../helpers/db.js";
 
 /**
- * Phase 4 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): the
+ * Phase 4 (docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): the
  * documentation-gap digest — the first recurring (pg-boss `schedule()`) job
  * in this codebase.
  *

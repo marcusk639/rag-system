@@ -5,7 +5,7 @@ import type { Db } from "@rag/db";
 import { createCustomSource, openTestDb, truncateAll } from "../helpers/db.js";
 
 /**
- * Phase 2 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): librarian-facing
+ * Phase 2 (docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): librarian-facing
  * content-type/governance taxonomy on `documents`.
  *
  * Verified against a real, migrated Postgres (globalSetup runs

@@ -2,7 +2,7 @@
  * Content safety — keep client-identifying material out of the index.
  *
  * Built 2026-08-03 after a screen found client identifiers in 355 of 858
- * indexed documents. Design: docs/superpowers/plans/2026-08-03-pii-redaction-before-index.md
+ * indexed documents. Design: docs/compliance/CONTENT-SAFETY-DESIGN.md
  *
  * ── The ordering constraint, restated because it is the whole point ────────
  *
@@ -15,7 +15,7 @@
  * and offline — a redactor that needed a network call would itself become an
  * egress path. Layer 1.5 (`scanForClientContextOrThrow`) is the deliberate
  * exception: it calls a `ContentScanner`, which MUST be self-hosted
- * on-process or on the firm's own network (see `docs/LOCAL-GENERATION.md`),
+ * on-process or on the firm's own network (see `docs/operations/LOCAL-GENERATION.md`),
  * never a third-party API — calling an external LLM "is this sensitive?"
  * would itself be the disclosure this file exists to prevent.
  *

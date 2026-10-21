@@ -23,7 +23,7 @@
  * Production `DATABASE_URL` resolves `rag-postgres.railway.internal`, which does
  * not resolve outside Railway's network, and `rag-postgres` deliberately exposes
  * no public URL. Run this against a RESTORED COPY of a nightly backup
- * (docs/BACKUP-SCHEDULE-RUNBOOK.md) rather than production. That is not a
+ * (docs/operations/BACKUP-AND-RECOVERY.md) rather than production. That is not a
  * workaround — it makes every audit double as a restore drill, which is the
  * open row in P0 gate #3.
  *

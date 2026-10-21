@@ -10,11 +10,11 @@ Every extensible surface in this repo is an interface in `@rag/core` plus a fact
 registration. Pick the row, follow the four steps, respect the caveats. **Do not copy
 interface code into this file — read the canonical interface before implementing.**
 
-| Provider type | Interface (read first)                                  | Implement under                         | Register in                                  | Document in                            |
-| ------------- | ------------------------------------------------------- | --------------------------------------- | -------------------------------------------- | -------------------------------------- |
-| **Connector** | `Connector` — `packages/core/src/interfaces.ts`         | `packages/connectors/src/<name>/`       | `packages/connectors/src/index.ts`           | `docs/CONNECTORS.md` + `env.example`   |
-| **Embedding** | `EmbeddingProvider` — `packages/core/src/interfaces.ts` | `packages/rag/src/embeddings/<name>.ts` | `packages/rag/src/embeddings/factory.ts`     | `docs/ARCHITECTURE.md` + `env.example` |
-| **Auth**      | `AuthProvider` — `packages/core/src/auth.ts`            | `packages/core/src/<name>.ts`           | `packages/core/src/auth-provider-factory.ts` | `env.example`                          |
+| Provider type | Interface (read first)                                  | Implement under                         | Register in                                  | Document in                                         |
+| ------------- | ------------------------------------------------------- | --------------------------------------- | -------------------------------------------- | --------------------------------------------------- |
+| **Connector** | `Connector` — `packages/core/src/interfaces.ts`         | `packages/connectors/src/<name>/`       | `packages/connectors/src/index.ts`           | `docs/reference/CONNECTORS.md` + `env.example`      |
+| **Embedding** | `EmbeddingProvider` — `packages/core/src/interfaces.ts` | `packages/rag/src/embeddings/<name>.ts` | `packages/rag/src/embeddings/factory.ts`     | `docs/architecture/ARCHITECTURE.md` + `env.example` |
+| **Auth**      | `AuthProvider` — `packages/core/src/auth.ts`            | `packages/core/src/<name>.ts`           | `packages/core/src/auth-provider-factory.ts` | `env.example`                                       |
 
 ## The four steps (same for all three)
 

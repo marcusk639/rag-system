@@ -13,7 +13,7 @@ import {
  * runs `verifyClaims` on the model's output and only returns what survived. The
  * design rule "drop any claim whose quote does not literally support it" is
  * therefore enforced here, in code, rather than requested in a prompt and hoped
- * for. See `docs/EVAL-CORPUS-GROUND-TRUTH.md`.
+ * for. See `docs/evaluation/EVAL-CORPUS-GROUND-TRUTH.md`.
  *
  * ⚠ **Extraction sends document text to a model — it is an egress event.** Run
  * the client-identifier screen over the corpus and resolve its flags *first*.

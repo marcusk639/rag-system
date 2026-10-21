@@ -58,7 +58,7 @@ export const dataClassEnum = pgEnum("data_class", [
 export type DataClass = (typeof dataClassEnum.enumValues)[number];
 
 /** Librarian-facing content-type taxonomy for a document (Phase 2 of
- *  docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): "is this an SOP, a
+ *  docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): "is this an SOP, a
  *  template, a research note, or an example file." Distinct from
  *  `dataClassEnum`/`DocumentClass`, which gate legal/regulatory access — do
  *  NOT conflate the two. */

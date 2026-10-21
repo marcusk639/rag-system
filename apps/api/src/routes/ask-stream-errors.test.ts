@@ -11,7 +11,7 @@ import type { Deps } from "../deps.js";
  * cannot use the status-code mapping in error-handler.ts — every failure was
  * flattened to `{"message":"Generation failed."}`.
  *
- * That defeats the air-gap verification in docs/LOCAL-GENERATION.md: pull the
+ * That defeats the air-gap verification in docs/operations/LOCAL-GENERATION.md: pull the
  * endpoint's host out of EGRESS_ALLOWED_HOSTS, ask again, and the documented
  * signal is `EGRESS_BLOCKED`. Through apps/web — the surface staff actually use,
  * and the only one that consumes this stream — an operator instead saw the same

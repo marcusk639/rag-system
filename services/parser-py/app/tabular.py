@@ -221,7 +221,7 @@ def _classify_sheet(
 ) -> SheetType:
     """
     Rule-based per-sheet classifier. Cheap (no LLM call) and deterministic.
-    See docs/ARCHITECTURE.md for the rationale per label.
+    See docs/architecture/ARCHITECTURE.md for the rationale per label.
 
       tabular         — database-like rows, ready for row-grouping or text-to-SQL
       financial_model — small, formula-heavy; embed computed values whole

@@ -22,7 +22,7 @@
  *   - proves it with `assertReadOnly` before reading anything, so the guarantee
  *     is "the server just refused a write," not "I passed the right factory";
  *   - never imports `truncateAll` or `seedEvalCorpus`. See C3 in
- *     `docs/ISSUES-AND-OPTIMIZATIONS.md` — the only pre-existing real-embedder
+ *     `docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md` — the only pre-existing real-embedder
  *     runner truncates the database, and copying it is the failure mode this
  *     script exists to avoid.
  *

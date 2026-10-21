@@ -1,5 +1,5 @@
 -- Migration: search-path audit logging parity (Phase 3 of
--- docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md).
+-- docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md).
 --
 -- `/ask` already writes one audit_log row per call; `/search` wrote none.
 -- Adds two columns so a single row shape now covers both endpoints instead
