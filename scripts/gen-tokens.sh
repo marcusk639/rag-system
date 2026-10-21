@@ -15,12 +15,12 @@
 #
 #   # Generate tokens for two staff members and one admin service account
 #   ./scripts/gen-tokens.sh \
-#     "marcus:a538dc0f98a49250236ff32ca6921172cf507e26ca4cd4b80b4177ae3e82680b" \
-#     "chris:5f7472857c98ddf3987e74f6c5031c92eb90f2407f99abc224405183eb79028f" \
+#     "marcus:<source-uuid>" \
+#     "chris:<source-uuid>,<source-uuid>" \
 #     "service-admin::isAdmin"
 #
 #   # Generate and deploy to Railway in one step
-#   ./scripts/gen-tokens.sh [principals...] | ./scripts/deploy-principals.sh
+#   ./scripts/gen-tokens.sh [principals...] | ./scripts/deploy_tokens.sh
 #
 #   # Full pipeline: list sources, then build and deploy principals
 #   ./scripts/gen-principals.sh         # <- find source UUIDs
