@@ -288,6 +288,21 @@ pre-rerank RRF order rather than failing the request
 
 ## Recommended before go-live
 
+> **Blocking — added 2026-10-21: SharePoint can't re-sync until the Railway `MS_*` variables change.**
+> A full sync failed with `Tenant does not have a SPO license`: the tenant in `MS_TENANT_ID` lost
+> SharePoint Online after the last good sync on 2026-09-02.
+>
+> **Fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker`, `rag-api` and
+> `rag-web` to a licensed tenant's app registration. Then create a new source, full-sync it, repoint
+> access, and purge the old source.
+>
+> **Why it comes first:**
+>
+> - Item 1's gold-set run would otherwise score a stale index.
+> - The index won't carry the parser upgrade (#142) or the heading-path fix (#116) until a re-sync.
+>
+> Procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item 3a.
+
 Ordered by value, not effort.
 
 1. **Populate the gold set** (10–15 CPA-verified questions, real 47-doc KB) and
