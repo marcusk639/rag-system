@@ -14,6 +14,15 @@
 > - ✅ Scope locked: sync `Knowledge Base` subfolder only (Documents/Shared Documents drive)
 > - ⬜ Phase 2: create source, update API_PRINCIPALS, trigger sync
 > - ⬜ Phase 3: verify sync completion + E2E happy path
+>
+> ⛔ **2026-10-21: re-sync blocked.** The tenant in `MS_TENANT_ID` has lost its SharePoint licence.
+> Graph returns `Tenant does not have a SPO license.` on the first sync call.
+>
+> Re-running this plan against a licensed tenant means changing the `MS_*` variables on **`rag-worker`,
+> `rag-api` and `rag-web`**, not just `rag-worker` as Phase 1 below says. The source must be recreated and
+> access moved to the new source id before the old source is purged.
+>
+> Procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item 3a.
 
 ---
 
@@ -87,6 +96,14 @@ export MS_CLIENT_SECRET="<client-secret-value>"
 # Optionally also set on rag-api (not strictly required — worker handles syncs):
 # ./scripts/set-ms-credentials.sh --with-api
 ```
+
+> **Updated 2026-10-21:**
+>
+> - Use `--with-api`.
+> - Also set the same three variables on **`rag-web`** by hand. The script never touches it, and its
+>   `/admin/access` page reads `MS_*` for Graph user lookups.
+> - Before running this, confirm the target tenant actually has a SharePoint Online licence. Auth succeeds
+>   without one; only the sync fails (`PILOT-MANUAL-RUNBOOK.md` item 3a).
 
 The script (`scripts/set-ms-credentials.sh`) already exists. It:
 

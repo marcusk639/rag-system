@@ -1,5 +1,19 @@
 # Pilot — Launch Status
 
+> ⛔ **NEW 2026-10-21: SharePoint can no longer sync. Fixing it requires changing the Railway `MS_*` variables.**
+> A full sync failed at its first Graph call with `Tenant does not have a SPO license`: the tenant in
+> `MS_TENANT_ID` no longer has SharePoint Online.
+>
+> - **What still works:** the index is intact and serving 48 documents / 211 chunks (47 SharePoint + 1 manual
+>   upload) from the 2026-09-02 sync.
+> - **What's missing:** it lacks the parser upgrade (#142) and the chunker heading-path fix (#116). Both reach
+>   existing documents only on re-ingest.
+> - **To fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker`, `rag-api` **and**
+>   `rag-web` to a SharePoint-licensed tenant's app registration. Then create a new source, full-sync it, move
+>   access to the new source id, and purge the old source.
+>
+> Full procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item **3a**. Tracked as P0 gate **3a** below.
+
 > ⛔ **Corpus-state claims below are stale (they describe 2026-08-04).** The
 > purge-and-re-sync is **complete**: the index now holds **47 documents / 210
 > chunks**, all Class A, all `gemini-embedding-001`, with search and ask verified
@@ -265,6 +279,29 @@ human/infra/legal; **gate #1 is not** — see its entry.
       scheduled artifact_ (the drill restored a hand-taken dump), and the
       `audit_log` retention window — a **counsel** question (ties to P2 #8), not a
       default; volume-backup retention tops out at 3 months.
+
+- [ ] **3a. SharePoint re-sync is blocked: the Microsoft 365 tenant has no SharePoint licence (found 2026-10-21).**
+      A full sync of `dbba75e2-…` failed with `400 BadRequest: Tenant does not have a SPO license.` The
+      tenant named by `MS_TENANT_ID` lost SharePoint Online after the last good sync on 2026-09-02.
+
+      **Required change:** update `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET` on Railway, on
+      `rag-worker`, `rag-api` and `rag-web`, to a SharePoint-licensed tenant (with admin consent), then
+      redeploy. `scripts/set-ms-credentials.sh --with-api` does not set `rag-web`.
+
+      **Then:**
+      - Create a new SharePoint source. The `siteId` changes with the tenant, and sources can't be edited.
+      - Full-sync it.
+      - Repoint `API_PRINCIPALS` and the web/Teams grants to the new source id.
+      - Purge the old source. The delete cascades its access grants, so repoint access first.
+
+      **Why it gates launch:**
+      - The index can't reflect current SharePoint content.
+      - The parser upgrade (#142) and heading-path fix (#116) never reach production documents.
+
+      **Also stale:** principal `chris` is scoped to three source ids that don't exist. Fix that in the same
+      `API_PRINCIPALS` edit.
+
+      **Procedure:** [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item 3a.
 
 ### ✅ LIVE 2026-08-01 — the web app is deployed and auth-gated
 

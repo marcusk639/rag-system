@@ -77,6 +77,60 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
 
 ---
 
+### 3a. Point the Microsoft 365 credentials at a SharePoint-licensed tenant, then re-sync
+
+**Why:** On 2026-10-21 a full sync of the SharePoint source ("Knowledge Base", `dbba75e2-cecb-41be-8998-4f923158f741`) failed at the first Graph call with `400 BadRequest: Tenant does not have a SPO license.` The tenant named in Railway's `MS_TENANT_ID` no longer has SharePoint Online.
+
+- **What still works:** the index is intact and serving: 47 SharePoint documents and 211 chunks from the last good sync on 2026-09-02.
+- **What's stuck:** nothing can be re-synced until the credentials point at a licensed tenant.
+- **What's waiting on the re-sync:** two fixes reach existing documents only when they are re-ingested:
+  - The parser upgrade (#142): full headings in HTML, ODT table header rows, and real tables in PDFs.
+  - The chunker heading-path fix (#116): sibling `##` sections no longer nest under each other.
+
+  Until a re-sync runs, production keeps serving the old parse.
+
+**Exact steps:**
+
+1. **Choose the tenant.**
+   - **If the same tenant gets a SharePoint licence back** (renewed trial or subscription), no environment variables change. Skip to step 6 and re-sync the existing source.
+   - **Otherwise** you're moving to a different tenant. Do steps 2–9.
+2. **Register the app in the new tenant.** Follow `docs/FRESH-DEPLOY-GUIDE.md` §1:
+   - Graph application permissions `Sites.Read.All` + `Files.Read.All` (or `Sites.Selected` with a per-site grant), plus `User.Read.All`.
+   - Admin consent.
+   - A client secret.
+3. **Set the three variables on every service that reads them.** These are `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET`. Seal them in the dashboard, then redeploy each service.
+   - **`rag-worker`:** runs the sync.
+   - **`rag-api`:** builds connectors.
+   - **`rag-web`:** its `/admin/access` page uses Graph for email→oid lookup and group-overage checks.
+
+   `./scripts/set-ms-credentials.sh --with-api` covers `rag-worker` and `rag-api`. It does **not** touch `rag-web`; set that one by hand.
+
+4. **Resolve the new site's composite `siteId`** with `./scripts/resolve-siteid.sh`. It also proves the new credentials can read SharePoint (`docs/PLAN-SHAREPOINT-GOLIVE.md` §0.2 and "Why resolve-siteid is the auth canary").
+5. **Create a new SharePoint source.** `POST /sources` with `{"kind":"sharepoint","name":"Knowledge Base","config":{"siteId":"<new siteId>"}}` and an admin token (`docs/PHASE-3-SHAREPOINT-RUNBOOK.md` step 7).
+   - There is no endpoint to edit a source's config, and the old source's `siteId` belongs to the old tenant.
+   - The new source gets a **new id**.
+6. **Run a full sync.** `POST /sources/<id>/sync` with `{"mode":"full"}`. Then watch:
+   - `rag-worker` logs until the `ingestion_jobs` row is `completed`, not `failed`.
+   - The `ingest_log` for `failed` rows.
+7. **Move access to the new source id.** Access is keyed by source id in two places:
+   - **`API_PRINCIPALS` on `rag-api`** (direct API/MCP tokens). Replace the old id in every principal's `allowedSourceIds`, then redeploy (`docs/CONFIGURE-PRINCIPALS.md`).
+     - Today `marcus` is scoped to the old id.
+     - `chris` is scoped to three ids that **don't exist** in the database, so that principal can currently see nothing. Fix it in the same edit.
+   - **The database grants used by web and Teams** (`staff_source_assignments`; one row points at the old source). Grant the new source with `node node_modules/@rag/db/dist/manage-access.js grant --user <id> --source <new id> --by <admin>`, run in a service container. Then `check --user <id>`.
+8. **Verify, then purge the old source.**
+   - First, a `/search` for a term you know is in a document should return results from the new source for an admin token _and_ for each scoped principal.
+   - Only then, `DELETE /sources/dbba75e2-cecb-41be-8998-4f923158f741`. The delete cascades to the old source's documents, chunks and **access grants**, which is why step 7 comes first.
+9. **Re-upload the one document in "Manual Uploads"** (`b8e010f3-…`, a `custom` source with no connector) if it should also get the new parser output. There is nothing to sync for that source.
+
+**Done when:** a full sync of the SharePoint source shows `completed` with the post-#142 parser. Every principal and web user who should have access gets new-source results from `/search`, and the old source has been purged.
+
+**Depends on / blocks:**
+
+- **Depends on** IT (or whoever administers the target tenant) completing the app registration and consent in step 2. `docs/FRESH-DEPLOY-GUIDE.md` §1.3 says what to send them.
+- **Blocks** any claim that the index reflects current SharePoint content, and blocks the parser and chunker fixes from reaching production documents.
+
+---
+
 ## P1 — close before adding a second real user beyond the smallest possible internal check
 
 ### 4. Deploy `apps/web` — supersedes the earlier MCP-tradeoff framing
