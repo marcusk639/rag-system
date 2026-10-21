@@ -111,6 +111,17 @@ describe("check-docs", () => {
     expect(r.out).toMatch(/src\/b\.ts.*docs\/OLD-PLAN\.md/);
   });
 
+  it("accepts a docs/ path that resolves relative to the citing file", () => {
+    const r = run(
+      repo({
+        ...BASE,
+        "examples/demo/README.md": "Load docs/sop.md first.\n",
+        "examples/demo/docs/sop.md": "# SOP\n",
+      }),
+    );
+    expect(r.out).toContain("check-docs: ok");
+  });
+
   it("fails on a known-false phrase in a live doc", () => {
     const r = run(
       repo({

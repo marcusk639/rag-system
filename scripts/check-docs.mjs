@@ -45,9 +45,17 @@ const BANNED = [
   },
 ];
 
-// Paths that legitimately mention old doc locations: the consolidation prompt
-// and its digests describe the pre-move tree.
-const CITATION_EXCLUDES = [":!docs", ":!.claude/prompts", ":!pnpm-lock.yaml"];
+// Paths that legitimately mention docs that don't exist: the consolidation
+// prompt and its digests describe the pre-move tree, and test fixtures
+// (including this script's own) invent paths on purpose.
+const CITATION_EXCLUDES = [
+  ":!docs",
+  ":!.claude/prompts",
+  ":!pnpm-lock.yaml",
+  ":!scripts/check-docs.mjs",
+  ":!scripts/check-docs.test.ts",
+  ":!.claude/hooks/migration-guard.test.mjs",
+];
 
 function parseArgs(argv) {
   const i = argv.indexOf("--root");
@@ -181,8 +189,12 @@ function check(root) {
   }
   for (const line of grep.split("\n").filter(Boolean)) {
     const [file, lineNo, path] = line.split(":");
-    if (!existsSync(join(root, path)))
-      errors.push(`${file}:${lineNo} cites missing ${path}`);
+    // A path may be repo-relative or relative to the citing file (an example
+    // package's own docs/ folder); either resolving is fine.
+    const resolves =
+      existsSync(join(root, path)) ||
+      existsSync(join(root, dirname(file), path));
+    if (!resolves) errors.push(`${file}:${lineNo} cites missing ${path}`);
   }
 
   return errors;
