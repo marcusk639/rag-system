@@ -292,9 +292,9 @@ pre-rerank RRF order rather than failing the request
 > A full sync failed with `Tenant does not have a SPO license`: the tenant in `MS_TENANT_ID` lost
 > SharePoint Online after the last good sync on 2026-09-02.
 >
-> **Fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker`, `rag-api` and
-> `rag-web` to a licensed tenant's app registration. Then create a new source, full-sync it, repoint
-> access, and purge the old source.
+> **Fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker` and `rag-web` to a
+> licensed tenant's app registration. Then create a new source, full-sync it, repoint access
+> (`API_PRINCIPALS` on `rag-api` and `rag-mcp`, plus the DB grants), and purge the old source.
 >
 > **Why it comes first:**
 >

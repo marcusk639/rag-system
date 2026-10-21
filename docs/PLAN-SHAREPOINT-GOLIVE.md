@@ -18,9 +18,9 @@
 > ⛔ **2026-10-21: re-sync blocked.** The tenant in `MS_TENANT_ID` has lost its SharePoint licence.
 > Graph returns `Tenant does not have a SPO license.` on the first sync call.
 >
-> Re-running this plan against a licensed tenant means changing the `MS_*` variables on **`rag-worker`,
-> `rag-api` and `rag-web`**, not just `rag-worker` as Phase 1 below says. The source must be recreated and
-> access moved to the new source id before the old source is purged.
+> Re-running this plan against a licensed tenant means changing the `MS_*` variables on **`rag-worker` and
+> `rag-web`**, not just `rag-worker` as Phase 1 below says (`rag-api` doesn't read them). The source must be
+> recreated and access moved to the new source id before the old source is purged.
 >
 > Procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item 3a.
 
@@ -99,7 +99,7 @@ export MS_CLIENT_SECRET="<client-secret-value>"
 
 > **Updated 2026-10-21:**
 >
-> - Use `--with-api`.
+> - `--with-api` isn't needed: `rag-api` doesn't read `MS_*`.
 > - Also set the same three variables on **`rag-web`** by hand. The script never touches it, and its
 >   `/admin/access` page reads `MS_*` for Graph user lookups.
 > - Before running this, confirm the target tenant actually has a SharePoint Online licence. Auth succeeds

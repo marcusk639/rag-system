@@ -326,7 +326,8 @@ no SharePoint licence, so this isn't caught until the first sync. That sync then
 
 Switching tenants later is more than a variable change:
 
-- `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET` change on `rag-worker`, `rag-api` **and** `rag-web`.
+- `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET` change on `rag-worker` **and** `rag-web` (the only
+  services that read them).
 - The source needs to be recreated (new `siteId`, and therefore a new source id).
 - Access has to move to the new id before the old source is purged.
 
@@ -385,15 +386,15 @@ need a tenant setting changed; see [`EMAIL-IT-TEAMS-APP-UPLOAD.md`](./EMAIL-IT-T
 
 ## Troubleshooting map
 
-| Symptom                                       | Likely cause                                                                                                            | Where                         |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| api/mcp crash-loop at boot                    | migrations not run yet (deploy worker first), or a missing/short secret                                                 | §3.2                          |
-| Every web/Teams request 401s at the API       | scope secret set as singular on `rag-api`; it reads `INTERNAL_SCOPE_JWT_SECRETS`                                        | §2                            |
-| Sign-in: redirect_uri mismatch                | redirect URI ≠ `https://<web-domain>/api/auth/callback/microsoft-entra-id`, or `AUTH_URL` wrong                         | §1.1, §3.1                    |
-| `/admin/access` grant fails                   | `User.Read.All` not consented, or `MS_*` missing on `rag-web`                                                           | §1.1                          |
-| Sync 403 at `validate()`                      | admin consent missing, Delegated instead of Application, or site not granted under `Sites.Selected`                     | §1.2, Phase-3 runbook         |
-| Sync 400 `Tenant does not have a SPO license` | the `MS_TENANT_ID` tenant has no SharePoint Online; point all three `MS_*` vars (worker, api, web) at a licensed tenant | §4, Manual runbook 3a         |
-| Every parse 401s                              | `PARSER_SECRET` mismatch                                                                                                | §2                            |
-| Documents quarantined, none indexed           | content scanner unreachable or its host not in `EGRESS_ALLOWED_HOSTS`                                                   | §3.1                          |
-| Bot sends a sign-in card every time           | OAuth connection misconfigured / Teams client IDs not pre-authorized                                                    | Azure runbook troubleshooting |
-| Backup fails "invalid sslmode value"          | Node-style `sslmode=no-verify` copied into the backup's `DATABASE_URL`                                                  | §3.2 step 8                   |
+| Symptom                                       | Likely cause                                                                                                       | Where                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| api/mcp crash-loop at boot                    | migrations not run yet (deploy worker first), or a missing/short secret                                            | §3.2                          |
+| Every web/Teams request 401s at the API       | scope secret set as singular on `rag-api`; it reads `INTERNAL_SCOPE_JWT_SECRETS`                                   | §2                            |
+| Sign-in: redirect_uri mismatch                | redirect URI ≠ `https://<web-domain>/api/auth/callback/microsoft-entra-id`, or `AUTH_URL` wrong                    | §1.1, §3.1                    |
+| `/admin/access` grant fails                   | `User.Read.All` not consented, or `MS_*` missing on `rag-web`                                                      | §1.1                          |
+| Sync 403 at `validate()`                      | admin consent missing, Delegated instead of Application, or site not granted under `Sites.Selected`                | §1.2, Phase-3 runbook         |
+| Sync 400 `Tenant does not have a SPO license` | the `MS_TENANT_ID` tenant has no SharePoint Online; point all three `MS_*` vars (worker, web) at a licensed tenant | §4, Manual runbook 3a         |
+| Every parse 401s                              | `PARSER_SECRET` mismatch                                                                                           | §2                            |
+| Documents quarantined, none indexed           | content scanner unreachable or its host not in `EGRESS_ALLOWED_HOSTS`                                              | §3.1                          |
+| Bot sends a sign-in card every time           | OAuth connection misconfigured / Teams client IDs not pre-authorized                                               | Azure runbook troubleshooting |
+| Backup fails "invalid sslmode value"          | Node-style `sslmode=no-verify` copied into the backup's `DATABASE_URL`                                             | §3.2 step 8                   |
