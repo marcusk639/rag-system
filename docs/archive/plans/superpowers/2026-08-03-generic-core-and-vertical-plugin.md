@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/specs/multi-vertical-platform.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [specs/multi-vertical-platform.md](../../../specs/multi-vertical-platform.md).
+
 # Generic Core + Vertical Plugin — making `rag-system` consumable
 
 > ## ⛔ SUPERSEDED as the build order (marked 2026-08-03) — read §0 anyway
@@ -129,7 +137,7 @@ rewrite opportunistically, never as a task.
 
 ## 0b. `apps/web` is already generic — it just isn't configurable
 
-Good news for the decision above: `grep -rniE "kb|terranova"` over `apps/web/src`
+Good news for the decision above: `grep -rniE "kb|<firm-name>"` over `apps/web/src`
 returns **nothing**. There is no the firm branding to remove. But `APP_NAME` is
 referenced **nowhere**, and the product name is hardcoded twice:
 

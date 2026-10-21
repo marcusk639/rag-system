@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # SDVOSB Federal AI Go-To-Market Plan
 
 **Date:** 2026-10-09 · **Owner:** founder (solo SDVOSB, VetCert + SAM pending, no clearance) · **Evidence base:** [`sdvosb-research/RESEARCH-REPORT.md`](./sdvosb-research/RESEARCH-REPORT.md)

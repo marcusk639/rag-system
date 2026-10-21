@@ -1,3 +1,12 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by:
+  [docs/architecture/ARCHITECTURE.md, docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/ARCHITECTURE.md](../../architecture/ARCHITECTURE.md), [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # Queue Architecture Review: Is pg-boss the right job queue?
 
 > **Audience:** humans and AI agents.

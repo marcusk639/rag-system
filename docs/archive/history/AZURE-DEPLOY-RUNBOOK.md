@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/operations/FRESH-DEPLOY-GUIDE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [operations/FRESH-DEPLOY-GUIDE.md](../../operations/FRESH-DEPLOY-GUIDE.md).
+
 # Azure / Entra + Railway Deployment Runbook
 
 **Audience:** Marcus (technical/ops lead). Every step here is human/infra work — Azure portal clicks, secret generation, Railway config. None of it can be done by an AI agent; the application code is already built and merged.

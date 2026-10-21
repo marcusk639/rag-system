@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/compliance/REQUIREMENTS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/REQUIREMENTS.md](../../compliance/REQUIREMENTS.md).
+
 # CPA RAG Knowledge Base — Implementation & Compliance Spec
 
 > ## ⛔ HISTORICAL (marked 2026-08-03) — no longer the authoritative plan

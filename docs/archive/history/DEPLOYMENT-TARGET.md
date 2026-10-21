@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/operations/DEPLOYMENT.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [operations/DEPLOYMENT.md](../../operations/DEPLOYMENT.md).
+
 # Deployment Target — Tenant #1
 
 > ## ⛔ SUPERSEDED — this is not what runs today (marked 2026-08-03)

@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/launch/LAUNCH-STATUS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [launch/LAUNCH-STATUS.md](../../launch/LAUNCH-STATUS.md). Its claim that an enterprise-LLM DPA was signed is wrong; see compliance/vendor-dpa-google-gemini.md.
+
 # Launch Readiness — Consolidated Plan (tenant #1, cloud-with-DPA)
 
 **Status:** Active **for priority and sequencing only** (scope narrowed 2026-08-03).

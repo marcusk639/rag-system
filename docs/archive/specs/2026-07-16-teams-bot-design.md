@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # apps/teams-bot — Microsoft Teams KB Bot Design
 
 **Status:** Approved design — 2026-07-16.

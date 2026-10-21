@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/launch/LAUNCH-STATUS.md, docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [launch/LAUNCH-STATUS.md](../../launch/LAUNCH-STATUS.md), [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # PLAN: Launch Readiness (Reusable RAG Knowledge-Base Platform)
 
 > ## ⛔ SUPERSEDED (marked 2026-08-03) — and one of its premises is falsified

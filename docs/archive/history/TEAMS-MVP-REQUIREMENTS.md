@@ -1,3 +1,12 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by:
+  [docs/launch/LAUNCH-STATUS.md, docs/operations/FRESH-DEPLOY-GUIDE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [launch/LAUNCH-STATUS.md](../../launch/LAUNCH-STATUS.md), [operations/FRESH-DEPLOY-GUIDE.md](../../operations/FRESH-DEPLOY-GUIDE.md).
+
 # Teams MVP — what is actually required
 
 **Written:** 2026-09-12 · **Verified against production and the tree on that date.**

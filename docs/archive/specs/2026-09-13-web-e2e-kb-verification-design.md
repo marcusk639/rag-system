@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [tests/web-e2e/README.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [tests/web-e2e/README.md](../../../tests/web-e2e/README.md).
+
 # Design: browser e2e verification of the KB through the web app
 
 **Date:** 2026-09-13

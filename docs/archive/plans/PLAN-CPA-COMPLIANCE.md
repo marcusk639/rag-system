@@ -1,3 +1,12 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by:
+  [docs/compliance/CONTROL-STATUS.md, docs/compliance/EXCEPTIONS-LOG.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/CONTROL-STATUS.md](../../compliance/CONTROL-STATUS.md), [compliance/EXCEPTIONS-LOG.md](../../compliance/EXCEPTIONS-LOG.md).
+
 # Implementation Plan: CPA Regulatory Compliance (IRC §7216 / GLBA / Circular 230)
 
 > **Goal:** Bring `rag-system` into a defensible compliance posture for a CPA firm handling real

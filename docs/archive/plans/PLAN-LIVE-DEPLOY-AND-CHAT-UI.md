@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # PLAN: Live SharePoint Ingestion Deploy + Frontend Chat Agent
 
 > **Phased, LLM-friendly plan.** Each phase is self-contained and executable in a

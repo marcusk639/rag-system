@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # Email draft — asking IT about Teams custom app upload
 
 **Status:** DRAFT, not sent · **Written:** 2026-09-13

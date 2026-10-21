@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # Phase 3 — First SharePoint Sync (COMPLETE ✅) + next-session handoff
 
 Updated 2026-06-21. The Phase 3 first-sync goal is **met and verified green**, and

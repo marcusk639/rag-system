@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # RAG System Review — 2026-09-16
 
 **Status:** Current · **Date:** 2026-09-16 · **Scope:** the whole RAG pipeline, from SharePoint ingestion to cited answers in web chat, Teams, and MCP

@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/reference/CONNECTORS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [reference/CONNECTORS.md](../../reference/CONNECTORS.md).
+
 # Plan: Sync SharePoint Knowledge Base Folder
 
 > **Goal:** Create the SharePoint source scoped to `Documents/Knowledge Base`, grant user

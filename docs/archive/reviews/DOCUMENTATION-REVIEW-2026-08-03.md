@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/README.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [README.md](../../README.md).
+
 # Documentation Review: `docs/` tree
 
 **Reviewed:** 2026-08-03 · **Documents:** 81 markdown files (~1.69 MB) under `docs/`

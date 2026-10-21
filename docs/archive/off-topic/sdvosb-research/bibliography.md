@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 - **[S100]** FAR 19.1406 Sole source awards (SDVOSB) — GSA / FAR Council (acquisition.gov), FAC 2026-01, eff. 2026-03-13 (scraped 2026-10-09). <https://www.acquisition.gov/far/19.1406> _(primary)_
 - **[S101]** FAR 2.101 Definitions — GSA / FAR Council (acquisition.gov), FAC 2026-01, eff. 2026-03-13. <https://www.acquisition.gov/far/2.101> _(primary)_
 - **[S102]** FAR: Inflation Adjustment of Acquisition-Related Thresholds (FAC 2025-06, FAR Case 2024-001; 90 FR 41872) — Federal Register (public inspection), 2025-08-27. <https://public-inspection.federalregister.gov/2025-16412.pdf> _(primary)_

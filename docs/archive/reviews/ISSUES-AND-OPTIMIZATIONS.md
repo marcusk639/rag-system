@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # RAG System — Prioritized Issues & Optimization Opportunities
 
 **Date:** 2026-06-07

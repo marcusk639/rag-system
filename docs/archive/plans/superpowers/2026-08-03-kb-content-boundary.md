@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/compliance/CONTENT-SAFETY-DESIGN.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/CONTENT-SAFETY-DESIGN.md](../../../compliance/CONTENT-SAFETY-DESIGN.md).
+
 # KB Content Boundary — keeping the corpus to "how the firm does things"
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax.
@@ -237,9 +245,7 @@ procedure with a stray reference, and even then needs a second pass.
 
 **The one genuinely promising technique** is **roster cross-matching**: use NER
 purely for recall (find every `PERSON` span), then match against the firm's
-**closed, enumerable staff list** — Chris Klein, Doug Theriot, Amy Hartley,
-Chandi Gremillion, Preston Blanchard, Thao, Sarah, Samantha, Morgan, Joycelyn,
-Callie, Didi, Autumn, Carol, Amanda, JD, Avalynn, Hailey. Any `PERSON` **not** on
+**closed, enumerable staff list** (about 18 names; firm data, not reproduced here: it belongs in the deployment's injected config). Any `PERSON` **not** on
 the roster is a client candidate. This converts an unsolved role-disambiguation
 problem into list matching, which is the one thing pattern matching does
 reliably. Note this is a synthesis from the research, not a sourced vendor
@@ -304,7 +310,7 @@ file is added.
 
 - [ ] **Task 3.1 — Decide the `path` exposure.** `path` is on `EXPOSABLE_METADATA_FIELDS` for display/filtering, but the firm corpus proves paths carry client identity. Options: drop `path` from the allowlist; or expose only the leading N segments. **Preferred: drop it.** Nothing in the web or Teams UI renders `path` today — grep before deciding, and if nothing consumes it, this costs nothing.
 - [ ] **Task 3.2 — Failing test in `metadata-policy.test.ts`** (155 lines, existing allowlist tests) pinning the new shape.
-- [ ] **Task 3.3 — Title is harder and must not be silently mangled.** A citation with no title is useless. Do **not** regex-scrub names out of titles — `Terranova Williams Klein CPA's, LLC_Customer Phone List` shows the firm's own name matches any person-name pattern. The correct control is Phase 2 (the document should not be in the corpus) plus Phase 4 (it should not have been ingested). **Record this as a deliberate non-fix**, with the reasoning, so nobody "improves" it later with a name scrubber.
+- [ ] **Task 3.3 — Title is harder and must not be silently mangled.** A citation with no title is useless. Do **not** regex-scrub names out of titles — `<firm legal name>_Customer Phone List` shows the firm's own name matches any person-name pattern. The correct control is Phase 2 (the document should not be in the corpus) plus Phase 4 (it should not have been ingested). **Record this as a deliberate non-fix**, with the reasoning, so nobody "improves" it later with a name scrubber.
 
 ---
 

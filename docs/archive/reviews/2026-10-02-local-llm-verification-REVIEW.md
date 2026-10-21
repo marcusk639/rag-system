@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # Adversarial review — `2026-10-02-local-llm-verification-design.md`
 
 **Reviewer:** plan-reviewer (independent verification against code, not against the spec's own claims)

@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # Implementation Plan: SharePoint Readiness — Ingest Everything, Answer Substantively, Download Citations
 
 > **Goal (user's words):** "ensure the system is prepared to ingest all SharePoint files and is able to

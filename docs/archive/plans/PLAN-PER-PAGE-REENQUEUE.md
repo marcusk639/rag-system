@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/ARCHITECTURE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/ARCHITECTURE.md](../../architecture/ARCHITECTURE.md).
+
 # Implementation Plan: Per-Page Self-Re-Enqueue for Ingestion (S1–S4)
 
 > **Source of truth:** `docs/QUEUE-ARCHITECTURE-REVIEW.md` (Suggestions S1–S4, Concerns C1/C4).

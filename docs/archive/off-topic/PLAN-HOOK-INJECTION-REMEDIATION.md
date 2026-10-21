@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # Hook-Injection Remediation Plan
 
 > **Status: DONE except 3 deliberately-deferred/skipped items (2026-07-13).** Tasks 1–6 and the Final Phase executed directly (not via subagent-driven-development — this is config editing, not reviewable code). The reproducing bug is confirmed fixed: a throwaway `security-reviewer` subagent re-ran the original `/iterative-review` trigger (`Read` + `git status`) and found zero Semgrep-leak content (`open ... no such file or directory`); the only `<system-reminder>` content still present on the first tool call is unrelated, expected MCP-server-instructions/Auto-Mode context, not a hook leak. `enabledPlugins` dropped 90 → 87 (semgrep, data-engineering, mcpmarket-my-toolkit). Every settings.json/hook-script edit required a separate explicit approval from an auto-mode self-modification classifier — each was confirmed individually before applying. **Left unchecked, on purpose:**

@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/compliance/records/DECISION-CPA-KB-RAG-CONVERGENCE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/records/DECISION-CPA-KB-RAG-CONVERGENCE.md](../../compliance/records/DECISION-CPA-KB-RAG-CONVERGENCE.md).
+
 # App Comparison: Product A (`cpa-backend` + `cpa-knowledge-base`) vs Product B (`rag-system`)
 
 _Generated: 2026-06-21 | Codebase paths: `/Users/marcus/dev/cpa-backend`, `/Users/marcus/dev/cpa-knowledge-base`, `/Users/marcus/dev/rag-system` | Domain rubric: `/Users/marcus/dev/cpa-consulting`_

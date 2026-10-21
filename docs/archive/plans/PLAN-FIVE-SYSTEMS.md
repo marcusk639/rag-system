@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # Implementation Plan — Five-System Unification & C2a Bug Fix
 
 **Source:** `journey-into-rag-system.md` (Pathfinder five-system proposal, obs #189/#192) + live-code verification (2026-06-08).

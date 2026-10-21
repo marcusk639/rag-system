@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/ARCHITECTURE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/ARCHITECTURE.md](../../architecture/ARCHITECTURE.md).
+
 # Implementation Plan: Knowledge-Base Governance & Usage Analytics
 
 > ### ℹ Where this plan's source documents actually live (marked 2026-08-03)

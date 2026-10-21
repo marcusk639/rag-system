@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../../KNOWN-ISSUES.md). Its C2/D2 reasoning (firm SOPs are Class A/B, so external models are fine) was invalidated when client data was found in the KB; do not reuse it.
+
 # Plan: the knowledge base — Autonomous E2E Testing, Answer-Quality Gate, and Feedback Loop
 
 **Created:** 2026-07-16. **Revised:** 2026-07-16 (post plan-review — resolved C1/C2/C3 + notes). **Repo:** `rag-system`.

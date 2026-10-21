@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # Selling RAG / Agentic AI to the Federal Government as a Solo SDVOSB — Research Report
 
 **As of:** 2026-10-09 · **Mode:** deep (8-phase pipeline, 1 red-team round) · **Companion plan:** [`../SDVOSB-GOV-GTM-PLAN.md`](../SDVOSB-GOV-GTM-PLAN.md)

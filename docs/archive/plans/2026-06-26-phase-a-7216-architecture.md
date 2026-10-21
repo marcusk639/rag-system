@@ -1,3 +1,12 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by:
+  [docs/compliance/CONTROL-STATUS.md, docs/compliance/EXCEPTIONS-LOG.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/CONTROL-STATUS.md](../../compliance/CONTROL-STATUS.md), [compliance/EXCEPTIONS-LOG.md](../../compliance/EXCEPTIONS-LOG.md). Its gate (no firm documents before client-data mode) was not followed: firm documents were ingested on 2026-07-04 under COMPLIANCE_MODE=none. See the exceptions log.
+
 # Phase A — §7216 Architecture: Self-hosted Embeddings + Egress Control
 
 > **Why this exists.** The `CPA-KB-IMPLEMENTATION-SPEC.md` Phase A gates ALL real firm-document

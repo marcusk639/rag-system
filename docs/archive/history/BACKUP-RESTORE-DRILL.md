@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/operations/BACKUP-AND-RECOVERY.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [operations/BACKUP-AND-RECOVERY.md](../../operations/BACKUP-AND-RECOVERY.md).
+
 # Backup & Restore Drill — the knowledge base
 
 **P0 gate #3** from `PILOT-LAUNCH-STATUS.md`. Runbook item 3 in `PILOT-MANUAL-RUNBOOK.md`.

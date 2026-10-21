@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/evaluation/EVALUATION.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [evaluation/EVALUATION.md](../../evaluation/EVALUATION.md).
+
 # Retrieval Evaluation Baseline
 
 **Status as of 2026-08-01: the first real-embedder run has been executed. It did

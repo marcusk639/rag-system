@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # RAG launch-readiness review — 2026-10-03
 
 **Scope:** the retrieval/generation pipeline, assessed against one bar only — a

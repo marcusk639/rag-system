@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/launch/LAUNCH-STATUS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [launch/LAUNCH-STATUS.md](../../launch/LAUNCH-STATUS.md). Its statement that the index holds no client files is false (2026-08-01 corpus screen; see compliance/records/PURGE-RECORD-2026-08-03.md).
+
 # Getting the KB assistant usable — options, ranked
 
 **Written:** 2026-08-01 · **Context:** this is a **prototype**, and that changes

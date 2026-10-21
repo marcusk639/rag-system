@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/specs/multi-vertical-platform.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [specs/multi-vertical-platform.md](../../specs/multi-vertical-platform.md).
+
 # Multi-Vertical RAG Platform — Design
 
 **Status:** Design — 2026-08-03. Approved in brainstorming.

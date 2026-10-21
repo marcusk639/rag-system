@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/ARCHITECTURE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/ARCHITECTURE.md](../../architecture/ARCHITECTURE.md).
+
 # Post-Merge Follow-Ups Remediation Plan
 
 > **Status: COMPLETE (re-verified 2026-07-13).** All 5 tasks were implemented, reviewed, and merged to `main` in an earlier session (see `.superpowers/sdd/progress.md`'s "NEW PLAN: docs/PLAN-POST-MERGE-FOLLOWUPS.md" section) — this file's checkboxes just hadn't been checked off. Re-confirmed independently against current `HEAD`: typecheck/lint/build clean, full unit suite passing, and a full 78/78 e2e run (including this plan's own concurrency and audit-attribution tests) against a freshly-migrated, isolated Postgres instance. See the progress ledger's "RE-VERIFIED 2026-07-13" entry for details.

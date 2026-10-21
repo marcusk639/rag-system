@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md, docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md), [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # Research: Auth Strategy + Server-Side Chat Sessions
 
 > Supporting research for `CPA-KB-ADOPTION-PLAN.md`. Resolves the two open risks flagged at

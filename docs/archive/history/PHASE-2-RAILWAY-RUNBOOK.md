@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/operations/DEPLOYMENT.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [operations/DEPLOYMENT.md](../../operations/DEPLOYMENT.md).
+
 # Phase 2 — Railway Deploy Runbook (resume from here)
 
 > **Historical.** This records how the first deployment was brought up. For a new

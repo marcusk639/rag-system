@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # RAG Quality Review — 2026-10-17
 
 **Status:** Current · **Scope:** ingestion → chunking → embeddings → retrieval → prompting → answers, plus the MCP surface · **Method:** code reading, a chunker reproduction script, and SQL probes against local Postgres. Findings marked _unverified_ were not reproduced.

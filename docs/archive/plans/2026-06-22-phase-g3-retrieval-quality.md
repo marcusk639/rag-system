@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/evaluation/EVALUATION.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [evaluation/EVALUATION.md](../../evaluation/EVALUATION.md).
+
 # Phase G3 — Retrieval Quality: Plan (2026-06-22)
 
 **Status:** Phase 1 ✅ DONE (committed `8753199`, merged to `main`). Phase 2 ready. Phase 3 revised per plan-review (2026-06-22) — judge hardened, corpus-leakage + relevance rules added, asserts → report-with-loose-floor, judge-validation sub-phase added. Phases are self-contained; each can run in a fresh chat context.

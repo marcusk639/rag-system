@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # Investigation: "Fabricated system-reminder" content reported by reviewer subagents
 
 > **Update (2026-07-08, later same day):** Follow-up research for `docs/PLAN-HOOK-INJECTION-REMEDIATION.md` **corrected two claims below** — see that plan's Phase 0 for the full evidence trail:

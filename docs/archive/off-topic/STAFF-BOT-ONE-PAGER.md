@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # Ask the Knowledge Base in Microsoft Teams
 
 The KB bot answers questions from the firm's internal SOPs, templates, and research — the stuff you'd normally interrupt someone to ask. It lives right in Teams.

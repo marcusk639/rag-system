@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/DECISIONS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/DECISIONS.md](../../architecture/DECISIONS.md).
+
 # PLAN — Source-Cited Chat Front-End (`apps/web`)
 
 > Focused, LLM-executable plan for a chatbot UI that asks the RAG system questions and

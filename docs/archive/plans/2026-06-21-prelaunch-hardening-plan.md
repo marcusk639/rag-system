@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/compliance/CONTROL-STATUS.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [compliance/CONTROL-STATUS.md](../../compliance/CONTROL-STATUS.md).
+
 # rag-system — Pre-Launch Hardening & Gap-Closure Plan
 
 _Authored: 2026-06-21 · Target repo: `/Users/marcus/dev/rag-system` @ HEAD `7b70b59` · Source of gaps: `docs/app-comparison-2026-06-21.md`, verified against current code + `docs/CPA-COMPLIANCE-REQUIREMENTS.md` (control matrix CR-1…CR-20)._

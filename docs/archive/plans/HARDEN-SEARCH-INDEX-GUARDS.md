@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/architecture/ARCHITECTURE.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [architecture/ARCHITECTURE.md](../../architecture/ARCHITECTURE.md).
+
 # TASK: Harden the search-index / migration split (the codebase's #1 fragility)
 
 > **For a fresh Claude Code session.** This document is self-contained — you do

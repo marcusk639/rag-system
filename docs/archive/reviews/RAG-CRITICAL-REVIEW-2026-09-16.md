@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/KNOWN-ISSUES.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [KNOWN-ISSUES.md](../../KNOWN-ISSUES.md).
+
 # RAG Critical Review — 2026-09-16
 
 Branch: `fix/rag-retrieval-review` (worktree `.worktrees/rag-review`, based on `7486747`).

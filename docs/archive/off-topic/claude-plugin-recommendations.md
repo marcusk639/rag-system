@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: none (off-topic for this repo)
+---
+
+> **Archived 2026-10-21 — off-topic.** Not about the rag-system product; kept here pending a decision on where it belongs. Not maintained.
+
 # wshobson/agents — Adoption Analysis for rag-system
 
 > **Verdict (2026-09-15, against the marketplace snapshot of 94 plugins / 202 agents / 183 skills / 105 commands / 16 orchestrator workflows at `wshobson/agents`, already registered on this machine as `claude-code-workflows`):** install **one plugin** — `security-scanning` — keep the already-enabled `documentation-standards` and start using it, pull three individual skills, and **disable `llm-application-dev`**. That is a deliberately short list, and it is shorter than it looks: the user has already triaged this catalog and set ~50 of 56 registered plugins to `false` (§2), so every item here must beat a considered rejection rather than an empty slate. The plugin whose name matches this repo's domain most exactly, `llm-application-dev`, is **rejected in full** — and is **currently enabled**, so §7's verdict is a removal, not a decline: its eight skills teach the RAG design decisions this repo already made, tested, and documented (`packages/rag/src/retrieval/`, `tests/e2e/src/eval/metrics.ts`, `docs/EVAL-BASELINE.md`), putting generic tutorial guidance in live competition with the repo's own hard-won, tenant-specific conclusions. The single highest-value addition is `security-scanning`, the one recommendation that was never on the menu (absent from both config dirs): `CODEBASE-REVIEW.md` carries three CRITICAL and four HIGH findings that are all security-shaped, `[C2]` (unauthenticated Python parser sidecar) is still an open decision, and `.github/workflows/ci.yml` runs **no** SAST, **no** dependency audit, and **no** coverage gate. Net footprint change: +2 agents (both Opus-tier), +3 commands, +3 skills, −8 skills and −3 agents removed.

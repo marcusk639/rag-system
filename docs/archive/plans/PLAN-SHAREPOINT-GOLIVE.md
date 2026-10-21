@@ -1,3 +1,11 @@
+---
+status: archived
+archived: 2026-10-21
+superseded_by: [docs/operations/SHAREPOINT-RUNBOOK.md]
+---
+
+> **Archived 2026-10-21.** Historical record, not current; the code and the live docs win where they disagree. Current source: [operations/SHAREPOINT-RUNBOOK.md](../../operations/SHAREPOINT-RUNBOOK.md).
+
 # Automation Plan: SharePoint Go-Live
 
 > **Goal:** Automate the four manual steps required to bring SharePoint ingestion live on
