@@ -1,263 +1,315 @@
+---
+title: Deployment (Railway production reference)
+status: current
+last_verified: 2026-10-21
+verified_against: be4b30e
+answers: What runs in production on Railway, which variables each service reads, how migrations, TLS, the Postgres image and monitoring work, and how to self-host with docker compose instead.
+read_when: Changing a Railway service or variable, upgrading the Postgres image, diagnosing a deploy, or standing up a self-hosted stack.
+supersedes: [DEPLOYMENT-TARGET.md, PHASE-2-RAILWAY-RUNBOOK.md]
+code:
+  [
+    apps/worker/railway.json,
+    apps/api/railway.json,
+    apps/mcp/railway.json,
+    apps/web/railway.json,
+    apps/teams-bot/railway.json,
+    services/parser-py/railway.json,
+    services/backup/railway.json,
+    docker/Dockerfile.warm-base,
+    docker/compose.prod.yml,
+    packages/core/src/config.ts,
+    packages/db/src/migrate.ts,
+    packages/db/src/hnsw.ts,
+  ]
+---
+
 # Deployment
 
-**Status:** Current · **Updated:** 2026-08-03 · **Live target:** Railway
+Production runs on **Railway**: one project, one `production` environment, nine services. Every Node service builds
+from the repo root with its own `railway.json`. `rag-worker` alone runs migrations, in a pre-deploy step. Cross-service
+URLs use `*.railway.internal`. This doc is the reference for what each service is and reads. For the order to stand a
+deployment up from nothing, use [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md). Backups and restores are in
+[`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md). The [self-host appendix](#appendix-self-hosting-with-docker-compose)
+covers running without Railway.
 
-How to run the RAG system in production. Local dev is covered in the root README; this doc focuses on the production picture. For the step-by-step order of a from-zero deployment (Entra apps and permissions, every Railway service, secrets), see [`FRESH-DEPLOY-GUIDE.md`](./FRESH-DEPLOY-GUIDE.md).
+Railway identifiers an operator needs (as of 2026-10-21): project `rag-system` id `d5676b24-11fe-4665-a9bb-1e55b3670eb1`,
+environment `production` id `53a51a39-6b88-493a-92f1-ff3cad32b73a`. Public domains: `rag-api-production-07b4.up.railway.app`,
+`rag-mcp-production-77f9.up.railway.app`, `rag-web-production-1c0a.up.railway.app`.
 
-## Components to deploy
+## Service inventory
 
-| Component           | Where it runs                          | Scaling                                                                                              |
-| ------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Postgres + pgvector | Managed (Neon, Supabase, RDS)          | Vertical for write-heavy ingestion. Read replicas for retrieval-heavy workloads.                     |
-| Python parser       | N container replicas                   | Horizontal — stateless. Tune count by ingestion throughput.                                          |
-| `@rag/api`          | N container replicas behind LB         | Horizontal — stateless. Add replicas when retrieval QPS climbs.                                      |
-| `@rag/mcp`          | 1+ replicas (HTTP) or per-user (stdio) | HTTP for shared agent infrastructure. stdio for single-user (Claude Desktop).                        |
-| `@rag/worker`       | N replicas                             | Horizontal — pg-boss distributes jobs. Each replica processes `WORKER_CONCURRENCY` docs in parallel. |
+| Service         | Built from                                              | Config / build                                                                            | Public | Healthcheck   | Role                                                    |
+| --------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ | ------------- | ------------------------------------------------------- |
+| `rag-postgres`  | image `ghcr.io/railwayapp-templates/postgres-ssl:16.14` | volume at exactly `/var/lib/postgresql/data`                                              | no     | —             | Postgres 16 + pgvector + pgBackRest                     |
+| `rag-parser`    | repo, Root Directory `/services/parser-py`              | `services/parser-py/Dockerfile` (see [gotchas](#railway-gotchas))                         | no     | `/health`     | Python document parser                                  |
+| `rag-worker`    | repo, root `/`                                          | `apps/worker/railway.json`; `preDeployCommand` runs migrations                            | no     | none          | pg-boss jobs: sync, ingest, audit ship, digests         |
+| `rag-api`       | repo, root `/`                                          | `apps/api/railway.json`                                                                   | yes    | `/health`     | HTTP API                                                |
+| `rag-mcp`       | repo, root `/`                                          | `apps/mcp/railway.json`                                                                   | yes    | `/health`     | MCP server over HTTP                                    |
+| `rag-web`       | repo, root `/`                                          | `apps/web/railway.json`                                                                   | yes    | `/api/health` | Next.js chat UI (BFF over the API)                      |
+| `rag-teams-bot` | repo, root `/`                                          | `apps/teams-bot/railway.json`; **one replica only**                                       | yes    | `/health`     | Teams bot (BFF over the API)                            |
+| `ollama`        | image `ollama/ollama`                                   | volume at `/root/.ollama`                                                                 | no     | —             | Layer 1.5 content scanner (required in `client-data`)   |
+| `rag-backup`    | repo, root `/`                                          | `services/backup/railway.json` (`restartPolicyType: NEVER`); cron is set in the dashboard | no     | —             | Nightly `pg_dump` ([details](./BACKUP-AND-RECOVERY.md)) |
 
-## Environment variables
+The Node Dockerfiles use `pnpm deploy --prod` in a pruner stage, so the runtime image holds prod dependencies only and
+**has no pnpm and no tsx**. Run package scripts in a container as compiled JS
+(`node node_modules/@rag/db/dist/<script>.js`), never `pnpm --filter …`. `rag-teams-bot` must stay at one replica because
+it keeps the SSO exchange in `MemoryStorage`. `ollama`, `rag-teams-bot` and `rag-backup` are optional outside
+`COMPLIANCE_MODE=client-data`.
 
-Every runtime reads the same `.env` (or container env). See `env.example` at repo root for the authoritative list. The minimum to bring the system up:
+## Variables per service
 
-```
-DATABASE_URL=postgres://...
-GEMINI_API_KEY=...              # or OPENAI_API_KEY if you set EMBEDDING_PROVIDER=openai
-API_TOKENS=long-random-token-here
-PARSER_URL=http://parser:8000   # service-discoverable URL
-```
+`env.example` is the source of truth for every variable: its comments carry the defaults and the compliance coupling.
+This table only says **who reads what**. Generate secrets as [`FRESH-DEPLOY-GUIDE.md` §2](./FRESH-DEPLOY-GUIDE.md#2-secrets-to-generate)
+says.
 
-Source-specific credentials (Microsoft, Google) only need to be present on the **worker** — the API and MCP server don't talk to external sources directly.
+| Variable / group                                                                                        | Set on                                            | Notes                                                                                                     |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` with `?sslmode=no-verify`                                                                | api, worker, mcp, web, teams-bot                  | [TLS rules](#database-tls-and-sslmode)                                                                    |
+| `DATABASE_URL` with `?sslmode=require`                                                                  | backup                                            | libpq; never copy the Node value                                                                          |
+| `POSTGRES_USER=rag`, `POSTGRES_DB=rag`, `POSTGRES_PASSWORD`, `PGDATA`, `WAL_ARCHIVE_*`                  | postgres                                          | `PGDATA=/var/lib/postgresql/data/pgdata` or the entrypoint refuses to boot                                |
+| `PARSER_URL=http://rag-parser.railway.internal:8000`                                                    | api, worker, mcp                                  | Default is `http://localhost:8000` (`packages/core/src/config.ts`)                                        |
+| `PARSER_SECRET`                                                                                         | parser, api, worker, mcp                          | Must be identical on all four, or every parse returns 401                                                 |
+| `API_TOKENS`                                                                                            | api, mcp, **worker**                              | The shared config rejects an empty list on every service (`config-schema.ts` `tokens`)                    |
+| `API_PRINCIPALS`, `API_ENFORCE_SCOPING`                                                                 | api, mcp (same value on both)                     | [`ACCESS-CONTROL.md`](./ACCESS-CONTROL.md)                                                                |
+| `AUTH_PROVIDER=composite` (+ `OIDC_*` if used)                                                          | api, mcp                                          | [root CLAUDE.md](../../CLAUDE.md) "Client auth config fails loud"                                         |
+| `INTERNAL_SCOPE_JWT_SECRETS` (plural)                                                                   | api                                               | Comma-separated verify list; the API never reads the singular                                             |
+| `INTERNAL_SCOPE_JWT_SECRET` (singular)                                                                  | web, teams-bot                                    | One of the api's values; at least 64 hex characters                                                       |
+| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, vendor key                             | api, worker, mcp (identical)                      | Changing them means a re-embed. Never the retired `text-embedding-004`                                    |
+| `GENERATION_PROVIDER`, `GENERATION_MODEL`, `GENERATION_TRI_POLICY`                                      | api, mcp                                          | Production model: UNVERIFIED (env.example default `gemini-2.5-flash`; check Railway)                      |
+| `EGRESS_ALLOWED_HOSTS`, `COMPLIANCE_MODE`, `LOG_LEVEL`, `PG_BOSS_SCHEMA=pgboss`                         | api, worker, mcp                                  | Every vendor host contacted must be listed                                                                |
+| `OBJECT_STORE_*`                                                                                        | api (serves downloads), worker (stores originals) | Same values on both                                                                                       |
+| `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`                                                      | **worker and web only**                           | Worker builds connectors (`apps/worker/src/deps.ts`); web uses Graph (`apps/web/src/lib/graph-client.ts`) |
+| `WORKER_CONCURRENCY`, `EMBEDDING_REQUESTS_PER_MINUTE`                                                   | worker                                            | Defaults in env.example                                                                                   |
+| `CONTENT_SCAN_PROVIDER=ollama`, `CONTENT_SCAN_BASE_URL`, `CONTENT_SCAN_MODEL`                           | worker                                            | Add `ollama.railway.internal` to `EGRESS_ALLOWED_HOSTS` or every document quarantines                     |
+| `MCP_TRANSPORT=http`, `MCP_ALLOWED_ORIGINS`, `MCP_MAX_SESSIONS`                                         | mcp                                               | Blank `MCP_ALLOWED_ORIGINS` allows every origin (development only)                                        |
+| `AUTH_ENTRA_*`, `AUTH_SECRET`, `AUTH_URL`, `AUTH_TRUST_HOST=true`, `RAG_ADMINS_GROUP_ID`, `RAG_API_URL` | web                                               | [`apps/web/CLAUDE.md`](../../apps/web/CLAUDE.md); leave `WEB_AUTH_MODE` at `entra`                        |
+| `MICROSOFT_APP_*`, `BOT_ENTRA_SSO_SCOPE`, `BOT_OAUTH_CONNECTION_NAME`, `RAG_API_URL`                    | teams-bot                                         | [FRESH-DEPLOY-GUIDE appendix](./FRESH-DEPLOY-GUIDE.md#appendix-a-web-and-teams-entra-and-azure-detail)    |
+| `PARSER_SECRET`, `PARSER_MAX_UPLOAD_BYTES`                                                              | parser                                            |                                                                                                           |
+| Backup variables                                                                                        | backup                                            | [`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md)                                                      |
 
-## Docker images
+`RAG_API_URL` is `http://rag-api.railway.internal:8080` on both BFFs. `WEB_AUTH_MODE=static-fallback` turns off
+authentication and gives every visitor one shared token; it is an emergency bypass only.
 
-Each Node app has a production-ready multi-stage Dockerfile at `apps/<name>/Dockerfile`.
-Build context is always the **repo root** (required for pnpm workspace resolution):
+## Ports
 
-```bash
-docker build -f apps/api/Dockerfile    -t rag-api    .
-docker build -f apps/mcp/Dockerfile    -t rag-mcp    .
-docker build -f apps/worker/Dockerfile -t rag-worker  .
-```
+Don't set `PORT` on any service. Railway injects `PORT=8080` and its healthcheck probes that port. api and mcp fall
+back to it (`packages/core/src/config.ts`: `API_PORT ?? PORT ?? 3000`, `MCP_HTTP_PORT ?? PORT ?? 3001`). web and the
+bot read `PORT` natively; the bot's own default is 3978 (`apps/teams-bot/src/config.ts`). If you pin `API_PORT` or
+`MCP_HTTP_PORT`, the domain's target port must match it.
 
-The Dockerfiles use `pnpm deploy --prod` in a pruner stage to produce a
-self-contained bundle (prod deps only, no other workspace apps). The parser image
-is at `services/parser-py/Dockerfile`.
+## Database TLS and sslmode
 
-**The live deployment target is Railway** (see [Migrations on deploy](#migrations-on-deploy-railway)
-below). For a single-VM self-hosted stack use `docker/compose.prod.yml`;
-[`DEPLOYMENT-TARGET.md`](./DEPLOYMENT-TARGET.md) holds that path's rationale and
-provisioning steps — note it is **superseded as a description of what runs
-today** and carries a banner saying so.
+`rag-postgres` serves a self-signed certificate, and the two client stacks need opposite spellings of "encrypt, don't
+verify":
 
-## Database
+| Client                                                        | Use                                    | Why                                                                                                 |
+| ------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Node services (pool, pg-boss, migrations)                     | `?sslmode=no-verify` in `DATABASE_URL` | `pg-connection-string` 2.10+ treats `require` as `verify-full`, which fails on the self-signed cert |
+| libpq (`pg_dump` in `rag-backup`, `psql`, restore procedures) | `?sslmode=require`                     | libpq rejects `no-verify` as an invalid value                                                       |
 
-### Provisioning
+`DATABASE_SSL` (`disable` / `require` / `no-verify`) is a separate pool-level knob (`packages/db/src/client.ts`
+`pgSslOption`). In production `buildCoreDeps` logs a warning when neither it nor the URL enables TLS. Full certificate
+verification would need the image's CA on every client; it is not a launch gate. The canonical comment block is the
+`DATABASE_URL` section of `env.example`.
 
-Any Postgres 14+ with `pgvector` enabled works. Confirmed on:
+### Connection pooling
 
-- **Neon** — enable pgvector via SQL editor: `CREATE EXTENSION vector;`
-- **Supabase** — enable pgvector in the dashboard (Database → Extensions).
-- **AWS RDS** — pgvector is bundled in Postgres 15.5+ on RDS; enable via parameter group.
-- **Self-hosted** — the `pgvector/pgvector:pg16` image used in `docker/docker-compose.yml`.
-- **Railway (production, tenant #1)** — `ghcr.io/railwayapp-templates/postgres-ssl:16.14`, Railway's
-  official Postgres image. Bundles pgvector (`postgresql-16-pgvector`), generates a self-signed cert on
-  first boot (`ssl = on`), and ships pgBackRest for WAL archiving / point-in-time recovery. It hard-requires
-  the volume mounted at exactly `/var/lib/postgresql/data` with `PGDATA=/var/lib/postgresql/data/pgdata` —
-  the entrypoint exits non-zero otherwise. pgBackRest WAL archiving is
-  **enabled as of 2026-09-02** (six `WAL_ARCHIVE_*` variables on `rag-postgres`, targeting the
-  `rag-documents` bucket; `archive_mode=on`, `archive_timeout=60`). It is gated on `WAL_ARCHIVE_BUCKET` —
-  unset that and the watcher returns early, silently. Note pgBackRest connects as
-  `pg1-user=${PGUSER:-postgres}`, so the `postgres` superuser role must exist even though the application
-  role is `rag`. See `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
+Each Node pool defaults to `max: 10` (`packages/db/src/client.ts` `createDb`). Against roughly 100 `max_connections`,
+that fits about 5 api + 3 worker + 2 mcp replicas, plus web, bot and backup. Beyond that, put PgBouncer in transaction
+mode in front and point `DATABASE_URL` at it. pg-boss and session-level features then need checking against the
+pooler first.
 
-After provisioning, run:
+## Migrations
 
-```bash
-DATABASE_URL=postgres://... pnpm db:migrate
-```
+The rule (worker `preDeployCommand` is the single migration owner; deploy `rag-worker` first on a schema change; never
+add the command to api/mcp) is stated in the [root CLAUDE.md](../../CLAUDE.md) "Migrations auto-run on Railway deploy".
+What it adds operationally:
 
-This is idempotent — safe to re-run on every deploy.
+- Railway runs the pre-deploy command between build and release, on the private network with the service's variables,
+  **against the new image**. A non-zero exit aborts that deploy, so a migration committed with its code applies before
+  the code serves traffic.
+- The command is `node node_modules/@rag/db/dist/migrate.js` (`apps/worker/railway.json`). `pnpm --filter @rag/db migrate`
+  cannot work inside the image (no pnpm, no tsx).
+- `packages/db/src/migrate.ts` `applyMigrations` runs the idempotent `0000_init.sql` bootstrap first (it also creates the
+  `vector`, `pg_trgm` and `uuid-ossp` extensions), then Drizzle's migrator for everything after.
+- api, mcp and the worker app all run `assertRequiredIndexes` at boot and crash-loop on an unmigrated database. The
+  pre-deploy process never boots the app, so it never reaches that assert.
+- Applying a migration by hand, and the journal `when` and hash rules that make Drizzle skip or re-run one, are in
+  [`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md).
 
-### Upgrading the Railway Postgres image
+## Upgrading the Railway Postgres image
 
-Changing `rag-postgres`'s image is a live-volume migration, not a config tweak. Checklist:
+Changing `rag-postgres`'s image is a live-volume migration. The image facts (volume path, `PGDATA`, the `postgres`
+role, why local and CI use a different image) are in the root CLAUDE.md gotchas; this is the procedure.
 
-```bash
-railway service source connect --image <new-image> --service rag-postgres \
-  --project <project-id> --environment <env-id>
-```
-
-1. **Pin the exact minor** (e.g. `:16.14`, not `:16`) so the server binary doesn't move underneath you.
-2. **Check glibc, not just the PG version.** `select version()` reports the Debian build — `pgdg12` (bookworm,
-   glibc 2.36) vs `pgdg13` (trixie, glibc 2.41). A same-minor image bump can still cross that boundary and
-   invalidate every text btree index.
-3. **If glibc moved, reindex before the version stamp is refreshed.** The image's entrypoint forks a "blind"
-   `ALTER DATABASE ... REFRESH COLLATION VERSION` across all databases on boot, with no `REINDEX` — it treats
-   the mismatch as cosmetic noise and, in silencing it, destroys the signal. Run this per connectable database
-   (`rag`, `postgres`, `template1`, and any `rag_premigration_*`), not just `rag`:
+1. Switch the image, pinned to an exact minor (`:16.14`, never `:16`):
+   `railway service source connect --image <new-image> --service rag-postgres --project <project-id> --environment <env-id>`.
+2. Check glibc, not only the Postgres version. `select version()` shows the Debian build: `pgdg12` is bookworm
+   (glibc 2.36), `pgdg13` is trixie (glibc 2.41). A same-minor rebuild can cross that line and invalidate every text
+   btree index.
+3. If glibc moved, reindex **before** the collation stamp is refreshed. The image's boot script runs
+   `ALTER DATABASE … REFRESH COLLATION VERSION` on every database with no reindex, which hides the evidence. For each
+   connectable database (`rag`, `postgres`, `template1`, and any `rag_premigration_*`):
 
    ```sql
    REINDEX DATABASE "<db>";
    ALTER DATABASE "<db>" REFRESH COLLATION VERSION;
    ```
 
-4. **Bring extension catalogs up to the new binaries:** `ALTER EXTENSION vector UPDATE;` (the volume pins the
-   SQL catalog at install-time version while the image carries the `.so`).
-5. **Verify:** `datcollversion` matches the OS on every DB, `select count(*) from pg_index where not indisvalid`
-   returns 0, and an HNSW probe (`ORDER BY embedding <=> ...`) still returns rows.
-6. The image's housekeeping (collation refresh, pgBackRest watcher) connects as the `postgres` role. This
-   deployment's superuser is `rag`, so a `postgres` superuser role must also exist or those scripts FATAL with
-   `role "postgres" does not exist` — the database itself still serves traffic normally.
+4. Bring the extension catalog up to the new binary: `ALTER EXTENSION vector UPDATE;`.
+5. Confirm the `postgres` superuser role still exists. The image's housekeeping and pgBackRest connect as `postgres`
+   (`pg1-user=${PGUSER:-postgres}`), while the app role is `rag`. Without it they fail with `role "postgres" does not exist`
+   and WAL archiving stops silently, while the database keeps serving.
+6. Verify: `datcollversion` matches the OS on every database, `select count(*) from pg_index where not indisvalid`
+   returns 0, and an HNSW probe (`ORDER BY embedding <=> …`) returns rows.
 
-Rollback is `railway service source connect --image <old-image>`; the volume is untouched and generated certs
-are inert to other images. Note that rolling back re-crosses the glibc boundary, so reindex either way.
+Rollback is the same command with the old image; the volume is untouched. Rolling back re-crosses the glibc boundary,
+so reindex either way.
 
-### Migrations on deploy (Railway)
+Done when: every check in step 6 passes on every database and the next WAL archive lands
+([`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md)).
 
-Migrations run **automatically** via the `rag-worker` service's `preDeployCommand`
-(`node node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json:8`). Railway runs a
-pre-deploy command between build and release, on the private network with the
-service's env vars; if it exits non-zero the deployment is aborted. Because it
-runs against the **new** image, any migration committed alongside code ships and
-applies before that code serves traffic.
+## Retrieval index tuning
 
-**The worker is the single migration owner** — not because it skips the
-index-assert guard (it does not: `apps/worker/src/main.ts:48` asserts and
-crashes exactly like api and mcp), but because the pre-deploy command is a
-separate process running only the migrate entrypoint, which never boots the app
-and so never reaches that assert. Do NOT
-add the same `preDeployCommand` to `rag-api`/`rag-mcp`: concurrent runs of the
-`0000_init.sql` bootstrap (HNSW/GIN index creation) would contend.
+The HNSW index on `chunks.embedding` is built with `m = 16, ef_construction = 64` (`packages/db/drizzle/0000_init.sql`).
+`hnsw.ef_search` is set per query with `SET LOCAL` in `packages/db/src/hybrid-search.ts`. The value comes from
+`packages/db/src/hnsw.ts` `resolveEfSearch`: at least 100 and at least the dense candidate pool, capped at 1000. No env
+var overrides it today, so there is nothing to tune at the connection level. The 768-dimension chain and the boot index
+checks are in the `rag-postgres-contracts` skill and the root CLAUDE.md.
 
-**Ordering caveat for schema-changing releases:** Railway has no cross-service
-deploy ordering, so deploy `rag-worker` **first** (or alone) on any release that
-adds a column the API reads, then `rag-api`/`rag-mcp`. This avoids a brief window
-where new API code queries a column the migration hasn't added yet. For a release
-with no schema change, order doesn't matter.
+## Local embeddings in production
 
-### Connection pooling
+`EMBEDDING_PROVIDER=local` runs `Xenova/bge-base-en-v1.5` (768-d) in-process with no network egress. It is the only
+embedding provider `COMPLIANCE_MODE=client-data` permits.
 
-The Node clients each create a 10-connection pool by default. For a Postgres instance with ~100 max connections, that supports roughly:
+- **The weights are already in the images.** api, worker and mcp `COPY` the cache from the digest-pinned
+  `ghcr.io/marcusk639/rag-warm-base@sha256:…` image (`docker/Dockerfile.warm-base`, published by
+  `.github/workflows/warm-base.yml`). Each Dockerfile sets `ENV HF_CACHE_DIR=/app/.hf-cache` to match. Nothing runs at
+  build or boot.
+- **Don't override `HF_CACHE_DIR` on the service.** An empty or different value misses the baked cache. Under
+  `client-data`, `LocalEmbeddingProvider` refuses to construct without it, and runtime downloads are refused.
+- `scripts/warm-model.ts` is needed only for a non-Docker host or a mounted cache volume.
+- `CHUNK_SIZE` is capped at 512 with this model (root CLAUDE.md).
+- Resources: about 430 MB on disk, 200–400 MB extra RSS during batch embedding, and roughly 50–100 chunks/s on 2 cores.
+  These are estimates, not measured on Railway.
 
-- 5 API replicas
-- 3 worker replicas
-- 2 MCP HTTP replicas
+The full `client-data` coupling (scanner, DPA file, TRI `block`, egress) is in `env.example` under `COMPLIANCE_MODE`.
 
-If you go higher, put a pooler in front (PgBouncer in transaction mode, or Neon's built-in pooler) and set `DATABASE_URL` to the pooler endpoint.
+## Secrets and rotation
 
-### Indexes
+Secrets live only in Railway variables, sealed in the dashboard. The CLI `--set` form lands in shell history. Never
+put a value in a doc or a committed file; `.env` is never committed (template: `env.example`).
 
-The HNSW index on `chunks.embedding` is created with `m=16, ef_construction=64`. Tune at query time by setting `hnsw.ef_search` per session — higher = better recall, slower. The system doesn't tune this automatically; if your retrieval recall is too low, raise the session GUC in your DB connection setup:
+- **`API_TOKENS`:** set `API_TOKENS=old,new` on api, mcp and worker and redeploy, move callers to the new token, then
+  remove the old one and redeploy again.
+- **Scope secret:** add the new value to the api's `INTERNAL_SCOPE_JWT_SECRETS` list and deploy, switch web and bot to
+  it, then drop the old value (`packages/core/src/internal-scope-auth.ts`).
+- **`API_PRINCIPALS`:** regenerating replaces every token at once ([`ACCESS-CONTROL.md`](./ACCESS-CONTROL.md)).
+- **Entra client secrets:** keep every expiry in a calendar. A lapsed secret fails quietly: syncs 401, sign-in breaks,
+  backups stop.
 
-```sql
-SET hnsw.ef_search = 100;  -- default 40
-```
+## Capacity and bottlenecks
 
-## Local embedding provider setup (CPA / §7216 compliance)
+These are rough planning figures from vendor documentation, not production measurements.
 
-When `EMBEDDING_PROVIDER=local`, embeddings run on-process via `@huggingface/transformers` (ONNX runtime) with zero network egress. This is required for any environment where real taxpayer documents may enter the pipeline.
+| Path      | Bottleneck      | Figure                                                                                                                                                                                                             |
+| --------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ingest    | Embedding API   | Gemini batches up to 100 inputs per call (`packages/rag/src/embeddings/gemini.ts`); throttle with `EMBEDDING_REQUESTS_PER_MINUTE`                                                                                  |
+| Ingest    | Parser CPU      | About 5–20 documents/min per core, by format; parser replicas scale linearly                                                                                                                                       |
+| Ingest    | Microsoft Graph | About 10K requests per 10 min per app per tenant, shared by SharePoint and Outlook; a 429 fails the job and pg-boss retries it (3 × 60 s with backoff); connectors do not retry in-process or honour `Retry-After` |
+| Retrieval | Query embedding | About 50–200 ms per query                                                                                                                                                                                          |
+| Retrieval | pgvector HNSW   | Under 10 ms below 1M chunks; under 100 ms below 10M                                                                                                                                                                |
 
-### Required env vars
-
-```env
-EMBEDDING_PROVIDER=local
-EMBEDDING_MODEL=Xenova/bge-base-en-v1.5   # 768-d; must match chunks.embedding column
-EMBEDDING_DIMENSIONS=768
-HF_CACHE_DIR=/opt/hf-cache               # shared across redeploys; avoids re-download
-```
-
-### First-startup model download (~430 MB)
-
-On first boot the ONNX runtime downloads `bge-base-en-v1.5` from HuggingFace Hub to `HF_CACHE_DIR`. In production, pre-warm the cache during the Docker image build so the first live query doesn't time out:
-
-Set `HF_CACHE_DIR` explicitly. Unset, the weights land inside the installed `@huggingface/transformers` package, which the multi-stage `COPY --from=pruner` discards -- and under `COMPLIANCE_MODE=client-data` `LocalEmbeddingProvider` refuses to construct without it rather than caching somewhere destroyable. `EMBEDDING_MODEL` no longer needs setting: `scripts/warm-model.ts` falls back to `defaultEmbeddingModel("local")`, the same function `loadConfig` uses, so the warmed model cannot drift from the one the runtime requests.
-
-```dockerfile
-# In Dockerfile (worker and api), after `pnpm install`:
-RUN HF_CACHE_DIR=/opt/hf-cache \
-    EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 \
-    node_modules/.bin/tsx scripts/warm-model.ts
-```
-
-The build-stage path must be the same one the runtime reads, so keep `HF_CACHE_DIR=/opt/hf-cache` in the service's own environment too.
-
-Or run it manually before the first deploy:
-
-```sh
-HF_CACHE_DIR=/opt/hf-cache node_modules/.bin/tsx scripts/warm-model.ts
-```
-
-Subsequent container restarts read from the cache volume — no network egress, no download delay. Mount `HF_CACHE_DIR` as a persistent volume so it survives redeploys.
-
-### Disk and memory
-
-| Resource                    | Estimate                        |
-| --------------------------- | ------------------------------- |
-| Model size on disk          | ~430 MB                         |
-| Peak RSS during batch embed | +200–400 MB above baseline      |
-| Throughput                  | ~50–100 chunks/s on a 2-core VM |
-
-### Compliance checklist
-
-- [ ] `EMBEDDING_PROVIDER=local` — confirmed in production `.env`
-- [ ] `HF_CACHE_DIR` — mounted as a persistent volume
-- [ ] `EGRESS_ALLOWED_HOSTS` — set to the generation vendor only (not the embedding API)
-- [ ] `COMPLIANCE_MODE=client-data` — set once a DPA is filed in `docs/compliance/`
-- [ ] Model cache — the app images COPY it from the digest-pinned
-      `rag-warm-base` image (see `docker/Dockerfile.warm-base`); nothing to run
-      by hand. Only a non-Docker or mounted-volume deployment needs
-      `scripts/warm-model.ts`.
-
----
-
-## Secrets
-
-DO NOT commit `.env`. The hook in this repo's parent setup blocks `.env` writes to enforce that. Production options, ordered by preference:
-
-1. **Secret Manager** (GCP Secret Manager, AWS Secrets Manager, Vercel Environment Variables): inject as env at container start.
-2. **Kubernetes Secrets** with `secretKeyRef` env entries.
-3. **HashiCorp Vault** with a sidecar injector.
-
-For the API token allow-list (`API_TOKENS`), rotate by:
-
-1. Add a new token to the env: `API_TOKENS=old-token,new-token`.
-2. Roll the API deployment.
-3. Update callers to use the new token.
-4. Remove the old token: `API_TOKENS=new-token`.
-5. Roll the API deployment again.
-
-## Scaling guidance
-
-### Ingestion is bottlenecked by
-
-1. **Embedding API throughput.** Gemini free tier is 1500 req/min; OpenAI is much higher but paid. The worker batches up to 100 chunks per Gemini call, so it can process ~150K chunks/min before saturating the free tier.
-2. **Parser sidecar CPU.** Document parsing (especially OCR via Unstructured) is CPU-bound. Scale parser replicas linearly; one core handles 5–20 docs/min depending on format.
-3. **Source rate limits.** Microsoft Graph: ~10K requests / 10 min per app per tenant. Google Workspace: much higher. The connectors throw `ConnectorTransientError` on 429; pg-boss retries with backoff.
-
-### Retrieval is bottlenecked by
-
-1. **Embedding latency for the query.** ~50–200ms per query depending on provider.
-2. **pgvector ANN search.** Sub-10ms for <1M chunks with HNSW; sub-100ms for <10M. Past that, partition by tenant or move to a dedicated vector store.
-
-### Cost levers (rough order of impact)
-
-- **Use a free embedding provider.** Gemini is free up to its quota; switching from OpenAI saves $0.13 per million embedded tokens.
-- **Embed only changed content.** The content-hash short-circuit ensures unchanged documents skip embedding. Don't trigger full syncs unnecessarily.
-- **Tune chunk size.** Smaller chunks = more embedding calls; larger chunks = fewer but worse retrieval precision. The default 800 tokens / 120 overlap is a reasonable middle.
-- **Tune HNSW ef_search.** Lower = faster, less recall. Find the lowest value that meets your quality bar.
+The cheapest lever is not re-embedding: unchanged content short-circuits on its content hash, so avoid needless full
+syncs.
 
 ## Monitoring
 
-Endpoints to scrape / probe:
+| Probe                                                                                  | What it tells you                                                                |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `GET /health` (api, mcp, bot), `GET /api/health` (web)                                 | Liveness only. The bot's `/health` is green with Postgres unreachable, by design |
+| `GET /ready` (api)                                                                     | Database ping                                                                    |
+| `SELECT state, count(*) FROM pgboss.job WHERE name = 'rag.sync_source' GROUP BY state` | Sync jobs by state; `created` is queue depth                                     |
+| `SELECT name, policy FROM pgboss.queue WHERE name = 'rag.sync_source'`                 | Must be `singleton` (`packages/ingestion/src/queue.ts`)                          |
+| `ingestion_jobs` rows with `status = 'failed'`                                         | Failed sync runs over time                                                       |
+| `ingest_log` rows by `action` (`ingested`, `blocked`, `tri-flagged`, `failed`)         | Per-document outcomes                                                            |
+| Worker log markers `ingest.run.summary`, `ingest.continuation`, `ingest.sync.failed`   | Run totals, pages still queued, and failed syncs                                 |
 
-- `GET /health` on API: liveness.
-- `GET /ready` on API: dependency check (DB).
-- pg-boss exposes job stats via SQL: `SELECT * FROM pgboss.job WHERE state IN ('active', 'failed')`.
-- `ingestion_jobs` table is human-readable history of sync runs.
+Also worth tracking: `chunks` row growth, api p95 latency on `/search` and `/ask`, and parser 5xx rate. No alerting is
+wired today. The backup dead-man's switch is tracked in [`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md).
 
-Recommended metrics to track:
+## Railway gotchas
 
-- `ingestion_jobs.status='failed'` count over time
-- pg-boss queue depth (`SELECT COUNT(*) FROM pgboss.job WHERE state='created'`)
-- `chunks` row count growth
-- API p95 latency on `/search` and `/ask`
-- Parser sidecar 5xx rate
+- **Parser build context.** `services/parser-py/Dockerfile` copies `requirements.txt` and `app/` relative to its own
+  directory, so the service needs Root Directory `/services/parser-py`. Don't change the `COPY` paths: local compose
+  builds with that context. Neither CLI trick works: `railway up services/parser-py` fails with "prefix not found", and
+  `railway up` from inside the directory can't locate the Dockerfile.
+- **Parser Dockerfile selection.** `services/parser-py/railway.json` says `dockerfilePath: services/parser-py/Dockerfile`,
+  which is repo-root-relative, while the live service uses Root Directory `/services/parser-py`, where the Dockerfile
+  is just `Dockerfile`. UNVERIFIED which one wins. Settle it by checking `rag-parser` → Settings for the config-file
+  path and any `RAILWAY_DOCKERFILE_PATH` variable.
+- **The parser binds IPv6 and runs as non-root.** Uvicorn listens on `--host ::` port 8000 for private networking, as
+  `appuser` (uid 10001).
+- **Healthcheck vs pinned port.** On 2026-08-01 a pinned port that didn't match the domain's target port failed
+  `rag-api`'s healthcheck. That is why no service sets `PORT` ([Ports](#ports)).
+- **Migrating without the pre-deploy command.** Your laptop can't resolve `*.railway.internal`. Open a temporary TCP
+  proxy with `railway tcp-proxy --service rag-postgres create --port 5432`, run
+  `DATABASE_URL=postgresql://rag:…@<proxyhost>:<port>/rag?sslmode=no-verify pnpm db:migrate` locally, then
+  `railway tcp-proxy --service rag-postgres delete <id> --yes`. The database is internal-only again once the proxy is
+  gone.
+- **`railway ssh` hides stdout in non-interactive mode** (seen with CLI v5.19 in 2026-06). Read database state
+  interactively, or send output to stderr. UNVERIFIED on the current CLI version.
+- **`railway connect rag-postgres`** depends on the image name and a `DATABASE_URL` on the database service (root
+  CLAUDE.md). `rag-postgres` carries one since the 2026-09-02 move to the postgres-ssl image; the 2026-10-02 restore drill
+  saw it resolve to `rag-postgres.railway.internal` ([`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md)).
+- **Cron services need `restartPolicyType: NEVER`.** Railway skips a scheduled run while the previous deployment is
+  still Active, so a crash-looping cron job suppresses every later run ([`BACKUP-AND-RECOVERY.md`](./BACKUP-AND-RECOVERY.md)).
+
+## Appendix: self-hosting with docker compose
+
+`docker/compose.prod.yml` is a working single-host stack and the per-tenant provisioning unit for a deployment that
+can't use Railway. It defines `postgres` (`pgvector/pgvector:pg16`), `parser`, `api`, `web`, `teams-bot`, `mcp` and
+`worker`. It has no `ollama` and no backup service, so add those yourself if you need them. It was the planned target
+until 2026-06-14; Railway replaced it, and it is not what runs in production today.
+
+Build the images from the repo root first (each compose service reads an image name such as
+`${WORKER_IMAGE:-rag-worker:latest}`):
+
+```bash
+docker build -f apps/api/Dockerfile    -t rag-api    .
+docker build -f apps/worker/Dockerfile -t rag-worker .
+docker build -f apps/mcp/Dockerfile    -t rag-mcp    .
+docker build -f apps/web/Dockerfile    -t rag-web    .
+```
+
+Then provision one tenant:
+
+```bash
+cp env.example .env.<tenant>          # fill it in; never commit it
+C="docker compose -f docker/compose.prod.yml --env-file .env.<tenant> -p <tenant>"
+$C up -d postgres parser              # infrastructure first
+$C run --rm worker node node_modules/@rag/db/dist/migrate.js   # the worker is the migration owner
+$C up -d api mcp worker web           # add teams-bot if used
+```
+
+Done when: `curl http://<host>:<api-port>/ready` returns `{"status":"ready"}`.
+
+Don't share one Postgres instance between tenants with sensitive data. Each tenant gets its own volume, secrets file
+and `-p` project name.
+
+### Encryption at rest
+
+The `postgres_data` named volume must sit on an encrypted block device. Options:
+
+- **Linux LUKS:** `cryptsetup luksFormat /dev/sdX`, then mount it at `/var/lib/docker/volumes/<tenant>_postgres_data/`.
+- **Cloud disk encryption:** AWS EBS with KMS, GCP Persistent Disk with CMEK, or equivalent. Most cloud VMs encrypt by
+  default; confirm it is on.
+- **Verify:** `lsblk -o NAME,FSTYPE,MOUNTPOINT,SIZE` shows the underlying device as encrypted (for LUKS, a `crypto_LUKS`
+  parent).
+
+On Railway the volume is the platform's. UNVERIFIED: Railway's at-rest encryption guarantee for volumes; settle it from Railway's security documentation before relying on it for a compliance claim.
+
+### When to move to Kubernetes
+
+Move to namespace-per-tenant Kubernetes only when the number of isolated tenants makes managing N compose hosts
+unwieldy. The same images and the per-source `data_class` model carry over with no app changes.
