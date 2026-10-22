@@ -277,10 +277,9 @@ test(
     await expect(chips).not.toHaveCount(0);
 
     for (const chip of await chips.all()) {
-      const title = ((await chip.textContent()) ?? "").replace(
-        /^\[\d+\]\s*/,
-        "",
-      );
+      // The `title` attribute, not the text: the chip's text also carries the
+      // optional modified-date and document-class badges after the title.
+      const title = await chip.getAttribute("title");
       const docId = await chip.getAttribute("data-doc-id");
       if (docId === null)
         throw new Error("citation chip is missing data-doc-id");
