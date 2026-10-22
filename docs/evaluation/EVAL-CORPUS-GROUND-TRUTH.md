@@ -1,437 +1,228 @@
-# Corpus-grounded ground truth — a third scoring tier
-
-**Status:** design, 2026-08-01. Not built. Prerequisites and hazards below.
-**Fills:** the one assistant failure mode nothing currently detects.
-
+---
+title: Corpus-grounded ground truth
+status: current
+last_verified: 2026-10-21
+verified_against: 6d5b458
+answers: What the corpus-grounded scoring tier is for, which parts (screen gate, claim extraction, quote verification, read-only corpus walk) are built and which are not, and the rules any further work must follow.
+read_when: Extending claim extraction, running scripts/extract-corpus.ts, building a corpus-grounded scorer, or writing anything that walks the production corpus.
+supersedes: []
+code:
+  [
+    packages/rag/src/extraction/claim-extractor.ts,
+    packages/rag/src/extraction/claim-verification.ts,
+    packages/rag/src/extraction/screen-gate.ts,
+    scripts/extract-corpus.ts,
+    packages/db/src/queries.ts,
+    packages/db/src/client.ts,
+  ]
 ---
 
-## Why this exists
+# Corpus-grounded ground truth
 
-Four ways the KB assistant can fail. Three have a check; one does not.
+This tier would score an answer against what the firm's own documents say, independent of what retrieval
+returned. The input side is built: a client-identifier screen, a sign-off gate, claim extraction that keeps
+only verifiable quotes, and a read-only corpus walk. The scoring side is not. There is no
+`tier1-corpus-grounded` value in `ScoringTier` (`tests/e2e/src/eval/gold-set.ts`), no entailment scorer, no
+independent claim verifier, and no pinned claim set. The tiers it would sit beside are described in
+[EVALUATION.md](./EVALUATION.md#scoring-tiers).
 
-| Failure                                                      | Detected by                                                     |
-| ------------------------------------------------------------ | --------------------------------------------------------------- |
-| Hallucinates a claim not present in the retrieved text       | `faithfulness.ts` (Tier 1)                                      |
-| Retrieves the wrong document, or misses the right one        | `metrics.ts` — **but only with labelled `relevant` ids**        |
-| **Answer contradicts what the firm's own SOP actually says** | **Nothing. This is the gap.**                                   |
-| The SOP itself is wrong or outdated                          | A credentialed preparer. Not automatable, and not trying to be. |
+## Why this tier exists
 
-Faithfulness compares the answer to **whatever happened to be retrieved**. If
-retrieval returned the wrong document and the answer faithfully reproduces it,
-faithfulness scores well. The answer is still wrong.
+| Failure                                               | Detected by                                              |
+| ----------------------------------------------------- | -------------------------------------------------------- |
+| A claim not present in the retrieved text             | Faithfulness (`tests/e2e/src/eval/faithfulness.ts`)      |
+| The wrong document retrieved, or the right one missed | Retrieval metrics, but only with labelled `relevant` ids |
+| An answer that contradicts what the firm's SOP says   | Nothing yet. This tier                                   |
+| The SOP itself is wrong or outdated                   | A credentialed preparer. Not automatable                 |
 
-Corpus-grounded truth closes that: it compares the answer to **what the corpus
-actually says**, independent of what retrieval returned.
+Faithfulness compares the answer with whatever was retrieved. If retrieval returned the wrong document and
+the answer reproduces it faithfully, faithfulness scores well and the answer is still wrong.
 
-## The reframing that makes this legitimate without a CPA
+The tier needs no CPA. The assistant's job is to reproduce firm procedure, not to hold opinions about tax,
+so "does it convey what our SOP says" is close to the product requirement. Whether the SOP is right is a
+knowledge-base governance question (issue ISS-05 in the cpa-consulting register), so this tier does not
+cross epistemic constraint C2.
 
-For a knowledge-base assistant, _"does it accurately convey what our SOP says"_
-is very nearly the product requirement. **The assistant's job is to reproduce
-firm procedure, not to hold opinions about tax.** Whether the SOP is _right_ is a
-**KB-governance** question — ISS-05's ~80% — not an assistant question.
+A perfect score here means the assistant faithfully reproduces the firm's documents. It does not mean the
+answers are correct. The KB is deliberately indexed as-is, superseded documents included, so a perfect
+score can mean a stale procedure was reproduced faithfully. Never report this score without that sentence.
 
-So this tier tests the assistant correctly and does **not** cross epistemic
-constraint C2. It is not a substitute for the Tier 2 CPA verdict; it is a
-different question, and one that happens to be the one most staff usage depends
-on.
+## What is built
 
-> ### ⚠ What a perfect score would and would not mean
->
-> A 100% corpus-grounded score means **the assistant faithfully reproduces the
-> firm's documents.** It does **not** mean the answers are correct. If an SOP is
-> stale, a perfect score means the assistant faithfully reproduced a stale
-> procedure — and we **deliberately indexed the KB as-is**, so superseded
-> documents are present by design. Never report this score without that sentence
-> attached.
+| Piece                    | Where                                                                                        | What it does                                                                                                                                                                                           |
+| ------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Read-only corpus walk    | `listDocuments`, `iterateDocuments`, `countDocuments` (`packages/db/src/queries.ts`)         | Keyset-paged enumeration of indexed documents, ordered by `id`                                                                                                                                         |
+| Read-only connection     | `createReadOnlyDb`, `assertReadOnly` (`packages/db/src/client.ts`)                           | Every transaction starts with `default_transaction_read_only=on`. `assertReadOnly` proves it by attempting a write and requiring SQLSTATE `25006`. This holds for superusers too (`read-only.test.ts`) |
+| Client-identifier screen | `scripts/extract-corpus.ts`                                                                  | Deterministic regex patterns: `ssn`, `ein`, `bank-account`, `tax-form-with-data`, `client-file-language`. Tuned to over-report; a hit is a shortlist entry for human review, never a verdict           |
+| Screen gate              | `evaluateExtractionGate`, `corpusFingerprint` (`packages/rag/src/extraction/screen-gate.ts`) | Fails closed unless a current, attributed, complete human sign-off exists                                                                                                                              |
+| Claim extraction         | `extractClaims`, `CLAIM_EXTRACTION_PROMPT` (`claim-extractor.ts`)                            | Asks a model for `{claim, quote, topic, distractorNote}`, then keeps only claims that pass quote verification                                                                                          |
+| Quote verification       | `verifyClaim`, `MATCH_RUNGS` (`claim-verification.ts`)                                       | Locates the model's quote in the source markdown and stores the slice from the document                                                                                                                |
 
----
+### Running the extraction pass
 
-## Design
+```bash
+# Screen only: no model calls, no keys
+DATABASE_URL=... pnpm exec tsx scripts/extract-corpus.ts [--source <uuid>] [--limit 30]
 
-### 1. Extract claims, not summaries
-
-The unit is an **atomic, checkable assertion** with provenance:
-
-```ts
-interface CorpusClaim {
-  id: string;
-  /** The assertion, in one sentence. */
-  claim: string;
-  /** Production connector externalId — doubles as the `relevant` label. */
-  documentExternalId: string;
-  documentTitle: string;
-  /** documents.source_modified_at — the staleness signal. */
-  sourceModifiedAt: string | null;
-  /** ⚠ VERBATIM span from the document. Mandatory. See below. */
-  quote: string;
-  topic: string;
-}
+# Extraction: an egress event, opt-in, refused without a current sign-off
+DATABASE_URL=... GEMINI_API_KEY=... pnpm exec tsx scripts/extract-corpus.ts --extract
 ```
 
-> **The `quote` is the whole design, and it is non-negotiable.** Without a
-> verbatim span, "ground truth" is itself an LLM summary — and you have built a
-> second artefact to distrust rather than a reference to check against. Every
-> claim must be traceable to text a human can read in the source document in
-> seconds. **Any claim whose quote does not literally contain the assertion is
-> dropped, not rewritten.**
-
-### 2. Contradictions are output, not error
-
-In an uncleaned KB, two documents giving different answers is **expected**.
-Cluster claims by topic; where two conflict, emit a record carrying **both**
-claims and **both** dates.
-
-**Do not silently resolve by recency.** Newer is a strong prior, not a fact — a
-recently-touched file may be a copy, and the authoritative version may be older.
-Emit the conflict, let it route to the cleanup queue, and let a human decide.
-
-This is the highest-value byproduct: it is precisely the wrong-version risk the
-index-as-is decision accepted, now **measured rather than assumed**, and it
-generates cleanup work ranked by evidence.
-
-### 3. Claims generate questions nearly for free
-
-A claim yields all three expensive parts of a gold-set entry at once:
-
-| Gold-set field     | Comes from                                                  |
-| ------------------ | ----------------------------------------------------------- |
-| `query`            | The claim, inverted into how staff would phrase it          |
-| `relevant`         | `documentExternalId` — **the labelling bottleneck, solved** |
-| expected substance | The `quote`                                                 |
-
-That second row is the point. Labelling which documents should answer which
-question is the tedious half of gold-set authoring, and this derives it.
-
-### 4. A third tier
-
-Add to `ScoringTier` in `gold-set.ts`:
-
-```ts
-/** Answer vs. what the corpus says. Automatable; does NOT establish correctness. */
-| "tier1-corpus-grounded"
-```
-
-It sits between the existing two and must not be conflated with either:
-
-| Tier                    | Question it answers                      | Needs a CPA? |
-| ----------------------- | ---------------------------------------- | ------------ |
-| `tier1-automatable`     | Did the right document come back?        | No           |
-| `tier1-corpus-grounded` | Does the answer match what the SOP says? | No           |
-| `tier2-cpa-verified`    | Is the answer right as tax practice?     | **Yes**      |
-
-⚠ **`expectedAnswer`/`verifiedBy` stay untouched by this tier.** A corpus quote is
-not a verified gold answer, and writing one into those fields would launder a
-document excerpt into a CPA attestation. Corpus claims live in their own file.
-
-### 5. Scoring
-
-Entailment between the answer and the claim's `quote`. Both texts are in the
-prompt, so an LLM judge is legitimate here for the same reason it is in
-`faithfulness.ts` — it compares, it does not recall.
-
-Three outcomes, and the third matters most:
-
-- **supported** — the answer agrees with the corpus
-- **contradicted** — the answer disagrees with the corpus → a real defect
-- **unaddressed** — the answer never engaged the claim → usually a retrieval miss,
-  which sorts it into ISS-05's pile 2
-
----
-
----
-
-## Claim extraction — the hard half, and where it goes wrong
-
-The walk is built (`scripts/extract-corpus.ts`, `listDocuments`). Turning document
-text into claims is the remaining piece, and it is harder than "prompt a model
-for `{claim, quote}`" for reasons worth writing down before anyone tries.
-
-### ⚠ First, a sequencing error in this document's own design
-
-The sections above describe extraction and the client-identifier screen as **one
-pass over the corpus**, on the reasoning that you are reading every document
-anyway. **That ordering is wrong, and the reason is egress.**
-
-Extraction sends document text to a model. The screen is the thing that
-establishes the corpus is Class A/B — and it **has not run yet**. Running them
-together discloses every document to a third-party model _before_ anything has
-checked whether some of them are client files. ISS-05 flags exactly this: the
-corpus is classified internal-only **by default, not because anyone checked.**
-
-**Correct order: screen the whole corpus, resolve the flags with Chris or Doug,
-then extract.** The shipped script already happens to do the safe half — it makes
-**zero model calls**, computing the inventory and screen locally — so nothing has
-leaked. But the combined-pass framing above would have led the next person to
-wire a generator into it, which is why this is recorded rather than quietly
-fixed. The "read every document once" efficiency argument is real but it is worth
-less than the ordering.
-
-### The two failure modes, and only one is mechanical
-
-Ask a model for `{claim, quote}` and you get two distinct failures:
-
-|       | Failure                                                         | Mechanically checkable?                           |
-| ----- | --------------------------------------------------------------- | ------------------------------------------------- |
-| **A** | The quote is not actually in the document                       | **Yes** — and this is the whole point of the rule |
-| **B** | The quote _is_ in the document but does not establish the claim | **No** — this is entailment                       |
-
-They need completely different treatment. Conflating them is how "verified
-against the source" quietly becomes "the model said so."
-
-### A — why this is harder than `document.includes(quote)`
-
-An honest model, not hallucinating, routinely returns a quote that is _nearly_
-verbatim:
-
-- **Whitespace.** Parsed markdown wraps at odd points; the model returns the
-  sentence with the newline collapsed to a space.
-- **Unicode.** Smart quotes → straight quotes, en-dash → hyphen, non-breaking
-  space → space. Common when the source came out of Word.
-- **Punctuation edges.** A trailing period added or dropped.
-- **Markdown artefacts.** The source reads `**BK-CATCHUP**`; the model strips the
-  asterisks.
-- **Tables.** The source is `| Code | BK-CATCHUP |` and the model quotes
-  `Code: BK-CATCHUP` — a faithful reading, not a verbatim span.
-
-Every normalization you add to accept these is **a licence to differ**, and
-normalization is where the rigour leaks. Too strict and the yield collapses; too
-lenient and paraphrase walks back in through the door the rule exists to close.
-
-#### The move that dissolves the problem: never store the model's quote
-
-Do not verify the model's string and keep it. **Use the model's string only to
-locate a span, then store the span taken from the document.**
-
-```
-model returns quote text
-  → code locates it in the source markdown
-  → code stores markdown.slice(start, end)   ← this is what persists
-  → if it cannot be located, the claim is DROPPED
-```
-
-What ends up in the artefact is then, by construction, **always real document
-text**. The model's job is reduced from _reproduce the text_ to _point at the
-text_, and pointing is something you can check.
-
-> Asking the model for character offsets directly would be cleaner still, and it
-> does not work — models cannot count characters reliably. Locate-then-slice gets
-> the same guarantee without depending on the model to do arithmetic.
-
-#### Make the normalization ladder explicit, and watch it
-
-Match in rungs, recording which rung succeeded:
-
-1. exact
-2. - whitespace collapsed
-3. - unicode folded (quotes, dashes, nbsp)
-4. - markdown stripped
-
-**The rung distribution is a diagnostic, not bookkeeping.** If most claims only
-match at rung 4, extraction is paraphrasing — and the fix is to tighten the
-prompt, **not** to add rung 5. A ladder that silently grows is the failure this
-whole design is trying to avoid, reintroduced as configuration.
-
-### B — quote real, claim overreaching
-
-The subtler failure: the model pulls a genuine sentence and hangs a claim on it
-that the sentence does not carry. Nothing mechanical catches this. A second model
-pass is legitimate — the same argument as `faithfulness.ts`, both texts are in the
-prompt — but only if it is set up not to cheat:
-
-- **Independent call.** The verifier sees the claim and the quote, **not the
-  document**. Given the document it will use document knowledge to fill the gap
-  and confirm almost anything.
-- **Adversarially framed.** _"Does this quote **alone** establish this claim?
-  Default to no."_ Verifiers asked to confirm, confirm.
-- **Sampled by a human periodically.** This is a model checking a model; without a
-  sample you have no idea what the agreement rate means.
-
-### The atomicity trap
-
-_"The catch-up bookkeeping code is BK-CATCHUP and it bills at the standard
-rate"_ is **two** claims. Compound claims are where support gets slippery: half
-the claim is in the quote, half is not, and the pair scores as supported.
-
-**Rule: one claim, one assertion.** If covering the claim requires a conjunction,
-split it. Splitting is cheap; a half-true gold entry poisons everything computed
-from it.
-
-### ⭐ The selection bias that quietly ruins the gold set
-
-This is the failure most likely to happen and least likely to be noticed.
-
-**A model extracting claims will preferentially pick the crisp, quotable,
-unambiguous ones** — a code, a threshold, a deadline stated in a single sentence.
-Those are exactly the facts retrieval already handles well. The questions that
-_discriminate_ between retrieval strategies come from the opposite material:
-things stated obliquely, facts spread across two sections, values living in a
-table cell, procedures described without naming the thing you would search for.
-
-So naive extraction yields an **easy** gold set — and this repo has already paid
-for that lesson once. `corpus.ts` produces a flat weight sweep that scores
-**identically at `dense=0`**, with embeddings contributing nothing, at MRR 1.000.
-**A gold set that cannot tell dense retrieval from sparse measures nothing**, and
-it will look like a healthy green dashboard while doing it.
-
-Mitigations, and they must be in the extraction prompt rather than bolted on
-after:
-
-- **Quota the hard categories** — require a share of claims drawn from tables,
-  from multi-section synthesis, and from obliquely-stated procedure.
-- **Require a `distractorNote` per claim**, and **drop claims that cannot name a
-  plausible near-neighbour.** A question with no distractor cannot discriminate
-  and is dead weight.
-- **Sanity-check the finished set the same way**: run the weight sweep. If it is
-  flat, the set is too easy — regardless of how many claims it holds.
-
-### Determinism, or the metric moves under you
-
-Re-running extraction produces different claims, so scores stop being comparable
-across runs and every regression is ambiguous. **Cache by `content_hash`** — the
-column already exists and already means "the parsed markdown changed" — and treat
-the claim set as a **versioned artefact that is reviewed and pinned**, not
-something regenerated on each eval.
-
-### What this costs
-
-~858 documents × one extraction call, plus a verification call per surviving
-claim. Not prohibitive, but not free either — and it is the argument for the
-**narrow start** recommended above: 20–30 documents in the families staff
-actually ask about, then let the retrieval log choose the rest.
-
----
-
-## The fourth dimension: is the answer any use?
-
-Everything above checks whether the answer is **true to the corpus**. None of it
-checks whether the answer is **worth reading**. An answer can be perfectly
-grounded, drawn from exactly the right document, and still useless — hedged into
-mush, a wall of quotes, "consult the SOP" when the SOP is right there, the actual
-step buried under preamble, or a refusal where the answer was plainly available.
-
-**This is the dimension that prompt changes actually move**, which makes it the
-one with a fast, safe iteration loop attached:
-
-| Failure                            | The lever that fixes it          |
-| ---------------------------------- | -------------------------------- |
-| Wrong/missing document retrieved   | chunking, RRF weights, reranking |
-| The document itself is wrong/stale | KB cleanup and governance        |
-| **Correct but useless answer**     | **the generation prompt**        |
-
-It also needs no CPA. _"Is this a useful answer to this question"_ is judgeable by
-anyone who can read.
-
-### ⚠ The trap: naive helpfulness scoring rewards exactly the wrong things
-
-LLM judges reliably reward **verbosity, fluency, and confidence**. In this system
-those are the risk profile, not the goal: confident-and-wrong over an uncleaned
-corpus is the failure mode the whole index-as-is decision accepted. A helpfulness
-metric that rewards assured prose will happily tune the assistant toward it.
-
-Two guards, and the first is the important one:
-
-**1. Abstention is correct behaviour, and must be scored as such.** The prompt's
-rule 3 emits a fixed string — _"The available documents do not contain enough
-information to answer that."_ That makes abstention **detectable mechanically, no
-judge involved.** Then the corpus claims decide whether it was right:
-
-| Corpus has the answer? | Assistant abstained? | Verdict                               |
-| ---------------------- | -------------------- | ------------------------------------- |
-| No                     | Yes                  | ✅ **Correct** — and a KB gap to log  |
-| No                     | No                   | 🔴 Fabrication — the worst outcome    |
-| Yes                    | Yes                  | 🟠 Over-refusal — retrieval or prompt |
-| Yes                    | No                   | → score on the rubric below           |
-
-This composition is the payoff of doing corpus extraction first: **it is what
-lets you tell a good abstention from a bad one**, which no answer-only metric can.
-
-**2. Cap and penalise padding.** Score length discipline explicitly, or the loop
-drifts toward longer answers because the judge likes them.
-
-### Rubric — each line maps to a prompt rule, so a bad score names its own fix
-
-| Dimension                  | Asks                                                           | Prompt rule |
-| -------------------------- | -------------------------------------------------------------- | ----------- |
-| **Answers what was asked** | Or a nearby question it found easier?                          | —           |
-| **Actionable**             | Gives the step, code, threshold — not "see the SOP"            | 4           |
-| **Complete for the ask**   | Multi-part question → multi-part answer                        | 7           |
-| **Honest about gaps**      | States what the documents don't cover instead of over-claiming | 8           |
-| **Surfaces disagreement**  | Where sources conflict, says so and cites both                 | 5           |
-| **Length discipline**      | No padding, no preamble, answer near the top                   | 4           |
-
-That last column is the design goal: **a low score points at a specific rule to
-change**, rather than at a vague sense that answers feel weak.
-
-The disagreement row is newly testable — corpus extraction finds contradictions
-in the KB, so you can ask a question you _know_ has two conflicting sources and
-check whether the assistant surfaces both or silently picks one. That is the
-wrong-version risk, measured directly.
-
-### Running the tune loop without fooling yourself
-
-1. **Freeze the question set before tuning.** A metric computed over questions
-   that change with the prompt measures nothing.
-2. **Re-run the whole set on every prompt change.** Prompt edits trade off —
-   pushing thoroughness (rule 7) against length discipline (rule 4) is a real
-   tension, and a fix for one commonly regresses the other.
-3. **Record the prompt version alongside the scores.** Without it no change is
-   attributable and the history is noise.
-4. **Spot-check against a human periodically.** Tuning against an LLM judge
-   optimises for the judge — that is not a reason to avoid the loop, it is a
-   reason to keep a human sample in it. This is the step that gets skipped.
-
-**None of this establishes correctness**, and it does not need to. It establishes
-that the assistant **finds what the KB has and says something useful about it** —
-which is the part you can fix this month, and the precondition for the CPA
-verdict being worth anyone's time. Judging a system that retrieves badly tells
-you about the retrieval, not the idea.
-
----
-
-## Prerequisites and hazards
-
-1. **🔴 Read-only, always.** See `ISSUES-AND-OPTIMIZATIONS.md` **C3**:
-   `run-real-eval.ts` calls `truncateAll`, which `TRUNCATE`s
-   `chunks, documents, ingestion_jobs, sources CASCADE`. It is the only existing
-   real-embedder runner and therefore the obvious template. **Copying it and
-   pointing it at production destroys the index.** An extraction pass must open a
-   read-only connection and must contain no `truncateAll`/`seedEvalCorpus`.
-2. **No corpus enumeration exists.** There is no `listDocuments` helper in
-   `packages/db/src/queries.ts`. A small read-only query over `documents`
-   (`external_id, title, source_modified_at, content`) is needed. Small, but it
-   does not exist today.
-3. **🔒 The extracted set is firm procedure detail and must never be committed to
-   a tracked path.** It belongs in a gitignored location — `docs/firm/` or
-   `firm-operations/` in the `cpa-consulting` workspace. This file (design only,
-   no firm content) is tracked; the output is not.
-4. **Class A/B only**, which the corpus already is by connection scope — the
-   assistant connects to SharePoint and only SharePoint, while client files live
-   in Onvio and on the Z Drive.
-
-> ### ⭐ A side effect worth more than the eval
->
-> ISS-05 flags this as **the real gate**: the corpus is _classified_ internal-only
-> **by default, not because anyone checked** — confirming none of the ~858 indexed
-> documents carries client-identifying material is "a document-list review by
-> Chris or Doug, not a legal task."
->
-> **An extraction pass reads every document.** Done with a client-identifier
-> screen running alongside, it produces exactly that review as a byproduct — and
-> converts a chore nobody has scheduled into the output of a job being run anyway.
-> **Build the screen into the first pass**; retrofitting it means a second full
-> read.
-
-## Scope — start narrow
-
-**Do not extract all ~858 documents first.** Start with the SOP families ISS-05
-names and staff most plausibly ask about — bookkeeping checklists, tax-return
-preparer/reviewer checklists, time coding, extensions, 1099s, sales tax — roughly
-20–30 documents.
-
-**Then let usage choose the rest.** The index-as-is decision made the retrieval
-log the prioritisation signal: once the assistant has real usage, the documents
-people actually reach for are the ones worth grounding. Extracting everything now
-front-loads work on documents that may never be queried.
-
-The exception is the client-identifier screen above — **that one wants full
-coverage**, because its value is proving a negative.
+Outputs go to `corpus-analysis/` at the repo root, which is gitignored.
+
+| File                          | Written by                                    |
+| ----------------------------- | --------------------------------------------- |
+| `inventory.jsonl`             | The screen pass, one row per document         |
+| `client-identifier-screen.md` | The screen pass. This is what the human reads |
+| `screen-state.json`           | The screen pass. Flagged ids and fingerprint  |
+| `screen-signoff.json`         | A human, after reviewing the screen report    |
+| `claims.jsonl`                | `--extract`, verified claims only             |
+
+Without `--extract`, the script makes no external calls; it reads only `DATABASE_URL`, not `loadConfig`.
+With `--extract`, it calls Gemini directly through `@google/genai`. It does not use `GeminiGenerator`,
+whose cited-Q&A system prompt fights a JSON extraction instruction. The model is `GENERATION_MODEL`,
+falling back to `gemini-2.0-flash`. UNVERIFIED: that this fallback model is still served; set
+`GENERATION_MODEL` explicitly. Extraction skips every document the sign-off lists as excluded. It warns
+when fewer than half of the kept claims matched at the `exact` rung.
+
+Done when `claims.jsonl` exists, the rung mix has been reviewed, and the files are still only under
+`corpus-analysis/`.
+
+## Rules
+
+These hold for every change to this pipeline. Each one is enforced in code where noted. The others are the
+spec for the parts not yet built.
+
+### Screen before any model call
+
+1. **Run the client-identifier screen over the whole corpus, and resolve every flag, before any document
+   text goes to a model.** Extraction is an egress event. The screen is what establishes the corpus holds
+   no client-identifying material, and the corpus is classified internal-only by default, not because
+   anyone checked. A combined screen-and-extract pass would disclose documents before the check that is
+   supposed to gate them. Enforced by `evaluateExtractionGate`.
+2. **The sign-off must be attributed, current and complete.** `screen-signoff.json` needs `approvedBy` and
+   `approvedOn` (Chris or Doug; see [../GLOSSARY.md](../GLOSSARY.md)). Its `corpusFingerprint` must equal the
+   current one, and every flagged id must be in exactly one of `clearedExternalIds` or
+   `excludedExternalIds`. The fingerprint hashes every document's `externalId` and `contentHash`, so any
+   added, removed or edited document invalidates the sign-off. A touched but unchanged file does not.
+3. **The screen wants full coverage, even when extraction starts narrow.** Its value is proving a negative.
+4. **Extraction over real KB content also needs the counsel determination.** See the
+   [egress caveat](./EVALUATION.md#egress-caveat). A clean screen alone is not enough.
+
+### Quotes are located, then sliced
+
+5. **Never store the model's quote.** Use it only to find a span in the source markdown. Store
+   `markdown.slice(start, end)`, and drop the claim if the span can't be found. Whatever persists is real
+   document text by construction. Don't ask the model for character offsets; models can't count characters
+   reliably. Enforced by `verifyClaim`; rejected claims are returned separately so the drop rate is visible.
+6. **The normalization ladder is fixed and diagnostic.** It matches in cumulative rungs: `exact`, then
+   `whitespace`, then `unicode` (quotes, dashes, non-breaking spaces), then `markdown` (emphasis and table
+   syntax). Each kept claim records its rung. If most claims only match at `markdown`, extraction is
+   paraphrasing: tighten the prompt, and don't add a fifth rung. A ladder that silently grows lets
+   paraphrase back in.
+
+### Claim quality
+
+7. **One claim, one assertion.** If stating it needs "and", split it. A compound claim is half-supported by
+   its quote and scores as supported. In the extraction prompt.
+8. **Counter selection bias.** A model extracting claims prefers crisp, quotable facts, which are exactly the
+   ones retrieval already handles. The prompt requires at least half the claims to come from tables, from
+   oblique wording, or from procedures named differently from how staff describe them.
+9. **Every claim needs a distractor.** The prompt requires a `distractorNote` and drops claims that can't
+   name one. A finished set should also produce a non-flat dense/sparse sweep. If the sweep is flat, the set
+   is too easy, however many claims it holds.
+10. **Contradictions are output, not error.** Not built. In an uncleaned KB, two documents disagreeing is
+    expected. Emit a record carrying both claims and both dates, and route it to the cleanup queue. Don't
+    resolve by recency: a recently touched file may be a copy of an older authoritative one. The generation
+    prompt applies the same rule to answers.
+
+### Verifying that a quote establishes its claim
+
+Not built. Mechanical verification proves the quote is in the document. It cannot prove the quote supports
+the claim. That is entailment, and it needs a second model pass with these constraints:
+
+11. **Independent call.** The verifier sees only the claim and the quote, never the document. Given the
+    document, it fills gaps from context and confirms almost anything.
+12. **Adversarial framing.** Ask "does this quote alone establish this claim? Default to no."
+13. **Human sampling.** A person periodically checks a sample. Without one, the agreement rate means
+    nothing.
+
+### Handling the output
+
+14. **Extracted claims are never committed.** They are firm procedure detail. They stay in gitignored
+    `corpus-analysis/`, or in a gitignored path in the cpa-consulting workspace, and their titles stay out
+    of commit messages and issues.
+15. **Production walks are read-only.** Use `createReadOnlyDb` and call `assertReadOnly` before reading,
+    as `extract-corpus.ts` does. Never import `truncateAll` or `seedEvalCorpus` into a script that touches
+    production. `tests/e2e/src/eval/run-real-eval.ts` truncates its database and is the obvious template to
+    copy. Its `truncateAll` now refuses non-local hosts unless `E2E_ALLOW_REMOTE_TRUNCATE=1`
+    (`assertDestructiveTestTarget`), but a guard on a test helper is not a reason to copy it. This hazard is
+    C3 in the archived [ISSUES-AND-OPTIMIZATIONS](../archive/reviews/ISSUES-AND-OPTIMIZATIONS.md).
+16. **Pin the claim set.** Not built. Re-running extraction produces different claims, which makes scores
+    incomparable across runs. Cache by `documents.content_hash` and treat the claim set as a reviewed,
+    versioned artifact, not something regenerated on each eval. Today `--extract` regenerates
+    `claims.jsonl` on every run.
+
+## The scorer to build
+
+Not built. Score entailment between an answer and each relevant claim's quote. Both texts are in the
+prompt, so an LLM judge is legitimate for the same reason it is in faithfulness. It must meet the
+calibration spec in [EVALUATION.md](./EVALUATION.md#calibrated-judge-specification-open). There are three
+outcomes:
+
+| Outcome      | Meaning                                                      |
+| ------------ | ------------------------------------------------------------ |
+| supported    | The answer agrees with the corpus                            |
+| contradicted | The answer disagrees with the corpus. A real defect          |
+| unaddressed  | The answer never engaged the claim. Usually a retrieval miss |
+
+A claim also yields most of a gold-set entry. The `query` is the claim inverted into staff phrasing, and
+`relevant` is the claim's document `externalId`. That second field removes the labelling bottleneck. The
+quote supplies the expected substance. A corpus quote must never go into `expectedAnswer` or `verifiedBy`,
+because that would launder a document excerpt into a CPA attestation. Corpus claims live in their own file.
+
+### Usefulness: is the answer worth reading
+
+A grounded answer from the right document can still be useless: hedged, a wall of quotes, "see the SOP",
+or a refusal where the answer was available. Prompt changes move this dimension, and anyone who can read can
+judge it. Naive helpfulness judges reward verbosity and confidence, which is this system's risk profile, so
+two guards apply.
+
+First, score abstention from corpus claims, not from the judge. The refusal sentence is fixed (`EMPTY_ANSWER`
+in `packages/services/src/ask.ts`, and coverage branch C of the generation prompt), so it is detectable
+mechanically.
+
+| Corpus has the answer? | Assistant abstained? | Verdict                                     |
+| ---------------------- | -------------------- | ------------------------------------------- |
+| No                     | Yes                  | Correct, and a KB gap to log                |
+| No                     | No                   | Fabrication, the worst outcome              |
+| Yes                    | Yes                  | Over-refusal: a retrieval or prompt problem |
+| Yes                    | No                   | Score on the rubric below                   |
+
+Second, score length discipline explicitly, or tuning drifts toward longer answers.
+
+The rubric maps each dimension to a section of `SYSTEM_PROMPT` (`packages/rag/src/generation/generator.ts`),
+so a low score names its own fix:
+
+| Dimension              | Asks                                                 | Prompt section                                          |
+| ---------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| Answers what was asked | Or a nearby, easier question?                        | —                                                       |
+| Actionable             | Gives the step, code or threshold, not "see the SOP" | Shape of the answer; grounding rule 3                   |
+| Complete for the ask   | A multi-part question gets a multi-part answer       | Shape of the answer ("synthesize across")               |
+| Honest about gaps      | Names what the documents don't cover                 | Coverage branch B                                       |
+| Surfaces disagreement  | Cites both sources where they conflict               | Conflicting or stale sources                            |
+| Length discipline      | No padding; the answer near the top                  | Shape of the answer ("let the question set the length") |
+
+Tuning-loop rules:
+
+1. Freeze the question set before tuning.
+2. Re-run the whole set on every prompt change; thoroughness and length discipline trade off.
+3. Record the prompt version with the scores.
+4. Spot-check against a human periodically, because tuning against a judge optimises for the judge.
+
+## Scope
+
+Start with 20–30 documents in the SOP families staff most plausibly ask about: bookkeeping checklists,
+tax-return preparer and reviewer checklists, time coding, extensions, 1099s and sales tax. Then let real
+usage choose the rest. The screen is the exception and covers everything (rule 3). Cost is one extraction
+call per document, plus one verification call per surviving claim once the verifier exists.
