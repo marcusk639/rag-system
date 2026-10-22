@@ -69,7 +69,7 @@ export async function registerSourceRoutes(
       // mailbox) is an admin-only operation. `Principal` today has no
       // "may create sources" capability distinct from "scoped to existing
       // sourceIds" — a brand-new source doesn't fit that model, so admin-only
-      // is the minimal viable gate (see PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md
+      // is the minimal viable gate (see docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md
       // Phase 1). Mirrors the direct `reply.code(...)` pattern `auth.ts` uses
       // for 401s rather than throwing a new error class.
       if (request.principal?.kind !== "admin") {

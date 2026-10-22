@@ -18,7 +18,7 @@
 #   --dry-run               resolve and show the request; create nothing
 #
 # It deliberately does NOT sync. Creating a source is reversible; ingesting is
-# not, and `docs/PURGE-RECORD-2026-08-03.md` records a corpus that had to be
+# not, and `docs/compliance/records/PURGE-RECORD-2026-08-03.md` records a corpus that had to be
 # deleted after a screen found TRI. The sync command is printed at the end so
 # the decision to ingest stays a separate, deliberate act.
 #
@@ -167,7 +167,7 @@ Before you sync, two things are worth knowing:
     guards GENERATION — it stops a prompt reaching a hosted model. It does not
     stop content reaching the index.
 
-  docs/PURGE-RECORD-2026-08-03.md has the background.
+  docs/compliance/records/PURGE-RECORD-2026-08-03.md has the background.
 
 When you are ready:
 

@@ -61,6 +61,13 @@ jobs:
           fi
           echo "clean: no tenant name in tracked files"
 
+      # Docs integrity: every live doc indexed and front-mattered, relative
+      # links resolve, every docs/ path cited from code exists, and no
+      # known-false claim reappears. A 2026-09 commit silently reverted an
+      # earlier docs cleanup; this is the check that would have caught it.
+      - name: Docs integrity
+        run: node scripts/check-docs.mjs
+
       - name: Unit tests
         run: pnpm test
 

@@ -13,7 +13,7 @@
  * gitignored (gold-*.json) but is still firm-confidential material.
  *
  * Refuses to run while the gold set is empty or invalid (see gold-set.ts and
- * docs/EVAL-GOLD-SET-GUIDE.md) — an empty run would print healthy-looking
+ * docs/evaluation/EVAL-GOLD-SET-GUIDE.md) — an empty run would print healthy-looking
  * zeros that mean nothing.
  */
 import { writeFile } from "node:fs/promises";
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   if (GOLD_QUESTIONS.length === 0) {
     process.stderr.write(
       "eval:gold: the gold set is empty — nothing to score. Author questions " +
-        "with firm staff first (docs/EVAL-GOLD-SET-GUIDE.md).\n",
+        "with firm staff first (docs/evaluation/EVAL-GOLD-SET-GUIDE.md).\n",
     );
     process.exit(2);
   }

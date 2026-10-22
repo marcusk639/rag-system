@@ -36,7 +36,7 @@ pnpm test:fresh               # build then unit-test (e2e excluded) — REQUIRED
 pnpm e2e                      # end-to-end tests (@rag/e2e, in tests/e2e/)
 pnpm eval                     # retrieval evaluation harness (@rag/e2e)
 pnpm eval:real                # eval harness against real providers (needs API keys)
-pnpm eval:gold                # eval against the curated gold set (docs/EVAL-GOLD-SET-GUIDE.md)
+pnpm eval:gold                # eval against the curated gold set (docs/evaluation/EVAL-GOLD-SET-GUIDE.md)
 pnpm gen:parser-types         # regenerate parser TS types from the live parser's OpenAPI schema
 pnpm --filter @rag/<pkg> test -- <name>   # single test in one package
 pnpm --filter @rag/web dev    # web UI — there is NO root `dev:web` script
@@ -64,64 +64,46 @@ npx tsx scripts/reembed-chunks.ts                                          # re-
 
 ## Where to find things
 
-| Concern                   | Location                                                                               |
-| ------------------------- | -------------------------------------------------------------------------------------- |
-| Shared types/interfaces   | `packages/core/src/`                                                                   |
-| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                                |
-| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                                      |
-| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                          |
-| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`          |
-| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                    |
-| Embedding providers       | `packages/rag/src/embeddings/`                                                         |
-| Chunking strategies       | `packages/rag/src/chunking/`                                                           |
-| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                          |
-| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4}/`   |
-| Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)     |
-| Neighbor expansion        | `packages/rag/src/retrieval/contextualize.ts`                                          |
-| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                   |
-| HTTP routes               | `apps/api/src/routes/`                                                                 |
-| MCP tools                 | `apps/mcp/src/tools/`                                                                  |
-| Worker job handlers       | `apps/worker/src/handlers/`                                                            |
-| Python parser             | `services/parser-py/app/main.py`                                                       |
-| Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules |
-| Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)        |
-| E2E suites                | `tests/e2e/` (`@rag/e2e`, also hosts the eval harness) and `tests/web-e2e/`            |
-| Shared test fixtures      | `packages/test-fixtures/`                                                              |
-| Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                         |
+| Concern                   | Location                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| Shared types/interfaces   | `packages/core/src/`                                                                        |
+| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                                     |
+| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                                           |
+| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                               |
+| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`               |
+| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                         |
+| Embedding providers       | `packages/rag/src/embeddings/`                                                              |
+| Chunking strategies       | `packages/rag/src/chunking/`                                                                |
+| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                               |
+| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4,custom}/` |
+| Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)          |
+| Neighbor expansion        | `packages/rag/src/retrieval/contextualize.ts`                                               |
+| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                        |
+| HTTP routes               | `apps/api/src/routes/`                                                                      |
+| MCP tools                 | `apps/mcp/src/tools/`                                                                       |
+| Worker job handlers       | `apps/worker/src/handlers/`                                                                 |
+| Python parser             | `services/parser-py/app/main.py`                                                            |
+| Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules      |
+| Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)             |
+| E2E suites                | `tests/e2e/` (`@rag/e2e`, also hosts the eval harness) and `tests/web-e2e/`                 |
+| Shared test fixtures      | `packages/test-fixtures/`                                                                   |
+| Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                              |
 
-## Adding a new connector
+## Adding a provider (connector, embedding model, auth strategy)
 
-1. Implement the `Connector` interface from `@rag/core` (`validate`, `list`, `fetch` methods; delta sync is driven by the `cursor` passed to `list()`, not a separate method).
-2. Add a subdirectory under `packages/connectors/src/<name>/`.
-3. Add a `case` to `packages/connectors/src/factory.ts`. (Optionally also re-export the class from `packages/connectors/src/index.ts` — note `git-markdown` and `ecfr-part4` do not, and work fine, since callers go through `createConnector`.)
-4. Extend `sourceKindEnum` in `packages/db/src/schema.ts` **and** the matching migration.
-5. Document OAuth/credential setup in `docs/CONNECTORS.md`.
-6. Add env vars to `env.example`.
-
-## Adding a new embedding provider
-
-1. Implement `EmbeddingProvider` in `packages/rag/src/embeddings/<name>.ts`.
-2. Register it in `packages/rag/src/embeddings/factory.ts`.
-3. Document the model + dimensions in `env.example` and `docs/ARCHITECTURE.md`.
-
-## Adding a new auth provider
-
-1. Implement `AuthProvider` (`authenticate(credential) → Promise<Principal | null>`) in `packages/core/src/`. Fail closed: return `null` for anything you can't positively authenticate; never throw for a bad credential.
-2. Add its config shape to `AuthProviderConfig` and a `case` in `createAuthProvider` (`packages/core/src/auth-provider-factory.ts`). Keep env parsing OUT of core — it lives in the runtime/app config layer.
-3. Wire env → config in `buildAuthProvider` (`packages/runtime/src/index.ts`).
-4. Document the env vars in `env.example`.
+All three follow the same shape: implement the interface from `@rag/core`, register it in the factory, document env in `env.example`. A new connector also needs a `sourceKindEnum` value **plus** its migration; `custom` is the one kind `createConnector` deliberately rejects. Auth providers must fail closed (return `null`, never throw) and keep env parsing out of core. The full step lists are in `.claude/rules/adding-{connector,embedding-provider,auth-provider}.md`; they load automatically when you touch those directories. The `rag-add-provider` skill walks through the same steps.
 
 ## Things that will trip you up
 
 - **`pnpm test` fails on a fresh clone.** Tests resolve workspace packages via their built `dist/` entry points, so an unbuilt checkout errors with `Failed to resolve entry for package "@rag/core"`. Run `pnpm test:fresh` (or `pnpm -r build` first). CI builds before testing, so this only bites locally.
-- **Migrations auto-run on Railway deploy.** The `rag-worker` service has a `preDeployCommand` (`node node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json:8`) — it's the single migration owner. That works because the pre-deploy command is a separate process running only the migrate entrypoint, so it never boots the worker app and never reaches the startup index-assert; all three apps, worker included, do assert and crash-loop on a not-yet-migrated DB. On a schema-changing release, deploy `rag-worker` first, then api/mcp. Don't add the same command to api/mcp (concurrent `0000_init` bootstrap contends). See `docs/DEPLOYMENT.md`.
+- **Migrations auto-run on Railway deploy.** The `rag-worker` service has a `preDeployCommand` (`node node_modules/@rag/db/dist/migrate.js`, see `apps/worker/railway.json:8`) — it's the single migration owner. That works because the pre-deploy command is a separate process running only the migrate entrypoint, so it never boots the worker app and never reaches the startup index-assert; all three apps, worker included, do assert and crash-loop on a not-yet-migrated DB. On a schema-changing release, deploy `rag-worker` first, then api/mcp. Don't add the same command to api/mcp (concurrent `0000_init` bootstrap contends). See `docs/operations/DEPLOYMENT.md`.
 - **pgvector dimension mismatch.** The `chunks.embedding` column is `vector(768)` to match Gemini. If you switch to OpenAI 1536-dim, change the column AND drop/rebuild the HNSW index. The migration script in `packages/db/drizzle/` handles this if you regenerate.
 - **`COMPLIANCE_MODE=client-data` changes boot behavior in four coupled places**, each a hard startup failure rather than a degraded mode. It (1) refuses `CONTENT_SCAN_PROVIDER=none`; (2) refuses runtime HuggingFace weight downloads, so `local` is the only permitted embedding provider and its weights must be pre-warmed at image-build time (`scripts/warm-model.ts`); (3) therefore requires `HF_CACHE_DIR` to name a durable path — `LocalEmbeddingProvider`'s **constructor** throws without it (`packages/rag/src/embeddings/local.ts`), so an empty-string compose override is as bad as unset; and (4) requires a DPA on record, with `EGRESS_ALLOWED_HOSTS` left blank unless a signed DPA covers each listed host (`docs/compliance/`). The authoritative annotations are in `env.example` — read it before changing any embedding or scanning env var.
 - **`CHUNK_SIZE` is silently capped at 512 when `EMBEDDING_PROVIDER=local`.** `Xenova/bge-base-en-v1.5` hard-truncates at 512 tokens, so a larger configured value is capped automatically with a startup warning. Don't route around the cap — chunks above it were previously embedded with invisible retrieval-quality loss.
 - **`scripts/` is a workspace package on purpose.** It ships no code; it's listed in `pnpm-workspace.yaml` only so `pnpm -r run test` picks up the Docker build-gate test in `scripts/warm-model-verified.test.ts`.
-- **Railway Postgres is a different image than local/CI, on purpose.** Production `rag-postgres` runs `ghcr.io/railwayapp-templates/postgres-ssl:16.14` (Railway's official image: bundles pgvector, self-signed SSL, and pgBackRest — WAL archiving to the `rag-documents` bucket is live, so `archive_mode=on` and a `postgres` superuser role must keep existing or backups stop silently). The image's **automated** PITR restore is broken on Railway volumes (err 088, and it wedges the volume into a crash loop) — backups are proven restorable, but only via the manual root procedure in `docs/BACKUP-SCHEDULE-RUNBOOK.md`. Local dev (`docker/docker-compose.yml`), the single-VM stack (`docker/compose.prod.yml`), and CI (`.github/workflows/e2e.yml`) still use `pgvector/pgvector:pg16` — that divergence is intentional, don't "fix" it. The image also hard-requires the volume at exactly `/var/lib/postgresql/data` with `PGDATA=/var/lib/postgresql/data/pgdata`; its entrypoint refuses to boot otherwise.
-- **`railway connect rag-postgres` detects the DB from the image NAME.** The CLI reads `serviceInstance.source.image` and matches it against a keyword list (`postgres`, `mysql`, `redis`, `mongo`, `postgis`, `timescale`, `mariadb`, `memcached`, `valkey`). Any image lacking one of those — `pgvector/pgvector:pg16` included — fails with `No supported database found in service` no matter how it's configured. It also needs a `DATABASE_URL` on the **database** service itself (not just on `rag-api`), which is why `rag-postgres` carries one.
-- **A Postgres image bump can silently invalidate every text index.** `postgres-ssl` tags track Debian, so a rebuild at the same PG minor can still move glibc (16.14 went bookworm/glibc 2.36 → trixie/glibc 2.41), making all text btree indexes suspect. The image's boot script then runs `ALTER DATABASE ... REFRESH COLLATION VERSION` on every database **without reindexing** — silencing the warning and erasing the only evidence that a rebuild is needed. After any Postgres image change: check `select version()` for a changed `pgdgNN`, and if it moved, run `REINDEX DATABASE <db>` **before** the refresh, for every connectable database (`rag`, `postgres`, `template1`, plus any `rag_premigration_*` leftovers) — not just `rag`.
+- **Railway Postgres runs `postgres-ssl:16.14`, not `pgvector/pgvector:pg16` — intentional.** Local, single-VM, and CI stay on `pgvector/pgvector:pg16`; don't "fix" the divergence. Automated PITR is broken on Railway volumes (manual restore only), and `archive_mode=on` plus the `postgres` superuser role must survive or backups stop silently. See `docs/operations/BACKUP-AND-RECOVERY.md`.
+- **`railway connect rag-postgres` matches on the image name** (an image without a DB keyword fails) and needs a `DATABASE_URL` on the DB service itself. See `docs/operations/DEPLOYMENT.md`.
+- **After any Postgres image change, `REINDEX DATABASE` every connectable DB _before_ the image's automatic `REFRESH COLLATION VERSION` hides a glibc move.** Procedure in `docs/operations/DEPLOYMENT.md`.
 - **The Python parser is a separate process.** If parsing fails locally, the first thing to check is whether the `parser` container is up (`docker ps`) and reachable at `PARSER_URL`.
 - **pg-boss schema.** It auto-creates the `pgboss` schema on first connect. If you nuke the DB, the worker re-creates it — no manual migration needed.
 - **Microsoft Graph throttling.** SharePoint and Outlook share the same Graph quota. The connector retries with backoff on 429 responses, but bulk re-syncs of huge libraries should be staged.
@@ -133,7 +115,7 @@ npx tsx scripts/reembed-chunks.ts                                          # re-
 Repo-committed (every contributor gets these via `pnpm install` → husky):
 
 - Pre-commit: prettier + eslint on staged files (lint-staged), secret scan (`scripts/check-secrets.mjs`), 800-line file cap (`scripts/check-file-sizes.mjs`).
-- Pre-push: `pnpm -r build && pnpm -r --filter '!@rag/e2e' run test` (e2e is excluded — it needs Docker and runs via `pnpm e2e` / CI instead), skipped when `.test-passed` matches HEAD.
+- Pre-push: `pnpm -r build && pnpm -r --filter '!@rag/*e2e' run test` (both `@rag/e2e` and `@rag/web-e2e` are excluded — it needs Docker and runs via `pnpm e2e` / CI instead), skipped when `.test-passed` matches HEAD.
 - Do not edit `.env` files — the template lives at `env.example`.
 - Do not edit `pnpm-lock.yaml` by hand — run `pnpm install` to update.
 

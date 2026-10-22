@@ -24,12 +24,12 @@ handlers under `src/app/api/`), which forwards to the backend HTTP API.
 
 ## Where things are
 
-| Concern                               | Location                                                                                      |
-| ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| BFF route handlers                    | `src/app/api/{chat,sources,upload,documents/[id],documents/[id]/download}/route.ts`           |
-| Server→backend client (token-bearing) | `src/lib/rag-api.ts`                                                                          |
-| Streaming chat client                 | `src/lib/stream-chat.ts`                                                                      |
-| UI components                         | `src/components/{chat-interface,knowledge-base,document-list,upload-modal,sessions-menu,ui}/` |
+| Concern                               | Location                                                                                                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BFF route handlers                    | `src/app/api/{chat,sources,upload,feedback,health,documents/[id],documents/[id]/download}/route.ts`; NextAuth at `src/app/api/auth/[...nextauth]/route.ts` |
+| Server→backend client (token-bearing) | `src/lib/rag-api.ts`                                                                                                                                       |
+| Streaming chat client                 | `src/lib/stream-chat.ts`                                                                                                                                   |
+| UI components                         | `src/components/{chat-interface,answer-feedback,knowledge-base,document-list,upload-modal,sessions-menu,ui}/`                                              |
 
 ## History (don't get confused)
 
@@ -41,4 +41,4 @@ extend. `rag-system/apps/web` is the only live copy.
 ## Commands
 
 There is no root `pnpm dev:web` script. Run web via `pnpm --filter @rag/web dev` (or `next dev`
-inside this dir). Lint here is `next lint`; typecheck is `tsc --noEmit`.
+inside this dir). Lint here is `next lint`; typecheck is `tsc --noEmit`; tests are `vitest run`.

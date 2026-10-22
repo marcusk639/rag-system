@@ -8,7 +8,7 @@
  * it can't run in CI on every PR the way the FakeEmbedder specs do. Run it
  * manually whenever a retrieval-affecting change (chunking, RRF weights,
  * reranking, embedding model) needs a real measurement — see
- * docs/EVAL-BASELINE.md for the last recorded numbers and the full rationale.
+ * docs/evaluation/EVALUATION.md for the last recorded numbers and the full rationale.
  *
  * Usage:
  *   pnpm docker:up   # postgres + parser must be running
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
     await writeFile(outPath, md + "\n", "utf8");
     console.log(`\nMarkdown report written to ${outPath.pathname}`);
     console.log(
-      "Copy its contents into docs/EVAL-BASELINE.md under this provider's section.",
+      "Copy its contents into docs/evaluation/EVALUATION.md under this provider's section.",
     );
   } finally {
     await close();

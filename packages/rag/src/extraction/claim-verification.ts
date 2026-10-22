@@ -4,7 +4,7 @@
  *
  * ## Why this module exists
  *
- * Corpus-grounded eval (`docs/EVAL-CORPUS-GROUND-TRUTH.md`) asks a model to read
+ * Corpus-grounded eval (`docs/evaluation/EVAL-CORPUS-GROUND-TRUTH.md`) asks a model to read
  * a document and emit `{claim, quote}` pairs. The quote is what makes the claim
  * checkable — without it, "ground truth" is just another model summary, and you
  * have built a second artefact to distrust instead of a reference to check

@@ -33,8 +33,8 @@ The highest-impact issues are: (1) `POST /sources` echoed the full `config` blob
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------- |
 | `Connector` interface described as `list/fetch/delta`                                                     | Corrected to `validate/list/fetch`; delta is driven by the `cursor` arg to `list()`  | `CLAUDE.md`                     |
 | Comment pointed to non-existent `0001_init.sql`                                                           | Corrected to `0000_init.sql`                                                         | `packages/db/src/schema.ts:123` |
-| GET/POST `/sources` examples showed `config`, but code strips it via `sanitizeSource`                     | Removed `config` from examples; added a note that all source responses omit `config` | `docs/API.md`                   |
-| Outlook source config missing `includeAttachments` (it exists in `outlook/config.ts`, default `true`)     | Added field to the documented config                                                 | `docs/CONNECTORS.md`            |
+| GET/POST `/sources` examples showed `config`, but code strips it via `sanitizeSource`                     | Removed `config` from examples; added a note that all source responses omit `config` | `docs/reference/API.md`         |
+| Outlook source config missing `includeAttachments` (it exists in `outlook/config.ts`, default `true`)     | Added field to the documented config                                                 | `docs/reference/CONNECTORS.md`  |
 | `LOG_LEVEL`, `MCP_ALLOWED_ORIGINS`, `MCP_MAX_SESSIONS`, `PARSER_MAX_UPLOAD_BYTES` read in code but absent | Added all four with comments/defaults                                                | `env.example`                   |
 
 ### Requires Human Decision
@@ -235,8 +235,8 @@ The highest-impact issues are: (1) `POST /sources` echoed the full `config` blob
 - [x] Fixed: MCP `search`/`ask` filters bounded to match the API caps — new `apps/mcp/src/tools/filter.ts`, wired into both tools
 - [x] Docs: corrected `Connector` interface description (`validate/list/fetch`) — `CLAUDE.md`
 - [x] Docs: corrected stale `0001_init.sql` → `0000_init.sql` — `packages/db/src/schema.ts`
-- [x] Docs: removed `config` from `/sources` examples + added the stripping note — `docs/API.md`
-- [x] Docs: added Outlook `includeAttachments` field — `docs/CONNECTORS.md`
+- [x] Docs: removed `config` from `/sources` examples + added the stripping note — `docs/reference/API.md`
+- [x] Docs: added Outlook `includeAttachments` field — `docs/reference/CONNECTORS.md`
 - [x] Docs: added `LOG_LEVEL`, `MCP_ALLOWED_ORIGINS`, `MCP_MAX_SESSIONS`, `PARSER_MAX_UPLOAD_BYTES` — `env.example`
 - [ ] Requires decision: add `PARSER_SECRET` auth to the parser sidecar (Python + Node client + env)
 - [ ] Requires decision: how to keep HNSW/tsvector GIN indexes from being dropped by Drizzle (H2)

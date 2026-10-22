@@ -63,7 +63,7 @@ curl http://localhost:3000/health
 
 ## Deployment (Railway)
 
-Services: `rag-api`, `rag-worker`, `rag-mcp`. Deploy order matters — see `docs/DEPLOYMENT.md`.
+Services: `rag-api`, `rag-worker`, `rag-mcp`. Deploy order matters — see `docs/operations/DEPLOYMENT.md`.
 
 - Worker deploys first (it runs `pnpm db:migrate` as `preDeployCommand`)
 - api/mcp deploy after worker

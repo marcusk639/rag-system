@@ -14,13 +14,13 @@
  *      instead of confabulating?
  *
  * ⚠ What this does NOT measure: whether an answer is substantively correct.
- * That is a CPA judgment and needs the gold set (docs/EVAL-GOLD-SET-GUIDE.md).
+ * That is a CPA judgment and needs the gold set (docs/evaluation/EVAL-GOLD-SET-GUIDE.md).
  * A green run here means "grounded in real documents", not "right".
  *
  * ⚠ Self-retrieval questions derived from document titles share vocabulary
  * with their target, so scores here are a FLOOR, not a quality ceiling —
  * the same lexical-overlap inflation that made the starter corpus useless
- * (docs/EVAL-BASELINE.md). A failure is meaningful; a pass is weak evidence.
+ * (docs/evaluation/EVALUATION.md). A failure is meaningful; a pass is weak evidence.
  *
  * Usage:
  *   RAG_API_URL=https://... RAG_API_TOKEN=... \
@@ -290,7 +290,7 @@ if (measured.length === 0) {
 if (selfMeasured.filter((r) => !r.retrievedExpected).length > 0) {
   console.log(
     `\nNOTE: ${selfMeasured.filter((r) => !r.retrievedExpected).length} self-retrieval miss(es) do NOT affect the exit code — ` +
-      `title-derived questions cannot support a threshold (docs/EVAL-BASELINE.md).`,
+      `title-derived questions cannot support a threshold (docs/evaluation/EVALUATION.md).`,
   );
 }
 process.exit(

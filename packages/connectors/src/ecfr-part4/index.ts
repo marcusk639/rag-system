@@ -10,7 +10,7 @@ import {
 import { EcfrPart4Config, type EcfrPart4Config as Config } from "./config.js";
 import { mapApiError } from "../util/errors.js";
 
-// See docs/ECFR-CONNECTOR-SPIKE.md: the REST versioner API is unreliable
+// See docs/reference/CONNECTORS.md#ecfr-part4: the REST versioner API is unreliable
 // (503s up to 40s+ observed) regardless of headers, so this connector reads
 // the static govinfo.gov bulk XML mirror exclusively -- no REST fallback.
 const USER_AGENT =

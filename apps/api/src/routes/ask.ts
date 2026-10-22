@@ -90,7 +90,7 @@ function auditAsk(
  * This path writes its 200 header before generation begins, so it cannot use
  * the status mapping in `error-handler.ts` — every failure used to flatten to
  * "Generation failed.". That defeated the air-gap verification in
- * `docs/LOCAL-GENERATION.md`: the documented signal is `EGRESS_BLOCKED`, and
+ * `docs/operations/LOCAL-GENERATION.md`: the documented signal is `EGRESS_BLOCKED`, and
  * through `apps/web` (the only consumer of this stream) an operator saw the
  * same string an unreachable model produces.
  *

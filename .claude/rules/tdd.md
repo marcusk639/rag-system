@@ -14,6 +14,6 @@ New features and bug fixes in this repo are test-first:
 Repo-specific expectations:
 
 - Bug fixes MUST start with a regression test reproducing the bug.
-- Do not use `--passWithNoTests` to dodge coverage for new packages — `packages/runtime` is the existing gap, don't add more.
+- Do not use `--passWithNoTests` to dodge coverage for new packages — `packages/test-fixtures` is the only existing gap, don't add more.
 - Connector changes: unit-test cursor/pagination/delta logic directly; the e2e suite only covers connectors black-box.
 - Retrieval-affecting changes (chunking, embeddings, RRF, parser, prompts) additionally require the eval harness: dispatch the `retrieval-eval-runner` agent or run `pnpm eval` before shipping.

@@ -11,7 +11,7 @@ import { runOneIngestion } from "../helpers/ingestion.js";
 import { TEST_API_TOKEN, TEST_INTERNAL_SCOPE_SECRET } from "../env.js";
 
 /**
- * Phase 3 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
+ * Phase 3 (docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
  * logging parity + `topScore`. Extended for SDD Task 4 (per-user-auth
  * follow-ups): threading the scope-assertion JWT's verified `sub` (AAD oid)
  * through to `audit_log.principal_subject`.
@@ -96,7 +96,7 @@ describe("E2E: audit_log search-path parity + backfill (Phase 3)", () => {
     expect(principalSubject?.is_nullable).toBe("YES");
     expect(principalSubject?.column_default).toBeNull();
 
-    // §7216/§10.22 disclosure recordkeeping (P3, docs/ISSUES-AND-OPTIMIZATIONS.md).
+    // §7216/§10.22 disclosure recordkeeping (P3, docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md).
     // Nullable at the SQL level (a pre-existing row backfills to NULL) even
     // though AskEventRow/logAskEvent require it at the TypeScript layer for
     // every NEW row — mirrors endpoint/topScore's own nullable-but-required

@@ -13,7 +13,7 @@ import { buildServer } from "../server.js";
 import type { Deps } from "../deps.js";
 
 /**
- * Phase 3 (docs/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
+ * Phase 3 (docs/archive/plans/PLAN-KB-GOVERNANCE-AND-USAGE-ANALYTICS.md): search-path audit
  * logging parity. `/ask` already wrote one `audit_log` row per call; this
  * closes the same gap for `/search` and adds the `topScore` signal to both.
  *

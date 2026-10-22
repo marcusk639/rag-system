@@ -3,7 +3,7 @@
 -- when callers pass a metadata filter. Default `jsonb_ops` opclass (not
 -- jsonb_path_ops) so it accelerates `@>` containment.
 --
--- Correction (2026-07-09, see H2 in docs/ISSUES-AND-OPTIMIZATIONS.md): the
+-- Correction (2026-07-09, see H2 in docs/archive/reviews/ISSUES-AND-OPTIMIZATIONS.md): the
 -- original version of this comment claimed jsonb_ops accelerates
 -- `->>'key' = ANY(...)`, which the query used at the time. That's wrong —
 -- jsonb_ops GIN indexes support `@>`/`?`/`?&`/`?|`, not `->>` text
