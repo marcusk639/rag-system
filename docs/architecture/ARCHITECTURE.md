@@ -151,7 +151,9 @@ The API and MCP enqueue syncs but never run them. The worker never serves querie
 
 1. **Layer 2, path exclusion.** Excluded paths are never parsed. This reads `metadata.path`, which
    only the SharePoint connector sets. On other connectors the check logs that it could not run.
-2. **Parse** through the sidecar. See [Parser sidecar](#parser-sidecar).
+2. **Parse** through the sidecar. See [Parser sidecar](#parser-sidecar). There is no file-type allowlist: every listed file is
+   sent to the parser, and an unsupported or empty file comes back 422. The pipeline records that as a
+   per-document failure (`recordIngestFailure`, counted in `documentsFailed`) and carries on with the job.
 3. **Layer 1, identifier redaction** over the markdown, tables and title, before anything is
    embedded or stored.
 4. **Layer 1.5, semantic scan** for client-identifying context (off unless a scanner is

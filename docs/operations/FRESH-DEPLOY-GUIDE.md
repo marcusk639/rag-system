@@ -317,7 +317,8 @@ The web app's auth model and its server-only credential rules are in [`apps/web/
 ### A.3 Azure Bot and bot registration
 
 1. Azure portal → **Create a resource → Azure Bot**: type of app **Single Tenant**, app creation **Create new
-   Microsoft App ID**, so the bot's id and secret are shared with no other app.
+   Microsoft App ID**, so the bot's id and secret are shared with no other app. Single Tenant is the only
+   choice: Microsoft stopped allowing new multi-tenant bot registrations on 2025-07-31.
 2. On the bot's Entra app (Azure Bot → **Configuration → Manage**): Application (client) ID is `MICROSOFT_APP_ID`, the
    tenant id is `MICROSOFT_APP_TENANT_ID`, and a new client secret **Value** is `MICROSOFT_APP_PASSWORD`.
 3. **Messaging endpoint** (Azure Bot → Configuration): `https://<bot-domain>/api/messages`, set after A.5.
