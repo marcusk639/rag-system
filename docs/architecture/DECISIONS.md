@@ -505,7 +505,7 @@ Rejected alternatives for D-07:
   supply chain auditable. There is no external library consumer, and publishing would put corpus findings from code
   comments on a public registry.
 - **Rejected:** code plugins with a registry (the 2026-07-17 design); dynamic module loading; npm publishing.
-- **Consequences:** an unknown pack field or an incompatible `PACK_CONTRACT_VERSION` fails boot. The unbuilt slices
+- **Consequences:** an incompatible `PACK_CONTRACT_VERSION` fails boot. Rejecting unknown pack fields is planned but not built: `PackFile` is a plain `z.object`, so extra keys load silently (slice 4 in [the spec](../specs/multi-vertical-platform.md#slice-status)). The unbuilt slices
   are tracked in [`../specs/multi-vertical-platform.md`](../specs/multi-vertical-platform.md).
 - **Status:** active. **Source:** `archive/specs/2026-08-03-multi-vertical-rag-platform-design.md`.
 
