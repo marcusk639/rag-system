@@ -91,6 +91,12 @@ describe("E2E: hybrid retrieval", () => {
       ADMIN_SCOPE,
     );
     expect(results.length).toBeGreaterThan(0);
+    // The query's words appear verbatim in the only document, so the sparse
+    // (full-text) half MUST score it. The finiteness checks below cannot catch
+    // a broken sparse half on their own: hybridSearch FULL OUTER JOINs dense
+    // and sparse hits and COALESCEs a missing sparse score to 0, so a sparse
+    // query returning nothing still yields a finite 0 on every row.
+    expect(Math.max(...results.map((r) => r.sparseScore))).toBeGreaterThan(0);
     for (const r of results) {
       expect(typeof r.denseScore).toBe("number");
       expect(typeof r.sparseScore).toBe("number");

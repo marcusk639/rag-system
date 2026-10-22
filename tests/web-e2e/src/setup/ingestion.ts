@@ -51,12 +51,11 @@ export async function truncateAll(db: Db): Promise<void> {
   `);
 }
 
-export async function createFixtureSource(db: Db): Promise<string> {
-  const row = await createSource(db, {
-    kind: "custom",
-    name: FIXTURE_SOURCE_NAME,
-    config: {},
-  });
+export async function createFixtureSource(
+  db: Db,
+  name: string = FIXTURE_SOURCE_NAME,
+): Promise<string> {
+  const row = await createSource(db, { kind: "custom", name, config: {} });
   return row.id;
 }
 
