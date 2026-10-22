@@ -1,614 +1,236 @@
-# Pilot — Launch Status
-
-> ⛔ **NEW 2026-10-21: SharePoint can no longer sync. Fixing it requires changing the Railway `MS_*` variables.**
-> A full sync failed at its first Graph call with `Tenant does not have a SPO license`: the tenant in
-> `MS_TENANT_ID` no longer has SharePoint Online.
->
-> - **What still works:** the index is intact and serving 48 documents / 211 chunks (47 SharePoint + 1 manual
->   upload) from the 2026-09-02 sync.
-> - **What's missing:** it lacks the parser upgrade (#142) and the chunker heading-path fix (#116). Both reach
->   existing documents only on re-ingest.
-> - **To fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker` **and** `rag-web`
->   (the only services that read them) to a SharePoint-licensed tenant's app registration. Then create a new
->   source, full-sync it, move access to the new source id (`API_PRINCIPALS` on `rag-api` and `rag-mcp`, plus
->   the DB grants), and purge the old source.
->
-> Full procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item **3a**. Tracked as P0 gate **3a** below.
-
-> ⛔ **Corpus-state claims below are stale (they describe 2026-08-04).** The
-> purge-and-re-sync is **complete**: the index now holds **47 documents / 210
-> chunks**, all Class A, all `gemini-embedding-001`, with search and ask verified
-> working. The gate analysis and the P0 table below remain useful; the "index is
-> EMPTY" banner does not.
->
-> **Verified state (queried 2026-09-07).** The Knowledge Base source was purged
-> and recreated (new id `dbba75e2-…`, replacing `badac563-…`); a full sync ran
-> twice on 2026-09-02, 17:14 and 17:24 UTC.
->
-> | Fact                | Value                                                                           |
-> | ------------------- | ------------------------------------------------------------------------------- |
-> | Index               | **47 documents / 210 chunks**, 1 source                                         |
-> | Embedding space     | 100% `gemini` / `gemini-embedding-001` — one coherent vector space              |
-> | Document class      | **47/47 Class A** — nothing else reached the index                              |
-> | Scanner disposition | `ingest_log`: 94 `ingested` (2 runs × 47), **6 `tri-flagged`**, **2 `blocked`** |
-> | TRI patterns caught | `1099+amount` ×4, `W2+amount` ×2; 2 escalated to Class D and quarantined        |
-> | Paths               | `metadata.path` on **47/47** — no `ingest.path_unavailable`                     |
-> | Delta cursor        | 5 drives, all carrying delta tokens                                             |
-> | Restore point       | pgBackRest WAL archiving live: 6,362 segments, **0 failures**                   |
->
-> **Why 47 and not 858 — this trips people up.** The 858-document corpus was
-> deliberately destroyed on 2026-08-03 for containing TRI
-> (`PURGE-RECORD-2026-08-03.md`). 47 is the post-purge, TRI-screened rebuild, not
-> an under-listing bug: the connector saw ~50 items and the scanner rejected 8.
-> **Do not "fix" the document count.**
->
-> **What this changes for the pilot.** P0 gate #1 — the content audit — was an
-> 858-document slog against a corpus known to contain TRI. It is now **47
-> documents, every one of them already screened by the TRI scanner and classed
-> A**, with the 8 that carried identifier patterns flagged or blocked at ingest.
-> The audit is a short review of a short list, and it is still the real gate:
-> the scanner catches identifier _patterns_, not client-confidential _content_,
-> which remains a firm-domain judgment for Chris/Doug.
-
-**Additional notes (2026-09-16):**
-
-- SharePoint permissions are not enforced per document — the pilot assumes only all-staff libraries are synced (review finding S-5, decision pending).
-- Deploying branch `fix/rag-review-findings` requires a full re-sync afterwards: `CONTENT_PROCESSING_VERSION=2` makes every document re-chunk and re-embed once. See `RAG-REVIEW-2026-09-16.md` §11.4.
-
-**Updated:** 2026-10-02 — **gate #1 now has a written procedure**
-([`compliance/GATE-1-CONTENT-AUDIT.md`](./compliance/GATE-1-CONTENT-AUDIT.md)):
-47 rows to review, plus one required code change, because a `WITHDRAW` verdict
-currently has nowhere in the schema to live and no retrieval path reads one.
-**Gate #3's "restore from a scheduled artifact" row is closed** — an untouched
-nightly artifact restored clean, 47/210 with HNSW and `vector(768)` intact
-([`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md)). Still open on #3:
-the off-Railway destination (Chris's admin consent) and `HEARTBEAT_URL`.
-Access control at the API, listed below as unenforced, was **remediated
-2026-10-02** — see `compliance/scope-conformance-2026-09-30.md` §0.4.
-
-**Updated:** 2026-08-03 — P0 gate #1 is a **live finding** (client-identifying
-material confirmed in the index); gate #3 is **partially closed**, not closed.
-Engineering table last verified 2026-07-16.
-
-> ✅ **Read first (updated 2026-08-04, superseded — see above) — the index is EMPTY, by design.**
->
-> The entire indexed corpus (858 documents / ~6,175 chunks) was **deliberately
-> purged on 2026-08-03** because it contained TRI. Production now holds **0
-> documents, 0 chunks, 3 sources** (cursors intact). Full account, with the
-> before/after evidence: [`PURGE-RECORD-2026-08-03.md`](./PURGE-RECORD-2026-08-03.md).
->
-> Three consequences that change how the rest of this file reads:
->
-> 1. **The exposure described below is closed.** Nothing client-identifying is
->    retrievable, because nothing is retrievable. `audit_log` confirms **no user
->    other than the operator ever queried the system.**
-> 2. ⛔ **A re-sync would restore all of it.** Cursors are intact and the
->    ingest-time gates are unbuilt, so one `POST /sources/:id/sync` undoes the
->    purge. Nothing triggers this automatically (verified — the only pg-boss
->    schedules are the weekly digest and the hourly audit shipper). **Do not
->    re-sync until content-boundary Phases 2 and 4 land.**
-> 3. **The pilot currently answers nothing.** `rag-web` is up and auth-gated, but
->    every question retrieves zero chunks and returns the no-information response.
->
-> The July disclosure is separately resolved: the Gemini key is **paid tier**
-> (Cloud Billing Tier 1, verified 2026-08-04), so the July 4 ingest ran under the
-> Cloud DPA with no-train and zero-retention — not free-tier terms. See
-> [`compliance/vendor-dpa-google-gemini.md`](./compliance/vendor-dpa-google-gemini.md).
-
-<details>
-<summary>Superseded — the 2026-08-03 warning this replaced (kept for the record)</summary>
-
-> ⛔ **Read first (2026-08-03).** Two things supersede everything below them:
->
-> 1. **The content audit ran and found client PII already in the live index.**
->    This retires every "no client data" statement previously in this file. See
->    [P0 gate #1](#p0--hard-gates-internalunapproved-pilot-only-until-done).
-> 2. **Closing gate #1 needs code**, not only firm judgment — connector
->    exclude-paths, a citation/metadata fix, and an ingest-time gate. The
->    "launch is gated on human/legal/infra work, not engineering" framing below
->    is **no longer accurate** and is retained only as the record of what was
->    believed on 2026-07-16.
-
-_(Point 2 still holds — those gates remain unbuilt, which is exactly why a
-re-sync is unsafe. Only point 1's "already in the live index" is superseded.)_
-
-</details>
-
-**Purpose:** One page that reflects what is _actually_ true right now, verified against the code — not what a plan's checkboxes claim. This project has a documented history of stale "resolved" claims creating false confidence; cross-check anything surprising against the tree before trusting it.
-
-> **On the dated blocks in this file.** `AMENDED` / `CORRECTED` / `UPDATED` all do
-> the same thing: quote the superseded claim, say why it was wrong, state what is
-> true now. Read the newest date as authoritative.
-
+---
+title: Launch status
+status: living-tracker
+last_verified: 2026-10-21
+verified_against: db0ceae
+answers: What the production index holds, which surfaces are live, and the status, owner and blocker of every launch gate.
+read_when: Deciding whether the pilot can widen, picking up launch work, or answering "is gate N done?".
+supersedes:
+  [
+    PILOT-LAUNCH-STATUS.md,
+    TEAMS-MVP-REQUIREMENTS.md,
+    PROTOTYPE-DELIVERY-OPTIONS.md,
+  ]
+code:
+  [
+    packages/core/src/config-schema.ts,
+    scripts/check-kb-grounding.mjs,
+    tests/e2e/src/eval/gold-set.ts,
+    apps/teams-bot/manifest/manifest.json,
+  ]
 ---
 
-## One-line status
-
-⚠ **Superseded on two counts — see Read first, above.**
-
-**(As of 2026-07-16)** The code is done and merged; launch is gated on human/legal/infra work, not engineering. All three staff surfaces (web app, MCP, Teams bot) are built, reviewed, and on `main`. What remains are the P0 gates and the Azure/Railway stand-up — none of it is code.
-
-> ### ⚠ AMENDED 2026-08-01 — "not engineering" was too strong
->
-> An end-to-end quality review found **three defects sitting directly between a
-> staff question and a useful answer**, none of which a build-passes gate would
-> catch. All three are now fixed, with tests and before/after measurements:
->
-> |         | Defect                                                                    | Effect on a real question                                                                                                                |
-> | ------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-> | **C-1** | TRI pre-flight blocked any prompt naming an IRS form near a dollar figure | Tax-procedure questions returned `500 Internal server error`. 8% of the firm's SOPs trip it; **every hit measured was a false positive** |
-> | **H-1** | `plainto_tsquery` ANDs every term, so the sparse arm returned nothing     | **5 of 15** realistic staff questions got zero keyword hits — "hybrid" search ran on one arm                                             |
-> | **H-7** | Citation filter only matched single-number brackets                       | An answer citing `[1, 2]` rendered with **zero sources** — silently                                                                      |
->
-> Two corrections to claims made elsewhere in this file and its companions:
->
-> - **The engineering go-live gate below is stale.** `pnpm typecheck` is **red on
->   `main`** (5 errors in `tests/e2e/src/specs/eval-faithfulness.spec.ts`),
->   verified pre-existing.
-> - **[`EVAL-BASELINE.md`](./EVAL-BASELINE.md)'s "the corpus is too easy" finding
->   was incomplete.** The flat weight sweep was partly the H-1 bug. Post-fix the
->   sweep responds and recall@5 rises 97.1% → 100%. The gold set is still the
->   right priority; the blanket "no retrieval work until it exists" is not.
->
-> Full analysis, severity-scored, incl. 20 further findings not yet actioned:
-> **[`PROTOTYPE-READINESS-REVIEW-2026-08-01.md`](./PROTOTYPE-READINESS-REVIEW-2026-08-01.md)**.
-> The largest unactioned gap is **no conversation memory** — follow-up questions
-> ("what about for partnerships?") fail on both surfaces.
-
----
-
-## Engineering — DONE (verified on `main`, 2026-07-16)
-
-| Area                                    | State                         | Evidence                                                                                                                                                                                                 |
-| --------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 17-task automatable readiness plan      | **Complete**                  | all artifacts exist on `main`; migrations `0000`→`0017`; `classify-source.ts`, MCP audit logging, secret-length enforcement, `staff_source_assignments`, migration guard, `EVAL-BASELINE.md` all present |
-| Harness readiness (hooks, CI, coverage) | **Complete**                  | pre-commit/pre-push hooks, CI format+parser-pytest jobs, coverage tooling (`readiness-report.md`, Level 3)                                                                                               |
-| Web chat app (`apps/web`)               | **Built + deploy config**     | Entra SSO, per-user scope, streaming, citations; `Dockerfile` + `railway.json` (commit `e285d89`)                                                                                                        |
-| Teams bot (`apps/teams-bot`)            | **Built + reviewed + merged** | 9-task plan, whole-branch review passed; merge `fe61ad7`; 43 unit tests                                                                                                                                  |
-| Eng go-live gate                        | ⚠ **Amber** (was "Green")     | `build + lint + unit` pass on `main`. **`typecheck` does NOT** — 5 errors in `tests/e2e/src/specs/eval-faithfulness.spec.ts`, verified pre-existing 2026-08-01. See review § M-7.                        |
-
-**Do not re-do any of the above.** If a plan doc's checkboxes look unchecked, they are stale — the work landed; verify against the tree.
-
----
-
-## What remains for launch — the critical path (mostly human/infra/legal; gate #1 also needs code)
-
-Tracked in detail in `docs/PILOT-MANUAL-RUNBOOK.md`. ⚠ **Corrected 2026-08-03:**
-this section previously read _"(all human/infra/legal) … Nothing here is a code
-task."_ That held until the content audit ran. Gates #2 and #3 are still purely
-human/infra/legal; **gate #1 is not** — see its entry.
-
-### P0 — hard gates (internal/unapproved pilot only until done)
-
-- [x] **0. ✅ RESOLVED 2026-09-07 — the §7216 guard was refusing a third of all questions; `GENERATION_TRI_POLICY=warn` is now set on `rag-api` and `rag-mcp`.**
-
-  Measured before and after with the same instrument
-  (`scripts/check-kb-grounding.mjs`, 51 questions, 0 errors both runs):
-
-  - Answered: **33/51 → 51/51**
-  - Blocked by the guard: **18 → 0**
-  - Self-retrieval: 29/30 (96.7%) → **43/47 (91.5%)**
-  - Refusal on out-of-corpus: 3/3 → **4/4**
-  - Invalid citations: 0 → 0
-
-  The self-retrieval _rate_ fell while the result improved: 29 correct
-  retrievals became 43, because the denominator grew from 30 to 47 as
-  previously-blocked questions started counting. 96.7% was measured over a
-  filtered, easier population. Refusal stayed perfect, so the change bought
-  coverage without buying confabulation.
-
-  **Why it was blocking.** Production never set `GENERATION_TRI_POLICY`, so it
-  inherited the `block` default — which `packages/core/src/config.ts` documents
-  as deliberate, precisely so the permissive setting must be chosen by a human
-  rather than "inherited by saying nothing".
-
-  **Only three documents carried a trigger**, found by scanning every blocked
-  document with `scanForTRI`: `Payroll - SOP - 1099 Process Master Workbook`
-  (`1099+amount`), `Admin - Template - Fee and Scope Proposal` (`1099+amount`),
-  and `Tax - Checklist - Entity Preparer Checklists` (`W2+amount`). The other
-  **14 were collateral** — the guard scans the assembled generation input
-  (question + every retrieved chunk), so a question about a clean document is
-  refused when a trigger lands in its top-k. Three documents, 6% of the corpus,
-  made ~36% of questions fail.
-
-  ⚠ **An earlier draft of this entry said "the guard refuses 17 of 47
-  documents."** That was wrong: the guard blocks _questions_, not documents, and
-  the blocked set was mostly bystanders. Corrected above.
-
-  **The blocking span, in full:** `1099 for any vendors "Less than $600"` — the
-  statutory reporting threshold, inside the SOP explaining how to run the firm's
-  1099 process. No taxpayer, no identifier, no amount belonging to a person.
-
-  **What `warn` does not weaken.** `896170e` (2026-08-03) split TRI policy by
-  pattern class for exactly this case. Identifying patterns (SSN / unformatted
-  SSN / EIN) **throw regardless of policy** and are untouched; that class was
-  tightened again afterwards by `19a7542`. A sweep of all 17 blocked documents
-  found **0 containing an identifying pattern**. `warn` also fires
-  `onTriDetected`, so every contextual hit is audited rather than silently
-  allowed — verified live:
-  `marker="generation.tri.warned" triPatterns=["1099+amount"]`.
-
-  ⚠ **Scope of that evidence:** the sweep scanned stored (post-redaction)
-  markdown — exactly the text the retriever chunks and the guard scans. It says
-  what can reach the model, not what is in the original SharePoint files.
-
-  **This is a §7216 disclosure decision**, made by the operator on 2026-09-07 —
-  which is what the `block` default exists to force. To revert: set
-  `GENERATION_TRI_POLICY=block` (or unset it). `COMPLIANCE_MODE=client-data`
-  overrides it to `block` upstream regardless.
-
-- [x] **1. Content audit — VERBAL SIGN-OFF 2026-10-02.** Superseded by
-      `compliance/GATE-1-CONTENT-AUDIT.md`: the 858-document corpus this line
-      originally described was destroyed on 2026-08-03
-      (`PURGE-RECORD-2026-08-03.md`); the rebuilt, TRI-screened corpus is 47
-      documents. Chris reviewed the audit worksheet and gave verbal approval.
-      Written sign-off (decision + reviewer per row, archived outside this
-      repo) is tracked in
-      [issue #82](https://github.com/marcusk639/rag-system/issues/82) —
-      treated as satisfied, not waived.
-- [ ] **2. Counsel + carrier sign-off** — §7216/Circular 230/GLBA. **Not
-      satisfied by Chris's sign-off above** — this gate names an attorney and
-      the firm's carrier specifically, neither of whom has reviewed anything
-      yet. Status per `compliance/vendor-dpa-google-gemini.md` (2026-08-04):
-      billing tier verified (Cloud DPA applies, no-train/zero-retention in
-      force), but counsel's adequacy review of that DPA for this practice's
-      §7216/GLBA risk profile, and CR-3 data residency, are both still
-      outstanding. Tracked in
-      [issue #83](https://github.com/marcusk639/rag-system/issues/83).
-- [ ] 🟡 **3. Backup/restore drill — HALF-OPEN.** The _restore_ leg is proven; the _backup schedule_ is a stopgap and the off-Railway destination is blocked. `BACKUP-SCHEDULE-RUNBOOK.md` states it plainly: _"a restore has been watched succeed from an artifact **nobody took by hand**… Until then P0 gate #3 is half-open, whatever the checkbox says."_ Marking this `[x]` was exactly the stale-resolved-claim pattern this file exists to prevent. Open items are enumerated once, at the end of this entry. What **is** done, 2026-07-31, both legs: Local:
-      fresh-instance restore + **88/88 e2e against restored data**. Production: real
-      data (858 docs / 6,175 chunks) dumped and restored **entirely inside Railway**
-      via `railway ssh` — nothing copied off their infrastructure — exit 0 in 4s,
-      **36/36 indexes** incl. HNSW, pgvector v0.8.2 intact, ANN query verified over
-      all 6,175 chunks. Production confirmed untouched; throwaway dropped.
-      Full write-up: `docs/BACKUP-RESTORE-DRILL.md`. Setup procedure for the
-      missing schedule: `docs/BACKUP-SCHEDULE-RUNBOOK.md`.
-      ✅ **UPDATED 2026-08-03 — the schedule now exists.** This entry previously
-      read _"A restore is proven; a backup schedule is not,"_ and listed enabling
-      Railway volume backups as "do this now, it is checkboxes." Both have since
-      been done. Per
-      [`BACKUP-SCHEDULE-RUNBOOK.md`](./BACKUP-SCHEDULE-RUNBOOK.md):
-      **(1)** Railway **volume backups** — ✅ enabled 2026-08-01 (Daily + Weekly).
-      **(2)** nightly **`pg_dump`** — 🟡 **LIVE as a stopgap** (`0 8 * * *` UTC),
-      landing in Railway's own bucket. The permanent, decorrelated off-Railway
-      destination is ⛔ **blocked on Chris's admin consent** — volume backups
-      restore only into the same project + environment, so they do not cover
-      project/account/provider loss.
-      Still open: a dead-man's-switch (`HEARTBEAT_URL` unset — nothing alerts if
-      the nightly dump stops, the failure `backup.sh`'s own header calls worse
-      than having no backup), a restore _from a
-      scheduled artifact_ (the drill restored a hand-taken dump), and the
-      `audit_log` retention window — a **counsel** question (ties to P2 #8), not a
-      default; volume-backup retention tops out at 3 months.
-
-- [ ] **3a. SharePoint re-sync is blocked: the Microsoft 365 tenant has no SharePoint licence (found 2026-10-21).**
-      A full sync of `dbba75e2-…` failed with `400 BadRequest: Tenant does not have a SPO license.` The
-      tenant named by `MS_TENANT_ID` lost SharePoint Online after the last good sync on 2026-09-02.
-
-      **Required change:** update `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET` on Railway, on
-      `rag-worker` and `rag-web` (the only services that read them), to a SharePoint-licensed tenant (with
-      admin consent), then redeploy. `scripts/set-ms-credentials.sh` sets `rag-worker` only; set `rag-web` by
-      hand.
-
-      **Then:**
-      - Create a new SharePoint source. The `siteId` changes with the tenant, and sources can't be edited.
-      - Full-sync it.
-      - Repoint `API_PRINCIPALS` (on both `rag-api` and `rag-mcp`) and the web/Teams grants to the new
-        source id.
-      - Purge the old source. The delete cascades its access grants, so repoint access first.
-
-      **Why it gates launch:**
-      - The index can't reflect current SharePoint content.
-      - The parser upgrade (#142) and heading-path fix (#116) never reach production documents.
-
-      **Also stale:** principal `chris` is scoped to three source ids that don't exist. Fix that in the same
-      `API_PRINCIPALS` edit.
-
-      **Procedure:** [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item 3a.
-
-### ✅ LIVE 2026-08-01 — the web app is deployed and auth-gated
-
-`rag-web` → **https://rag-web-production-1c0a.up.railway.app** — Option 1 below,
-shipped. Verified: `/api/health` 200; `/` redirects **307 → /api/auth/signin**;
-an unauthenticated `POST /api/chat` returns **307, not 200** (no unauthenticated
-data path). `rag-api` redeployed from current `main` and now runs the feedback
-route against the migration applied earlier.
-
-Entra objects created in the firm's tenant (within the permissions the tenant
-already grants Marcus — no admin action needed):
-
-| Object           | Value                                                                                                                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App registration | `the knowledge base Assistant (Web)` · `c885331a-8e73-47c0-9dff-263756a81942`                                                                                                   |
-| Security group   | `RAG-Admins` · `33cdedd4-61cb-465e-afe2-f37045cf243c`                                                                                                                           |
-| Sign-in scopes   | `openid profile email offline_access` — **user-consentable**                                                                                                                    |
-| Group claims     | `groupMembershipClaims=SecurityGroup` — ids arrive **inline in the token**, so the admin gate does **not** need the app-only Graph fallback (which would require admin consent) |
-
-⚠ **`WEB_AUTH_MODE=static-fallback` was deliberately NOT used.** It disables
-authentication entirely and issues every visitor one shared token — the firm's
-internal KB on an open URL. It exists as an emergency override; it is not a
-shortcut to launch.
-
-⚠ **Still pilot-scoped — but scope is now doing more work than it was.** Named
-users only. **Corrected 2026-08-03:** this passage previously read _"Class A/B
-sources only, no client data. P0 #1 (the content audit) is unchanged and is still
-the real gate."_ Both halves are now wrong. Client-identifying material **is**
-present in the live index (see the correction under _Fastest defensible path_
-below and P0 gate #1 above), so "Class A/B only" is a remediation target rather
-than a description, and gate #1 is **not** unchanged — it is a live finding.
-
-⛔ **The exposure is live, not theoretical.** This deployment is auth-gated but
-serving named pilot users right now, and per
-[`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md)
-§0b a client-named document title reaches the UI as a **citation**, bypassing the
-model entirely — so the system prompt's do-not-repeat-client-names rule cannot
-stop it. Phase 1 Task 1.1 (removing the flagged roster from the index) is
-**still an unchecked box**. Until it is executed, assume the roster is
-retrievable.
-
-#### 🔌 Port gotcha — this will bite the next service too
-
-`rag-api`'s redeploy failed its healthcheck, and the cause is a trap worth
-recording. **`packages/core/src/config.ts` resolves the listen port from
-`API_PORT` only** (`Number(env.API_PORT ?? 3000)`) — it never reads `PORT`.
-Railway injects **`PORT=8080`** and its V2 healthcheck probes _that_. So the app
-listened on 3000 while the probe knocked on 8080 and got nothing.
-
-It had gone unnoticed because the previous deployment's manifest carried **no
-`healthcheckPath`**, so nothing ever probed it, and the **domain** had an explicit
-target port of 3000 — public traffic worked fine. Applying `apps/api/railway.json`
-enabled the healthcheck for the first time and exposed the mismatch.
-
-Fixed by setting `API_PORT=8080` and `railway domain update … --port 8080`.
-**Both are required** — moving the app without moving the domain returns 502.
-`apps/web` is unaffected: Next.js standalone reads `PORT` natively.
-
-**Better long-term fix (not done):** make config read `API_PORT ?? PORT ?? 3000`
-so no per-service magic number is needed and any platform works.
-
-### ⚡ Fastest defensible path to a working prototype (2026-08-01)
-
-**The Azure blocker below stops the Teams bot, not the prototype.** Ranked
-options — full reasoning in
-[`PROTOTYPE-DELIVERY-OPTIONS.md`](./PROTOTYPE-DELIVERY-OPTIONS.md):
-
-| #     | Option                                             | Blocked by                                                         | Effort                |
-| ----- | -------------------------------------------------- | ------------------------------------------------------------------ | --------------------- |
-| **1** | **Deploy `apps/web`, pilot-scoped** ✅ recommended | **nothing** — no subscription, sign-in scopes are user-consentable | hours                 |
-| 2     | Teams **personal tab** wrapping the web app        | tenant custom-app-upload setting (⚠ unverified)                    | +½ day                |
-| 3     | Full Teams **bot**                                 | Azure subscription → Chris → purchasing                            | small, once unblocked |
-| 4     | MCP only — **already live**                        | nothing                                                            | zero                  |
-
-**Verified 2026-08-01:** all 3 indexed sources are SharePoint, `data_class =
-general` (844 + 14 + 0 docs), and nothing is connected to Onvio, the Z Drive, or
-QuickBooks. That connection scope still holds and is still the strongest part of
-the compliance story.
-
-> ### ⛔ CORRECTED 2026-08-03 — "this corpus has none" was wrong
->
-> This paragraph previously read _"internal KB content, **no client files, no
-> Onvio, no QuickBooks**. §7216 attaches to taxpayer data; this corpus has none,
-> which is why a scoped pilot is defensible without counsel sign-off."_ **The
-> first and third claims are falsified.** The `no Onvio / no QuickBooks` half
-> stands — that is a connection fact. The `no client files` half does not.
->
-> The client-identifier screen (`corpus-analysis/`) ran against the full
-> 858-document production corpus and found **355 documents carrying at least one
-> pattern hit**, including per-client billing and production analyses under
-> client-named folders, client fee/scope deliverables, engagement letters, and
-> **one indexed spreadsheet holding 522 SSN-shaped and 518 EIN-shaped values** —
-> a client roster. 17 documents carry SSN/EIN/bank-account hits.
->
-> **The hedge below was right and the conclusion above was wrong.** `general` was
-> the ingestion default, nobody had checked, and when the check was finally run it
-> came back the other way. Note what this does _not_ change: the connection scope
-> is unchanged, and no client data reached a third-party model that was not
-> already reachable. What it changes is that **P0 gate #1 is now a live finding
-> with remediation in flight, not an unstarted formality** — and the sentence
-> "a scoped pilot is defensible without counsel sign-off" can no longer rest on
-> the corpus being clean.
->
-> Remediation plan, including removal of the roster and structural folder
-> exclusion: [`superpowers/plans/2026-08-03-kb-content-boundary.md`](./superpowers/plans/2026-08-03-kb-content-boundary.md).
-> The same premise appeared in four other documents. All four were corrected on
-> 2026-08-03: `PROTOTYPE-DELIVERY-OPTIONS.md`, `STAFF-BOT-ONE-PAGER.md`,
-> `PLAN-LAUNCH-READINESS.md`, and `DECISION-CPA-KB-RAG-CONVERGENCE.md`.
-
-⚠ `general` was the ingestion _default_, never a verified judgment — which is
-exactly why the screen was run, and why it came back the way it did. **Gate #1
-above is the real compliance action.** Its firm-judgment half needs Chris/Doug,
-not an attorney; its remediation half needs code.
-
-### P1
-
-- [x] **0. Apply migration `0018_answer_feedback` to production.** ✅ **DONE
-      2026-07-31.** Found during the backup drill (production 17 migrations / 12
-      tables vs local 18 / 13). Applied by hand — the deployed `rag-api` image
-      predates the migration file, so `pnpm db:migrate` could not be run from it;
-      redeploying first would have shipped code before schema. Snapshot taken
-      first; SQL + the Drizzle tracking row applied in one transaction; resulting
-      schema verified **byte-identical** to the migrator-applied local schema
-      (columns, defaults, and all three `indexdef` strings incl.
-      `NULLS NOT DISTINCT`). Production now 18/18, 39 indexes, data untouched
-      (3 / 858 / 6,175). Procedure: `docs/BACKUP-RESTORE-DRILL.md` →
-      _Applying a migration by hand_.
-
-- [ ] **4. Deploy web + Teams bot** — ⛔ **NEW BLOCKER (2026-08-01): the Teams bot
-      needs an Azure subscription the firm does not have.** Verified against the
-      tenant — `az` returns `No subscriptions found` for `<admin>@<tenant-domain>`.
-      An **Azure Bot is an Azure _resource_** (runbook §3: "Create a resource →
-      Azure Bot"), so it needs a subscription with a payment method. The free F0
-      tier means **cost is not the obstacle; the absent subscription is.** The web
-      app is unaffected — Entra app registrations live in the tenant and are free.
-      ⚠ Unverified whether no subscription exists or Marcus merely has no role on
-      one; only an admin can distinguish them. Raised with Chris via the issue
-      register (Conflicts #11). Azure/Entra registrations + Railway + Teams packaging. **See `docs/AZURE-DEPLOY-RUNBOOK.md`** (covers both surfaces, incl. the new `BOT_OAUTH_CONNECTION_NAME` the bot needs). Code is done; this is portal/infra work.
-- [ ] **5. Docs-gap-digest privacy decision** — whether to retain question text for the weekly digest (a real privacy tradeoff; Marcus's call). Safe aggregate-only version already built.
-- [ ] **6. Baseline diary** — capture Chris's "interrupt" baseline _before_ anyone uses the bot.
-
-### P2
-
-- [ ] **7. Real CPA eval questions with Doug** — ⬆ **ESCALATED 2026-08-01: this
-      is now the single blocking input for all retrieval work.** The first
-      real-embedder run proved the current corpus cannot measure quality — the
-      dense/sparse sweep is _flat_, identical even at `dense=0` where embeddings
-      contribute nothing. Every tuning decision (reranking, weights, chunking,
-      models) is therefore **unfalsifiable** until this exists. Instrument is
-      built and waiting: `tests/e2e/src/eval/gold-set.ts` (empty by design,
-      validated, references real production docs) + a 90-minute session guide,
-      `docs/EVAL-GOLD-SET-GUIDE.md`. Original note follows — — the gold set that unblocks reranker/tuning decisions (harness already runs against a real embedder; questions are the missing input).
-- [ ] **8. Audit-log off-host destination + retention window** — decision, then small config.
-- [ ] **9. Classifier build-vs-buy** — deferred; nothing depends on it.
-- [ ] **10. Reset the shared local dev Postgres** — local-dev hygiene only; not production.
-
----
-
-## New requirement surfaced by the Teams bot build
-
-The Teams bot added one deployment input beyond the web app's Entra setup:
-
-- **`BOT_OAUTH_CONNECTION_NAME`** — the Azure Bot **OAuth connection setting** name (distinct from the SSO scope URI). Without it configured (and passing its **Test Connection** in the Azure portal), the bot authenticates no one and replies with a sign-in card to every message. Fully covered in `docs/AZURE-DEPLOY-RUNBOOK.md` §4.
-- The bot must run **single-instance** (it uses `MemoryStorage` for the SSO exchange) — fine for a firm-scale pilot.
-
----
-
-## Doc-accuracy corrections (truth-up)
-
-- **`docs/DEPLOYMENT-TARGET.md` is stale.** It records "single VM + docker-compose" (a 2026-06-14 decision), but the system actually runs on **Railway** (per `docs/PILOT-MANUAL-RUNBOOK.md` items 3–4 and the `railway.json` deploy configs on each app). Treat Railway as the live target; the VM+compose file (`docker/compose.prod.yml`) remains a valid self-host option but is not what's deployed.
-- **Plan checkboxes are not a status source.** `PLAN-PILOT-READINESS-AUTOMATABLE.md` and `PLAN-LAUNCH-READINESS.md` have mostly-unchecked boxes despite the work being complete — they were execution guides, not trackers. **This file is the status source; the manual runbook is the remaining-work source.**
-
----
-
-## Carried-forward backlog
-
-Migrated here on 2026-09-07 when `HANDOFF-2026-09-02.md` was retired (its premise
-— that the re-sync had not run — stopped being true). These items were live at
-that point and none is owned.
-
-### Security / correctness
-
-- ~~**Postgres TLS.**~~ ✅ **CLOSED 2026-09-07.** All five services carry an
-  `sslmode` in `DATABASE_URL` (the URL, not the `DATABASE_SSL` flag, which
-  configures only the app pool — pg-boss and the migration runner parse the URL
-  themselves, and pg-boss held every plaintext connection). Verified against
-  `pg_stat_ssl`: **7/7 client backends `ssl = t`, TLSv1.3, zero plaintext**, and
-  the worker's boot warning is gone. Setting the variable was not enough — the
-  worker ran on for another 20 minutes on its old container, so verify the
-  connections, never the variable.
-
-  ⚠ **The two stacks need opposite spellings of the same intent.** The URL is
-  copy-pasteable between them, which makes this a trap rather than a footnote:
-
-  | Consumer                                                              | Value               | What the other value does                                                                                        |
-  | --------------------------------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-  | node-postgres (api, worker, mcp, web, teams-bot)                      | `sslmode=no-verify` | `require` is aliased to `verify-full` by `pg-connection-string` >= 2.10 → **fails** against the self-signed cert |
-  | libpq (`pg_dump` in `services/backup`, `psql`, the restore procedure) | `sslmode=require`   | `no-verify` is **not a valid libpq sslmode** → refuses to connect before trying                                  |
-
-  Both verified by execution. Note libpq defaults to `prefer`, so its connections
-  were already opportunistically encrypted; `require` makes it mandatory rather
-  than silently falling back. These modes encrypt without authenticating the
-  server — full verification needs the image's CA distributed to every client,
-  which is later hardening, not a launch gate.
-
-- **Spreadsheet content is chunked from an unredacted field — dormant but real.**
-  Redaction rewrites only markdown (`pipeline.ts:379`, written back at `:422`),
-  but `chunker.chunk(parsed)` gets the whole object, and for spreadsheets
-  `composite-chunker.ts:42` routes on `document.tables` and `:55` chunks from
-  those rows, bypassing the redacted markdown. `parsed.tables` is never redacted.
-  It is currently contained only _indirectly_: the parser also renders tables
-  into `markdown`, so redaction finds the identifiers there, escalating the doc
-  to Class D and quarantining it before chunking. That protection is a side
-  effect of markdown rendering, not a guard on `tables`. Any change that stops
-  rendering tables into markdown — or a sheet whose rendering differs from its
-  rows — silently reopens it. The worst document in the 2026-08-03 screen was a
-  spreadsheet with 522 SSN-shaped values. Redact `parsed.tables` (or chunk from a
-  redacted copy) before relying on the disposition matrix.
-- **`disposition` is modeled everywhere and consumed nowhere.** Declared in
-  `pack.yaml`, defaulted in `schema.ts:95`, carried through `load.ts:88`, emitted
-  on every `ScanMatch` in `scan.ts:92` — and nothing branches on it. `exclude`,
-  `redact` and `flag` are indistinguishable today: every high-confidence match is
-  masked, and quarantined if its kind is a Class D identifier. A pack author
-  would reasonably read `flag` as index-with-a-note. Either wire it or say so in
-  the pack header.
-- **Credential rotation, deferred by explicit user decision** ("i'll worry about
-  rotating the token later"): admin bearer token, Gemini API key,
-  `OBJECT_STORE_SECRET_ACCESS_KEY`.
-- **Off-Railway backup remains unbuilt.** WAL archiving and the proven-restorable
-  2026-09-02 full backup both live in Railway's own bucket, so neither covers
-  project/account/provider loss.
-- **Unfixed PR #41 review findings:** #3 Class-C escalation dead code
-  (`pipeline.ts:325`); #5 no eval evidence; #6 object store writes raw unredacted
-  bytes (`pipeline.ts:424`); #10 titles never redacted and sent to the model
-  (`generator.ts:142`).
-- **From #42:** the design's stricter SSA-validity SSN pattern was silently
-  dropped in the follow-on plan (PR #44).
-- **From #43:** ~23 broken markdown links to renamed docs; `pnpm eval:gold` names
-  a script that does not exist; `b-renamed.md` and `c.md` are stray tracked files
-  in the repo root. (#43 also claimed `clients/pilot/README.md` references a
-  missing `methodology/` directory — **that is false**; `methodology/README.md`
-  is tracked and the reference resolves. Do not go looking for it.)
-
-### Deploy-gate hardening
-
-Railway has `preDeployCommand` and `healthcheckPath` but **no
-`postDeployCommand`**, so there is no post-cutover gate in config-as-code. In
-leverage order:
-
-1. Point `healthcheckPath` at `/ready` rather than `/health`, and give MCP a real
-   `/ready`. Minutes of work.
-2. Expose the build's git SHA on `/ready` and assert it — nothing else catches
-   the stale-image class. `RAILWAY_GIT_COMMIT_SHA` is already populated.
-3. Make `preDeployCommand` a real preflight: it runs the new image with full
-   production env before anything takes traffic. Assert DB + migration version,
-   parser reachable _and_ authenticating, embedder reachable _and_ billable,
-   object store writable. **Hard-fail on auth/config errors (401/403), warn-only
-   on transient 5xx** — otherwise a momentary Gemini blip crash-loops the deploy.
-
-None of this catches the `.xls` class (one document silently never ingesting);
-that needs per-document ingest failures surfaced as a metric, not a log line.
-
-### Open threads
-
-- **Pack scanner — slice 2 of 2 not started.** ⚠ The plan doc
-  (`docs/superpowers/plans/2026-09-01-pack-scanner-slice.md`) shows 32 unchecked
-  steps and zero checked, but slice 1 is **written, tested, merged and wired** —
-  the boxes were never ticked. **Do not resume from step 1.** Remaining: the
-  discovery service, the `scan_*` tables, and the admin API. No plan document
-  exists yet; the design is
-  `docs/superpowers/specs/2026-08-31-sensitive-content-discovery-design.md` §3,
-  and the next step is writing a plan against it.
-- **TRI identifying-pattern exemptions — open decision, blocked on a
-  measurement.** `docs/superpowers/plans/2026-08-31-tri-identifying-pattern-exemptions.md`.
-  `TRI_IDENTIFYING_LABELS` hard-blocks regardless of `GENERATION_TRI_POLICY`, so
-  no position means "warn on contextual, block on identifiers, tolerate this known
-  false positive". The EIN pattern `\b\d{2}[-\s]\d{7}\b` matches vendor account
-  numbers and OCR'd figures; since a prompt bundles ~12 chunks, one poisoned SOP
-  chunk permanently fails every question whose retrieval pulls it. The only escape
-  is `off`, which disables SSN detection corpus-wide. Three options are written up
-  and **none is chosen — choosing before measuring is premature.** ⚠ The doc's
-  prerequisite was to measure identifying-label hit rates during the re-ingest;
-  **that re-ingest has now happened**, so this must be measured against the
-  standing corpus instead. `ssn-unformatted` post-dates the 858-document screen
-  and its false-positive rate is still unmeasured.
-
-### Second repo — `cpa-consulting`
-
-The live artifact is `docs/todo.md` (committed `feb111a`, 2026-08-31) — the firm's
-automation agenda from the Chris call. It ends `...listen to transcript to get the
-rest`, so it is **incomplete by design**; the remaining items are in an
-untranscribed call recording. Per that repo's own `CLAUDE.md`,
-`docs/issue-synthesis/` is the canonical workstream, **maintained in place and
-never regenerated** — read its `CLAUDE.md` first, as the firm facts and epistemic
-constraints there are binding.
-
----
-
-## Where things live
-
-| Concern                                        | Doc                                                                        |
-| ---------------------------------------------- | -------------------------------------------------------------------------- |
-| Remaining human/legal/infra work               | `docs/PILOT-MANUAL-RUNBOOK.md`                                             |
-| How to deploy (Azure + Railway, both surfaces) | `docs/AZURE-DEPLOY-RUNBOOK.md`                                             |
-| Staff-facing "how to use the bot"              | `docs/STAFF-BOT-ONE-PAGER.md`                                              |
-| Teams bot design + plan                        | `docs/superpowers/{specs,plans}/2026-07-16-teams-bot*`                     |
-| Architecture / connectors / API                | `docs/ARCHITECTURE.md`, `docs/CONNECTORS.md`, `docs/API.md`, `docs/MCP.md` |
+# Launch status
+
+This is the single launch tracker. It answers what production holds today and where each launch gate stands. As of
+2026-10-21 the system runs as an internal, named-user pilot on the web app. The index is intact (48 documents / 211
+chunks) but can't be re-synced, because the Microsoft 365 tenant lost its SharePoint Online licence (gate 3a). Gate 2
+(counsel and insurance-carrier sign-off) hasn't started. The Teams bot is blocked on an Azure subscription. Procedures
+for every gate live in [`LAUNCH-RUNBOOK.md`](./LAUNCH-RUNBOOK.md), under the same item numbers. Open engineering issues
+live in [`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md), not here. Gate numbers, people and classes are defined in
+[`GLOSSARY.md`](../GLOSSARY.md).
+
+## Production corpus and surfaces
+
+### Index
+
+| Fact                  | Value                                                                                                                       | Verified                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Size                  | **48 documents / 211 chunks** in 2 sources                                                                                  | Production query, 2026-10-20   |
+| SharePoint source     | "Knowledge Base", `dbba75e2-cecb-41be-8998-4f923158f741`: 47 documents. Last good full sync 2026-09-02                      | 2026-10-21 (re-sync failed)    |
+| Manual upload source  | "Manual Uploads", `b8e010f3-8b4b-4c6b-bf69-8cc639868fca` (`custom` kind, no connector): 1 document                          | 2026-10-20                     |
+| Document class        | All Class A                                                                                                                 | 2026-09-07 (SharePoint docs)   |
+| Embedding space       | 100% `gemini` / `gemini-embedding-001`                                                                                      | 2026-09-07                     |
+| Ingest screen (09-02) | `ingest_log`: 94 `ingested` (2 runs × 47), 6 `tri-flagged`, 2 `blocked`. Patterns: `1099+amount` ×4, `W2+amount` ×2         | 2026-09-07                     |
+| Delta cursor          | 5 drives, all carrying delta tokens                                                                                         | 2026-09-07                     |
+| Not in production yet | Anything that changes documents only on re-ingest after 2026-09-02: `CONTENT_PROCESSING_VERSION` 2 (2026-09-16), #116, #142 | Inferred from the sync history |
+| Connected systems     | SharePoint only. Nothing is connected to Onvio, the Z drive or QuickBooks                                                   | 2026-08-01                     |
+
+**Do not "fix" the document count.** The earlier 858-document corpus was deliberately purged on 2026-08-03 because it
+contained tax return information (TRI). The 47 SharePoint documents are the TRI-screened rebuild: the connector saw about
+50 items and the scanner flagged or blocked 8. It is not an under-listing bug.
+
+UNVERIFIED: the class of the manually uploaded 48th document. Its `ingest_log.doc_class` row (source `b8e010f3-…`)
+would settle it.
+
+### Deployed surfaces
+
+| Surface         | State                                                                                          | Notes                                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Web (`rag-web`) | Live and auth-gated since 2026-08-01 at `https://rag-web-production-1c0a.up.railway.app`       | Entra SSO; `RAG-Admins` group `33cdedd4-61cb-465e-afe2-f37045cf243c`. Registration detail: [FRESH-DEPLOY-GUIDE §A][fdg-a] |
+| MCP (`rag-mcp`) | Live (operator use only, not staff-facing)                                                     | Domain in [`DEPLOYMENT.md`](../operations/DEPLOYMENT.md)                                                                  |
+| Teams bot       | Code merged (`fe61ad7`, 2026-07-16); **not deployed**. `rag-teams-bot` didn't exist 2026-09-12 | See [Teams bot gate](#teams-bot-gate-item-4)                                                                              |
+
+[fdg-a]: ../operations/FRESH-DEPLOY-GUIDE.md#appendix-a-web-and-teams-entra-and-azure-detail
+
+`WEB_AUTH_MODE=static-fallback` is not set and must not be used to launch. It disables per-user auth and gives every
+visitor one shared token.
+
+UNVERIFIED: whether `rag-teams-bot` exists now. `railway status` would settle it.
+
+## Gate status
+
+P0 gates bound what the pilot may become. Until all are closed, the system stays an internal pilot for named users.
+P1 items should close before a second real user; P2 items don't block a tightly scoped pilot.
+
+| Gate                                    | Status                                      | Owner (role)                                         | Blocker                                                            | Evidence                                                                                                  | Last verified |
+| --------------------------------------- | ------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------- |
+| P0 0: production TRI policy             | **Done.** `warn` on `rag-api` and `rag-mcp` | Operator (Marcus)                                    | None                                                               | [Gate 0 note](#gate-0-tri-policy-is-warn)                                                                 | 2026-09-07    |
+| P0 1: content audit                     | **Verbal sign-off 2026-10-02**              | Tenant admin and partner (Chris)                     | Written per-row sign-off outstanding                               | [`GATE-1-CONTENT-AUDIT.md`](../compliance/GATE-1-CONTENT-AUDIT.md)                                        | 2026-10-02    |
+| P0 2: counsel + carrier                 | **Not started**                             | Operator to engage; attorney and carrier decide      | No tax-practice attorney engaged; carrier not called               | [Gate 2 note](#gate-2-counsel-and-carrier)                                                                | 2026-10-21    |
+| P0 3: backup and restore                | **Partly closed**                           | Operator; Chris for consent                          | Off-Railway copy needs admin consent; `HEARTBEAT_URL` unset        | [`BACKUP-AND-RECOVERY.md`](../operations/BACKUP-AND-RECOVERY.md)                                          | 2026-10-21    |
+| P0 3a: SharePoint licence + re-sync     | **Blocked**                                 | Operator; target-tenant admin (IT)                   | Tenant has no SharePoint Online licence                            | [Gate 3a note](#gate-3a-sharepoint-licence-and-re-sync)                                                   | 2026-10-21    |
+| P1 4: staff surfaces                    | **Web done 2026-08-01; Teams bot blocked**  | Chris / purchasing (subscription); operator          | No Azure subscription; tenant custom-app upload policy unknown     | [Teams bot gate](#teams-bot-gate-item-4)                                                                  | 2026-09-12    |
+| P1 5: audit-log content privacy         | **Decision needed**                         | Operator, with Chris                                 | Decision: keep `AUDIT_LOG_CONTENT=none` (hash only) or retain text | [Runbook item 5](./LAUNCH-RUNBOOK.md#5-decide-the-audit-log-content-and-docs-gap-digest-privacy-tradeoff) | 2026-10-21    |
+| P1 6: baseline diary                    | **Not started**                             | Chris (diary); operator (timing exercise)            | Must finish before Doug's first real use                           | [Runbook item 6](./LAUNCH-RUNBOOK.md#6-run-the-phase-1-baseline-diary)                                    | 2026-10-21    |
+| P2 7: gold set                          | **Open.** `GOLD_QUESTIONS` is `[]`          | Domain reviewer (Doug), with operator                | Needs a session with Doug                                          | [Runbook item 7](./LAUNCH-RUNBOOK.md#7-build-the-retrieval-eval-gold-set-with-doug)                       | 2026-10-21    |
+| P2 8: audit-log destination + retention | **Decision needed**                         | Operator (destination); firm and counsel (retention) | No destination chosen; retention window undecided                  | [Runbook item 8](./LAUNCH-RUNBOOK.md#8-decide-where-off-host-audit-logs-ship-and-how-long-to-keep-them)   | 2026-10-21    |
+| P2 9: classifier build vs buy           | **Deferred**                                | Operator                                             | Nothing depends on it                                              | [Runbook item 9](./LAUNCH-RUNBOOK.md#9-decide-build-vs-buy-for-the-document-classifier)                   | 2026-10-21    |
+| P2 10: local dev DB reset               | **Open** (local only)                       | Operator                                             | None                                                               | [Runbook item 10](./LAUNCH-RUNBOOK.md#10-reset-the-shared-local-dev-postgres-container)                   | 2026-07-11    |
+
+"Last verified" is the date the status was checked against production or the record, not the date of this file.
+Railway wasn't reachable on 2026-10-21, so production environment values (for example `GENERATION_TRI_POLICY`,
+`AUDIT_LOG_CONTENT`, `AUDIT_SINK_PROVIDER`) carry their last recorded date.
+
+UNVERIFIED (item 6): whether any staff member other than the operator has already used the system. An `audit_log`
+query grouped by `principal_subject` would settle it. If someone has, the "before" baseline is already lost.
+
+## Gate notes
+
+### Gate 0: TRI policy is warn
+
+`GENERATION_TRI_POLICY=warn` was set on `rag-api` and `rag-mcp` on 2026-09-07, by operator decision. The code default
+is `block` on purpose (`packages/core/src/config-schema.ts`, the `triPolicy` comment): `warn` is a §7216 disclosure
+decision, so a human has to choose it rather than inherit it. Production had never set the variable, so it ran `block`.
+
+Measured with `scripts/check-kb-grounding.mjs` (51 questions, 0 errors in both runs):
+
+| Measure                        | `block`       | `warn`            |
+| ------------------------------ | ------------- | ----------------- |
+| Answered                       | 33/51         | **51/51**         |
+| Blocked by the TRI guard       | 18            | 0                 |
+| Self-retrieval                 | 29/30 (96.7%) | **43/47 (91.5%)** |
+| Correct out-of-corpus refusals | 3/3           | 4/4               |
+| Invalid citations              | 0             | 0                 |
+
+The self-retrieval rate fell while the result improved. Correct retrievals rose from 29 to 43; the denominator grew
+from 30 to 47 because previously blocked questions began to count. Treat 91.5% as a lexical floor, not a quality score.
+
+Why `block` failed a third of the questions: the guard scans the assembled generation input (question plus every
+retrieved chunk). Only 3 documents carried a contextual trigger (`1099+amount` ×2, `W2+amount` ×1). The other 14
+blocked documents were collateral: a clean document's question failed when a trigger chunk landed in its top-k. The
+blocking span was the statutory threshold `"Less than $600"` in the firm's 1099 SOP, with no taxpayer, identifier or
+personal amount.
+
+What `warn` doesn't weaken:
+
+- Identifying patterns (SSN, unformatted SSN, EIN; `TRI_IDENTIFYING_LABELS` in `packages/core/src/tri-scanner.ts`)
+  throw under every policy (`896170e`, 2026-08-03; tightened by `19a7542`, 2026-08-31). A sweep of all 17 blocked
+  documents found none. The sweep read stored, post-redaction markdown, which is what the model can receive, not the
+  original SharePoint files.
+- `warn` calls `onTriDetected` (`packages/rag/src/generation/generator.ts`), so every contextual hit is logged
+  (`marker="generation.tri.warned"`, seen live 2026-09-07).
+- `COMPLIANCE_MODE=client-data` forces `block` at wiring time, whatever this variable says.
+
+**To revert:** set `GENERATION_TRI_POLICY=block` (or unset it) on `rag-api` and `rag-mcp`, then redeploy. Whether to
+exempt known false positives among the identifying patterns is still undecided; see
+[`specs/tri-identifying-pattern-exemptions.md`](../specs/tri-identifying-pattern-exemptions.md).
+
+### Gate 1: content audit
+
+Chris reviewed the 47-row audit worksheet and approved it verbally on 2026-10-02. A `WITHDRAW` verdict is enforced:
+retrieval returns only `documents.lifecycle_status = 'active'` rows (`packages/db/src/hybrid-search.ts`). Still open:
+the written sign-off, meaning reviewer name and decision per row, stored outside this repo. The procedure and the
+record are in [`compliance/GATE-1-CONTENT-AUDIT.md`](../compliance/GATE-1-CONTENT-AUDIT.md). The TRI scanner catches
+identifier patterns, not client-confidential content, so this gate stays a firm judgment. After 3a's re-sync, any new
+document needs the same review.
+
+### Gate 2: counsel and carrier
+
+Chris's sign-off doesn't satisfy this gate. It needs a tax-practice attorney and the firm's professional-liability
+carrier, and neither has reviewed anything. The Gemini DPA status is **billing verified 2026-08-04** (Cloud Billing
+Tier 1, so the Cloud DPA's no-training and zero-retention terms apply). Counsel's adequacy review of that DPA and CR-3
+data residency are both outstanding; see
+[`compliance/vendor-dpa-google-gemini.md`](../compliance/vendor-dpa-google-gemini.md). The engineering evidence
+prepared for counsel is [`compliance/scope-conformance-2026-09-30.md`](../compliance/scope-conformance-2026-09-30.md).
+Procedure: [runbook item 2](./LAUNCH-RUNBOOK.md#2-get-counsel-review-and-notify-the-carrier).
+
+### Gate 3: backup and restore
+
+A restore is proven: from a scheduled nightly artifact on 2026-10-02, and to a chosen second via pgBackRest on
+2026-09-02. What keeps the gate open: every backup layer lives in the same Railway project, the off-Railway copy is
+blocked on Chris's admin consent, and `HEARTBEAT_URL` is unset, so nothing alerts if the nightly dump stops. The
+`audit_log` retention window belongs to item 8. Layer-by-layer state and procedures:
+[`operations/BACKUP-AND-RECOVERY.md`](../operations/BACKUP-AND-RECOVERY.md).
+
+### Gate 3a: SharePoint licence and re-sync
+
+On 2026-10-21 a full sync of `dbba75e2-…` failed at its first Graph call with
+`400 BadRequest: Tenant does not have a SPO license.` The tenant in `MS_TENANT_ID` lost SharePoint Online some time
+after the last good sync on 2026-09-02. Search and ask still serve the 2026-09-02 index.
+
+Why it gates launch: the index can't reflect current SharePoint content, and the re-ingest-only fixes listed under
+[Index](#index) never reach production documents. Closing it also fixes stale access config: principal `chris` is
+scoped to three source ids that don't exist, so that principal sees nothing.
+
+Owner split: the operator does the Railway, source and access work. Whoever administers the target tenant (IT) does
+the app registration and admin consent. Procedure:
+[`operations/SHAREPOINT-RUNBOOK.md`](../operations/SHAREPOINT-RUNBOOK.md#switching-tenants-and-re-syncing).
+
+### Teams bot gate (item 4)
+
+**Definition of done:** a named pilot user messages the bot in Teams with a real firm question and gets a cited answer
+scoped to the sources they can access, and the query is recorded in `audit_log` with `channel = 'teams'`. Deployed or
+merged doesn't count.
+
+| Blocker                              | Owner (role)              | State                                                                                                                                                                                                        |
+| ------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Azure subscription                   | Chris / purchasing        | **Hard blocker.** An Azure Bot is an Azure resource and needs a subscription with a payment method. The F0 tier is free, so cost isn't the obstacle. `az` found no subscription on 2026-08-01 and 2026-09-12 |
+| Azure Bot + Entra bot registration   | Operator, after the above | Produces `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`, `MICROSOFT_APP_TENANT_ID`, `BOT_ENTRA_SSO_SCOPE`, `BOT_OAUTH_CONNECTION_NAME`                                                                         |
+| Tenant custom-app upload policy      | Tenant admin              | **Unverified.** Could change the plan, not just delay it. Ask early and separately from the subscription                                                                                                     |
+| Real icons                           | Whoever owns branding     | `apps/teams-bot/manifest/color.png` (192×192) and `outline.png` (32×32) are still the 2026-07-16 placeholders                                                                                                |
+| `rag-teams-bot` service + three URLs | Operator                  | Service not created. Teams validates the website, privacy and terms URLs at upload time                                                                                                                      |
+
+UNVERIFIED: whether no subscription exists or the operator just holds no role on one. Only a tenant admin can tell, and
+the answer changes who acts.
+
+The custom-app question has two admin controls: the org-wide setting for custom apps and the per-user app setup
+policy. If sideloading is off by policy, an admin can publish the package to the org catalogue scoped to a named group
+instead. The manifest requests only `identity` and `messageTeamMembers`, declares `validDomains: []`, and uses scopes
+`personal`, `team` and `groupChat` (`apps/teams-bot/manifest/manifest.json`).
+
+**Alternative without a subscription:** wrap the web app as a Teams **personal tab**. A tab is a manifest pointing at
+a hosted URL; only the conversational bot needs an Azure Bot resource. It needs the same custom-app permission, and
+gives up @mentions and proactive messages. Not built.
+
+Deploy steps, smoke test and day-one traps: [FRESH-DEPLOY-GUIDE Appendix A][fdg-a].
+
+## Pilot scope guardrails
+
+These are what make the current pilot defensible while gate 2 is open:
+
+1. Named pilot users only: no firm-wide rollout, no self-service sign-up.
+2. Class A sources only, and only all-staff SharePoint libraries. Per-document SharePoint permissions aren't enforced
+   (tracked in [`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md)).
+3. A written scope note for users: internal pilot, named users, not for client deliverables or filed positions.
+   UNVERIFIED whether this note has been issued.
+4. Audit logging on for every query.
+5. No tax or accounting judgments. The system answers from documents and cites them.
+
+**What would make it not defensible:** adding Onvio or client folders to the index, opening it past the named pilot
+group, or letting output reach a client deliverable or a filed position. Any of those moves the system into §7216
+territory, and gate 2 can no longer wait.
+
+## Legal and process track
+
+Firm-side compliance items outside these gates (naming the Qualified Individual, adding the system to the WISP, a staff
+AI-limitations note, a breach-runbook reference, the GLBA penetration-test exemption by consumer-record count, and the
+vendor register) are tracked in [`compliance/CONTROL-STATUS.md`](../compliance/CONTROL-STATUS.md).
+
+## How we got here
+
+- 2026-08-03: a screen of the 858-document corpus found client identifiers, and it was purged
+  ([`PURGE-RECORD-2026-08-03.md`](../compliance/records/PURGE-RECORD-2026-08-03.md)).
+- 2026-09-02: the 47-document TRI-screened rebuild synced. 2026-09-07: gate 0 set to `warn`.
+- 2026-10-02: gate 1 verbal sign-off; restore from a scheduled artifact proven.
+- 2026-10-21: the SharePoint licence loss was found (gate 3a). Earlier status text is in `archive/` and git history.
