@@ -121,11 +121,13 @@ repeating it.
 
 ### Specs with open work
 
-| Doc                                                                                  | Answers                                                                             |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| [multi-vertical-platform.md](specs/multi-vertical-platform.md)                       | The remaining slices of the multi-vertical platform design, and the status of each. |
-| [sensitive-content-discovery.md](specs/sensitive-content-discovery.md)               | The read-only discovery service. Its scanner part has shipped; the service has not. |
-| [tri-identifying-pattern-exemptions.md](specs/tri-identifying-pattern-exemptions.md) | The open decision on exempting false-positive identifying TRI matches.              |
+| Doc                                                                                  | Answers                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [multi-vertical-platform.md](specs/multi-vertical-platform.md)                       | The remaining slices of the multi-vertical platform design, and the status of each.                                                                                                                                     |
+| [sensitive-content-discovery.md](specs/sensitive-content-discovery.md)               | The read-only discovery service. Its scanner part has shipped; the service has not.                                                                                                                                     |
+| [tri-identifying-pattern-exemptions.md](specs/tri-identifying-pattern-exemptions.md) | The open decision on exempting false-positive identifying TRI matches.                                                                                                                                                  |
+| [chunk-size-sweep.md](specs/chunk-size-sweep.md)                                     | Choosing the local-embedder chunk size by answer quality. Plan: [plans/2026-10-16-chunk-size-sweep.md](specs/plans/2026-10-16-chunk-size-sweep.md). Not built.                                                          |
+| [local-llm-verification.md](specs/local-llm-verification.md)                         | Running fully local under `client-data`. Phases 0-1 shipped. Unstarted plans: [local reranker](specs/plans/2026-10-02-local-reranker.md), [answer-quality gold set](specs/plans/2026-10-02-answer-quality-gold-set.md). |
 
 ### Elsewhere
 
