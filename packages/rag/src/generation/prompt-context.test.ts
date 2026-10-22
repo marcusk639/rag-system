@@ -3,6 +3,7 @@ import type { RetrievalResult } from "@rag/core";
 import {
   buildCitations,
   buildPrompt,
+  findInvalidCitations,
   groupContextByDocument,
 } from "./prompt-context.js";
 
@@ -245,5 +246,37 @@ describe("buildCitations — source URL class gate", () => {
     for (const value of [["A"], null, 0, true]) {
       expect("url" in (citationFor(value) ?? {})).toBe(false);
     }
+  });
+});
+
+describe("findInvalidCitations — fabricated [N] detection", () => {
+  // RESULTS yields two citations: [1] (doc A) and [2] (doc B).
+  const citations = buildCitations(RESULTS);
+  const invalid = (answer: string) => findInvalidCitations(answer, citations);
+
+  it("reports nothing when every cited index was retrieved", () => {
+    expect(invalid("A applies [1]; B applies [2].")).toEqual([]);
+  });
+
+  it("reports nothing for an answer with no citations", () => {
+    expect(invalid("No brackets here.")).toEqual([]);
+  });
+
+  it("reports an index beyond the retrieved set", () => {
+    expect(invalid("A applies [1], and so does something else [7].")).toEqual([
+      7,
+    ]);
+  });
+
+  it("reports the out-of-range tail of a grouped citation, sorted and deduplicated", () => {
+    expect(invalid("See [1-4] and [4, 3].")).toEqual([3, 4]);
+  });
+
+  it("does not treat a bracketed year range as fabricated citations", () => {
+    expect(invalid("Applies to tax years [2019-2024] per [1].")).toEqual([]);
+  });
+
+  it("does not treat a bracketed code number as a citation", () => {
+    expect(invalid("Form [1040] instructions [2].")).toEqual([]);
   });
 });

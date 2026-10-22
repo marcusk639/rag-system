@@ -192,4 +192,44 @@ describe("ChatInterface data-testid hooks", () => {
       screen.getByRole("button", { name: "Send question" }),
     ).toBeInTheDocument();
   });
+
+  it("shows a citation-check notice for a fabricated citation and for an uncited answer", () => {
+    render(
+      <ChatInterface
+        session={sessionWith({
+          id: "w1",
+          role: "assistant",
+          content: "The rate is 70 cents [5].",
+          citationWarnings: [
+            { kind: "invalid_citation", indices: [5] },
+            { kind: "uncited_answer" },
+          ],
+        })}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    const notices = screen.getAllByTestId("citation-warning");
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toHaveTextContent("[5]");
+    expect(notices[1]).toHaveTextContent(/cites no sources/i);
+  });
+
+  it("shows no citation-check notice when there are no warnings", () => {
+    render(
+      <ChatInterface
+        session={sessionWith({
+          id: "w2",
+          role: "assistant",
+          content: "Grounded answer [1].",
+          citationWarnings: [],
+        })}
+        selectedSource={null}
+        addMessage={noop}
+        updateMessage={noop}
+      />,
+    );
+    expect(screen.queryByTestId("citation-warning")).not.toBeInTheDocument();
+  });
 });

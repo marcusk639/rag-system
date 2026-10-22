@@ -1,6 +1,6 @@
 import { CardFactory } from "botbuilder";
 import type { Attachment } from "botbuilder";
-import type { AskAnswer } from "./rag-client.js";
+import type { AskAnswer, CitationWarning } from "./rag-client.js";
 
 interface AdaptiveCardElement {
   type: string;
@@ -21,6 +21,16 @@ interface AdaptiveCard {
   actions?: Array<Record<string, unknown>>;
 }
 
+function describeCitationWarning(warning: CitationWarning): string {
+  if (warning.kind === "uncited_answer") {
+    return "Citation check: this answer cites no sources — verify it before relying on it.";
+  }
+  const refs = warning.indices.map((i) => `[${i}]`).join(", ");
+  return warning.indices.length === 1
+    ? `Citation check: this answer cites ${refs}, which is not among the retrieved sources.`
+    : `Citation check: this answer cites ${refs}, which are not among the retrieved sources.`;
+}
+
 /** `Action.Submit` payload kind the bot routes as a feedback vote. */
 export const FEEDBACK_SUBMIT_KIND = "rag-feedback";
 
@@ -33,6 +43,16 @@ export function answerCard(a: AskAnswer): Attachment {
     text: a.answer,
     wrap: true,
   });
+
+  for (const warning of a.citationWarnings ?? []) {
+    body.push({
+      type: "TextBlock",
+      text: describeCitationWarning(warning),
+      wrap: true,
+      color: "Warning",
+      spacing: "Small",
+    });
+  }
 
   // Add citations if any
   if (a.citations.length > 0) {

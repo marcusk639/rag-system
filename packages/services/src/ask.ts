@@ -4,6 +4,7 @@ import {
   buildCitations,
   contextualizeQuestion,
   filterCitationsToAnswer,
+  findInvalidCitations,
   type ConversationTurn,
 } from "@rag/rag";
 import type {
@@ -20,6 +21,7 @@ import {
 import { getChunksByOrdinals } from "@rag/db";
 import type { ServiceDeps } from "./deps.js";
 import { GenerationNotConfiguredError } from "./errors.js";
+import { EMPTY_ANSWER, isRefusal } from "./refusal.js";
 
 /**
  * The knowledge base is indexed as-is, so the same SOP often exists as several
@@ -112,10 +114,55 @@ export interface AskResult {
   disclaimer: string;
   /** Stable id for this answer; feedback references it. */
   answerId: string;
+  /** Citation problems detected in the answer; empty when it checks out. */
+  citationWarnings: CitationWarning[];
 }
 
-export const EMPTY_ANSWER =
-  "The available documents do not contain enough information to answer that.";
+/**
+ * A citation problem `filterCitationsToAnswer` would otherwise hide:
+ * - `invalid_citation`: the answer cites `[N]` for no retrieved document.
+ * - `uncited_answer`: a non-refusal answer with no valid citation left.
+ *
+ * Not a per-claim check: an answer with one valid citation and other
+ * unsupported claims produces no warning, so an empty list is not proof the
+ * whole answer is grounded.
+ */
+export type CitationWarning =
+  { kind: "invalid_citation"; indices: number[] } | { kind: "uncited_answer" };
+
+export { EMPTY_ANSWER } from "./refusal.js";
+
+/**
+ * The citations an answer actually references, plus warnings for what could
+ * not be verified. Shared by both answer paths so they cannot drift apart.
+ * Logs only the answerId and warning shape — never question or answer text,
+ * whose retention AUDIT_LOG_CONTENT governs.
+ */
+function verifyCitations(
+  logger: ServiceDeps["logger"],
+  answerId: string,
+  answer: string,
+  retrieved: RetrievalResult[],
+): Pick<AskResult, "citations" | "citationWarnings"> {
+  const all = buildCitations(retrieved);
+  const citations = filterCitationsToAnswer(answer, all);
+  const invalid = findInvalidCitations(answer, all);
+  const citationWarnings: CitationWarning[] = [
+    ...(invalid.length > 0
+      ? [{ kind: "invalid_citation" as const, indices: invalid }]
+      : []),
+    ...(citations.length === 0 && !isRefusal(answer)
+      ? [{ kind: "uncited_answer" as const }]
+      : []),
+  ];
+  if (citationWarnings.length > 0) {
+    logger.warn(
+      { answerId, citationWarnings },
+      "answer citations could not be verified",
+    );
+  }
+  return { citations, citationWarnings };
+}
 
 /**
  * Retrieval + grounded generation. Transport-agnostic core of POST /ask and
@@ -446,6 +493,7 @@ async function ask(
     return {
       answer: EMPTY_ANSWER,
       citations: [],
+      citationWarnings: [],
       retrieved: [],
       reviewStatus: REVIEW_STATUS,
       disclaimer: ANSWER_DISCLAIMER,
@@ -459,10 +507,7 @@ async function ask(
     // Faithful to what the answer actually cites, not everything retrieved.
     // Built here, from the same `retrieved` the generator saw, so the
     // streaming and non-streaming paths cannot drift apart.
-    citations: filterCitationsToAnswer(
-      result.answer,
-      buildCitations(retrieved),
-    ),
+    ...verifyCitations(deps.logger, answerId, result.answer, retrieved),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,
@@ -480,6 +525,7 @@ export type AskStreamEvent =
   | {
       type: "done";
       citations: GenerationResult["citations"];
+      citationWarnings: CitationWarning[];
       retrieved: SanitizedRetrievalResult[];
       reviewStatus: typeof REVIEW_STATUS;
       disclaimer: string;
@@ -549,6 +595,7 @@ async function* askStream(
     yield {
       type: "done",
       citations: [],
+      citationWarnings: [],
       retrieved: [],
       reviewStatus: REVIEW_STATUS,
       disclaimer: ANSWER_DISCLAIMER,
@@ -571,7 +618,7 @@ async function* askStream(
   yield {
     type: "done",
     // Faithful to what the answer actually cites, not everything retrieved.
-    citations: filterCitationsToAnswer(answerText, buildCitations(retrieved)),
+    ...verifyCitations(deps.logger, answerId, answerText, retrieved),
     retrieved: sanitizeRetrievalResults(retrieved),
     reviewStatus: REVIEW_STATUS,
     disclaimer: ANSWER_DISCLAIMER,

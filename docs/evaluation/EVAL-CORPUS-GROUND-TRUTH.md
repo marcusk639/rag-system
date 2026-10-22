@@ -189,8 +189,9 @@ judge it. Naive helpfulness judges reward verbosity and confidence, which is thi
 two guards apply.
 
 First, score abstention from corpus claims, not from the judge. The refusal sentence is fixed (`EMPTY_ANSWER`
-in `packages/services/src/ask.ts`, and coverage branch C of the generation prompt), so it is detectable
-mechanically.
+in `packages/services/src/refusal.ts`, and coverage branch C of the generation prompt), so it is detectable
+mechanically with `isRefusal` from the same file. See
+[What counts as a refusal](./EVAL-GOLD-SET-GUIDE.md#what-counts-as-a-refusal).
 
 | Corpus has the answer? | Assistant abstained? | Verdict                                     |
 | ---------------------- | -------------------- | ------------------------------------------- |

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { ChatSession, Citation, Message } from "@/types";
+import type { ChatSession, Citation, CitationWarning, Message } from "@/types";
 
 let counter = 0;
 const nextId = (prefix: string): string =>
@@ -55,6 +55,7 @@ export const useChatSessions = () => {
         appendContent?: string;
         citations?: Citation[];
         answerId?: string;
+        citationWarnings?: CitationWarning[];
         error?: string;
       },
     ): void => {
@@ -73,6 +74,7 @@ export const useChatSessions = () => {
                     : m.content,
                 citations: patch.citations ?? m.citations,
                 answerId: patch.answerId ?? m.answerId,
+                citationWarnings: patch.citationWarnings ?? m.citationWarnings,
                 error: patch.error ?? m.error,
               };
             }),

@@ -86,6 +86,7 @@ describe("askQuestion", () => {
       reviewStatus: "draft_requires_practitioner_review",
       disclaimer: expect.any(String),
       answerId: expect.any(String),
+      citationWarnings: [],
     });
   });
 

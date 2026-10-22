@@ -1,9 +1,13 @@
-import type { Citation } from "@/types";
+import type { Citation, CitationWarning } from "@/types";
 import type { HistoryTurn } from "@/lib/chat-request";
 
 export interface AskStreamHandlers {
   onToken: (text: string) => void;
-  onDone: (citations: Citation[], answerId: string) => void;
+  onDone: (
+    citations: Citation[],
+    answerId: string,
+    citationWarnings: CitationWarning[],
+  ) => void;
   onError: (message: string) => void;
 }
 
@@ -18,7 +22,7 @@ interface AskRequest {
  * POST a question to the same-origin BFF (/api/chat) and parse the SSE response.
  * Event contract (from apps/api ask/stream):
  *   event: token  data: <JSON-encoded string chunk>
- *   event: done   data: {citations, retrieved, reviewStatus, disclaimer, answerId}
+ *   event: done   data: {citations, citationWarnings, retrieved, reviewStatus, disclaimer, answerId}
  *   event: error  data: {message}
  */
 export async function askStream(
@@ -87,10 +91,15 @@ function dispatchFrame(frame: string, handlers: AskStreamHandlers): void {
       const payload = JSON.parse(raw) as {
         citations?: Citation[];
         answerId?: string;
+        citationWarnings?: CitationWarning[];
       };
-      handlers.onDone(payload.citations ?? [], payload.answerId ?? "");
+      handlers.onDone(
+        payload.citations ?? [],
+        payload.answerId ?? "",
+        payload.citationWarnings ?? [],
+      );
     } catch {
-      handlers.onDone([], "");
+      handlers.onDone([], "", []);
     }
     return;
   }

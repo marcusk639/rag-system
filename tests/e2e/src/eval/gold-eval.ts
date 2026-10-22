@@ -1,4 +1,5 @@
 import { TRUNCATION_NOTICE } from "@rag/rag";
+import { isRefusal } from "@rag/services";
 import type { GoldQuestion } from "./gold-set.js";
 import { mean, recallAtK, reciprocalRank } from "./metrics.js";
 
@@ -38,21 +39,7 @@ export interface GoldReport {
   missing: string[];
 }
 
-/**
- * Refusal sentence from the generation prompt's coverage mode C, which is also
- * @rag/services `EMPTY_ANSWER` (not a dependency of this package, so restated).
- */
-const REFUSAL = "do not contain enough information to answer that";
 const TRUNCATION = TRUNCATION_NOTICE.trim();
-
-function isRefusal(answer: string): boolean {
-  // Mode C opens with the refusal sentence (optionally followed by a "Closest
-  // related material" line). Matching anywhere would misread an answer that
-  // quotes the phrase; mode B ("Not covered by the documents:") is a partial
-  // answer, not a refusal.
-  const opening = answer.trimStart().split("\n")[0] ?? "";
-  return opening.includes(REFUSAL);
-}
 
 export function scoreGoldRun(
   questions: readonly GoldQuestion[],

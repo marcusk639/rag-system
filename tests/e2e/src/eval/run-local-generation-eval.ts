@@ -73,7 +73,7 @@
  */
 import { ADMIN_SCOPE, loadConfig } from "@rag/core";
 import { buildCoreDeps } from "@rag/runtime";
-import { EMPTY_ANSWER, askQuestion } from "@rag/services";
+import { EMPTY_ANSWER, askQuestion, isRefusal } from "@rag/services";
 import pino from "pino";
 import { createCustomSource, truncateAll } from "../helpers/db.js";
 import { seedEvalCorpus } from "./run-eval.js";
@@ -89,59 +89,14 @@ const VERBOSE = process.argv.includes("--verbose");
  * Classify an answer into the prompt's own three coverage cases
  * (generator.ts SYSTEM_PROMPT, "## Coverage — pick one of three").
  *
- * ## This is the third refusal predicate in the repo, and deliberately the
- * ## strictest. Read before changing it.
- *
- * Two already existed, and an earlier version of this file ignored both and
- * invented a looser one. PR review caught four misclassifications in it,
- * including a safety-critical inversion. The prior art:
- *
- *   - `gold-eval.ts`'s `isRefusal` anchors on the OPENING LINE, because case C opens
- *     with the prescribed sentence. Matching anywhere misreads an answer that
- *     merely quotes it. Pinned by two tests in `specs/gold-eval.spec.ts`.
- *   - `scripts/check-kb-grounding.mjs` additionally caps length and
- *     rejects continuation words, with a comment naming the exact attack:
- *     "...do not contain a 2025 deadline, BUT the standard deadline is April
- *     15" is a confabulation, and counting it as a refusal scores the very
- *     failure the check exists to catch.
- *
- * This predicate applies all three guards. The loose version scored
- * `"<refusal sentence>. However, the standard IRS mileage rate for 2025 is 70
- * cents per mile [1]."` as a CORRECT REFUSAL on a negative. That is the worst
- * possible direction to be wrong in: the negatives column exists precisely to
- * catch a model answering an out-of-corpus question confidently.
- *
- * Citation count is deliberately NOT a signal. The retriever always returns
- * its top-k, so "cited something" is normal even when the corpus cannot answer
- * (same reasoning, in `check-kb-grounding.mjs`). The previous `citationCount > 1`
- * discriminator also scored a one-citation case B as C, which deflated the
- * headline `answered` metric.
- *
- * These three predicates should be consolidated into `@rag/core` or
- * `@rag/services`; `EMPTY_ANSWER` is now importable here (this package gained
- * `@rag/services`), which removes the stated reason `gold-eval.ts` restates
- * the sentence by hand. Left as a follow-up rather than done here so this
- * change does not alter `eval:gold` behaviour.
+ * Case C uses `isRefusal` from `@rag/services` — the single, strict refusal
+ * predicate shared with the ask path and `gold-eval.ts`. Its doc comment
+ * explains the opening-line anchor, length cap, and continuation-word guard.
+ * Citation count is deliberately NOT a signal: the retriever always returns
+ * its top-k, so "cited something" is normal even when the corpus cannot
+ * answer, and a one-citation case B must not be scored as C.
  */
 type Coverage = "A" | "B" | "C";
-
-/**
- * The prescribed case-C sentence, taken from the single source of truth rather
- * than re-encoded: `@rag/services` EMPTY_ANSWER is byte-identical to the
- * sentence the SYSTEM_PROMPT's case-C clause prescribes.
- */
-const REFUSAL_SENTENCE = EMPTY_ANSWER.replace(/\.$/, "");
-
-/** The rubric LABEL, which small models echo in place of the sentence. */
-const REFUSAL_LABEL = "do not bear on the question";
-
-/**
- * A real case C is short and is nothing but a refusal, optionally plus the
- * prescribed "Closest related material" line. A continuation word after the
- * refusal sentence means the model kept going -- i.e. answered anyway.
- */
-const CONTINUATION = /\b(however|but|that said|based on|according to)\b/i;
-const MAX_REFUSAL_CHARS = 400;
 
 /** Case-B gap language. A partial answer is a SUCCESS; the prompt prefers B over C. */
 const PARTIAL_PATTERNS: RegExp[] = [
@@ -149,18 +104,6 @@ const PARTIAL_PATTERNS: RegExp[] = [
   /(is |are )?not (covered|addressed|mentioned|available) in/i,
   /not explicitly (covered|stated|mentioned|addressed)/i,
 ];
-
-function isRefusal(answer: string): boolean {
-  const trimmed = answer.trim();
-  const opening = trimmed.split("\n")[0] ?? "";
-  if (
-    !opening.includes(REFUSAL_SENTENCE) &&
-    !opening.toLowerCase().includes(REFUSAL_LABEL)
-  ) {
-    return false;
-  }
-  return trimmed.length <= MAX_REFUSAL_CHARS && !CONTINUATION.test(trimmed);
-}
 
 function classify(answer: string): Coverage {
   if (isRefusal(answer)) return "C";

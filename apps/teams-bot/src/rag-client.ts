@@ -20,12 +20,22 @@ export interface Citation {
   docClass?: "A" | "B" | "C" | "D";
 }
 
+/**
+ * A server-detected citation problem on an answer (mirrors `CitationWarning`
+ * in @rag/services). Not a per-claim check: an empty list does not prove the
+ * answer is grounded.
+ */
+export type CitationWarning =
+  { kind: "invalid_citation"; indices: number[] } | { kind: "uncited_answer" };
+
 export interface AskAnswer {
   answer: string;
   citations: Citation[];
   disclaimer: string;
   /** Server id for this answer; feedback references it. */
   answerId?: string;
+  /** Absent from an API that predates citation checks — treat as none. */
+  citationWarnings?: CitationWarning[];
 }
 
 export type FeedbackRating = "helpful" | "not_helpful";
