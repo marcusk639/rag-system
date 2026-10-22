@@ -25,6 +25,14 @@ const FRONT = (title: string) =>
 
 const roots: string[] = [];
 
+// Hooks (husky pre-push) export GIT_DIR, GIT_INDEX_FILE and friends for the real
+// repository; inherited, they redirect every fixture git call into it.
+function gitEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+  );
+}
+
 function repo(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), "check-docs-"));
   roots.push(root);
@@ -32,13 +40,16 @@ function repo(files: Record<string, string>): string {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), body);
   }
-  execFileSync("git", ["init", "-q"], { cwd: root });
-  execFileSync("git", ["add", "-A"], { cwd: root });
+  execFileSync("git", ["init", "-q"], { cwd: root, env: gitEnv() });
+  execFileSync("git", ["add", "-A"], { cwd: root, env: gitEnv() });
   return root;
 }
 
 function run(root: string) {
-  const r = spawnSync("node", [SCRIPT, "--root", root], { encoding: "utf-8" });
+  const r = spawnSync("node", [SCRIPT, "--root", root], {
+    encoding: "utf-8",
+    env: gitEnv(),
+  });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
@@ -170,5 +181,43 @@ describe("check-docs", () => {
       }),
     );
     expect(bad.code).toBe(1);
+  });
+});
+
+// husky runs the pre-push test suite with GIT_DIR (and friends) pointing at the
+// real repository. A fixture `git init` that inherits it re-initialises that
+// repository as bare instead of creating the throwaway one.
+describe("check-docs fixtures under an inherited git environment", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    for (const k of Object.keys(process.env))
+      if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  });
+
+  it("never touches the repository named by GIT_DIR", () => {
+    const decoy = mkdtempSync(join(tmpdir(), "check-docs-decoy-"));
+    roots.push(decoy);
+    const clean = gitEnv();
+    execFileSync("git", ["init", "-q"], { cwd: decoy, env: clean });
+    process.env.GIT_DIR = join(decoy, ".git");
+    process.env.GIT_INDEX_FILE = join(decoy, ".git", "index");
+
+    const r = run(repo(BASE));
+
+    const bare = spawnSync("git", ["config", "--get", "core.bare"], {
+      cwd: decoy,
+      env: clean,
+      encoding: "utf-8",
+    }).stdout.trim();
+    const staged = execFileSync("git", ["ls-files"], {
+      cwd: decoy,
+      env: clean,
+      encoding: "utf-8",
+    });
+    expect(bare).toBe("false");
+    expect(staged).toBe("");
+    expect(r.out).toContain("check-docs: ok");
+    expect(r.code).toBe(0);
   });
 });
