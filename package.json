@@ -39,7 +39,7 @@
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "@rag/rag": "workspace:*",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.5",
     "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^9.0.0",
     "husky": "^9.1.7",
@@ -48,7 +48,7 @@
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.71.2",
+    "typescript-eslint": "^8.72.0",
     "vite": "^6.4.4",
     "vitest": "^4.1.12"
   },
