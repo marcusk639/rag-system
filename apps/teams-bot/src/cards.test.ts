@@ -166,4 +166,34 @@ describe("cards — data-class label", () => {
     expect(text(att)).toContain("Untagged");
     expect(text(att)).not.toContain("Class");
   });
+
+  it("answer card shows a citation check for a fabricated citation and an uncited answer", () => {
+    const att = answerCard({
+      answer: "The rate is 70 cents [5].",
+      citations: [],
+      disclaimer: "d",
+      citationWarnings: [
+        { kind: "invalid_citation", indices: [5, 7] },
+        { kind: "uncited_answer" },
+      ],
+    });
+    expect(text(att)).toContain("Citation check");
+    expect(text(att)).toContain("[5], [7]");
+    expect(text(att)).toMatch(/cites no sources/i);
+  });
+  it("answer card has no citation check without warnings, including from an older API", () => {
+    expect(
+      text(
+        answerCard({
+          answer: "A [1]",
+          citations: [],
+          disclaimer: "d",
+          citationWarnings: [],
+        }),
+      ),
+    ).not.toContain("Citation check");
+    expect(
+      text(answerCard({ answer: "A [1]", citations: [], disclaimer: "d" })),
+    ).not.toContain("Citation check");
+  });
 });

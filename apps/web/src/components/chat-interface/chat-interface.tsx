@@ -5,7 +5,14 @@ import { CardContent } from "@/components/ui/card";
 import { askStream } from "@/lib/stream-chat";
 import { toHistory } from "@/lib/chat-request";
 import { AnswerFeedback } from "@/components/answer-feedback";
-import type { ChatSession, Citation, Message, Source } from "@/types";
+import type {
+  ChatSession,
+  Citation,
+  CitationWarning,
+  Message,
+  Source,
+} from "@/types";
+import { describeCitationWarning } from "@/lib/citation-warnings";
 
 /**
  * Mirrors `EMPTY_ANSWER` from `@rag/services` (packages/services/src/refusal.ts).
@@ -28,6 +35,7 @@ interface ChatInterfaceProps {
       appendContent?: string;
       citations?: Citation[];
       answerId?: string;
+      citationWarnings?: CitationWarning[];
       error?: string;
     },
   ) => void;
@@ -70,8 +78,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           onToken: (text) =>
             updateMessage(assistantId, { appendContent: text }),
-          onDone: (citations, answerId) =>
-            updateMessage(assistantId, { citations, answerId }),
+          onDone: (citations, answerId, citationWarnings) =>
+            updateMessage(assistantId, {
+              citations,
+              answerId,
+              citationWarnings,
+            }),
           onError: (message) => updateMessage(assistantId, { error: message }),
         },
       );
@@ -124,6 +136,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         {message.error}
                       </div>
                     )}
+                    {message.citationWarnings?.map((w) => (
+                      <div
+                        key={w.kind}
+                        data-testid="citation-warning"
+                        className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                      >
+                        {describeCitationWarning(w)}
+                      </div>
+                    ))}
                     {message.citations && message.citations.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {message.citations.map((c) => (

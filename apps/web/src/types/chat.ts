@@ -23,6 +23,14 @@ export interface Citation {
   docClass?: "A" | "B" | "C" | "D";
 }
 
+/**
+ * A server-detected citation problem on an answer (mirrors `CitationWarning`
+ * in @rag/services; restated because the client bundle does not import it).
+ * Not a per-claim check: an empty list does not prove the answer is grounded.
+ */
+export type CitationWarning =
+  { kind: "invalid_citation"; indices: number[] } | { kind: "uncited_answer" };
+
 export interface Message {
   id: string;
   role: MessageRole;
@@ -30,6 +38,8 @@ export interface Message {
   citations?: Citation[];
   /** Server-assigned id for this answer. Required to submit feedback on it. */
   answerId?: string;
+  /** Citation problems the server found on this answer; see `CitationWarning`. */
+  citationWarnings?: CitationWarning[];
   /**
    * Set when the stream itself failed (network error, non-2xx response, a
    * mid-stream `event: error` frame). Rendered in its own element — kept out

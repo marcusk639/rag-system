@@ -1,9 +1,13 @@
-import type { Citation } from "@/types";
+import type { Citation, CitationWarning } from "@/types";
 import type { HistoryTurn } from "@/lib/chat-request";
 
 export interface AskStreamHandlers {
   onToken: (text: string) => void;
-  onDone: (citations: Citation[], answerId: string) => void;
+  onDone: (
+    citations: Citation[],
+    answerId: string,
+    citationWarnings: CitationWarning[],
+  ) => void;
   onError: (message: string) => void;
 }
 
@@ -87,10 +91,15 @@ function dispatchFrame(frame: string, handlers: AskStreamHandlers): void {
       const payload = JSON.parse(raw) as {
         citations?: Citation[];
         answerId?: string;
+        citationWarnings?: CitationWarning[];
       };
-      handlers.onDone(payload.citations ?? [], payload.answerId ?? "");
+      handlers.onDone(
+        payload.citations ?? [],
+        payload.answerId ?? "",
+        payload.citationWarnings ?? [],
+      );
     } catch {
-      handlers.onDone([], "");
+      handlers.onDone([], "", []);
     }
     return;
   }
