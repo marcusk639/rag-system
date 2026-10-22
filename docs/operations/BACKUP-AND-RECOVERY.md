@@ -425,7 +425,7 @@ on one workstation doesn't survive the disaster it guards against. Revisit this 
 
 Retention is not yet decided, and is a counsel question. Answer it together with launch-runbook item 8 (audit-log
 off-host destination and retention window,
-[`LAUNCH-RUNBOOK.md`](../launch/LAUNCH-RUNBOOK.md#8-decide-where-off-host-audit-logs-should-actually-ship)).
+[`LAUNCH-RUNBOOK.md`](../launch/LAUNCH-RUNBOOK.md#8-decide-where-off-host-audit-logs-ship-and-how-long-to-keep-them)).
 Questions for counsel:
 
 - How long must the `audit_log` trail be kept?

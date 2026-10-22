@@ -43,8 +43,8 @@ function run(root: string) {
 }
 
 const BASE: Record<string, string> = {
-  "docs/README.md": `${FRONT("Index")}- [Guide](ops/GUIDE.md)\n- [Archive](archive/README.md)\n- [DPA](compliance/vendor-dpa-x.md)\n`,
-  "docs/ops/GUIDE.md": `${FRONT("Guide")}See [index](../README.md#top).\n`,
+  "docs/README.md": `${FRONT("Index")}# Index\n\n- [Guide](ops/GUIDE.md)\n- [Archive](archive/README.md)\n- [DPA](compliance/vendor-dpa-x.md)\n`,
+  "docs/ops/GUIDE.md": `${FRONT("Guide")}See [index](../README.md#index).\n`,
   "docs/archive/README.md":
     "# Archive\n\nOld [link](GONE.md) and no client files claim.\n",
   "docs/compliance/vendor-dpa-x.md":
@@ -109,6 +109,28 @@ describe("check-docs", () => {
     const r = run(repo({ ...BASE, "src/b.ts": "// see docs/OLD-PLAN.md#x\n" }));
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/src\/b\.ts.*docs\/OLD-PLAN\.md/);
+  });
+
+  it("fails on a link to a heading anchor that does not exist", () => {
+    const r = run(
+      repo({
+        ...BASE,
+        "docs/ops/GUIDE.md": `${FRONT("Guide")}## Real — section\n\n[ok](#real--section) [bad](../README.md#nope)\n`,
+      }),
+    );
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/broken anchor .*README\.md#nope/);
+    expect(r.out).not.toMatch(/real--section/);
+  });
+
+  it("accepts explicit id anchors and GitHub's duplicate-heading suffixes", () => {
+    const r = run(
+      repo({
+        ...BASE,
+        "docs/ops/GUIDE.md": `${FRONT("Guide")}<a id="custom"></a>\n\n## Step\n\n## Step\n\n[a](#custom) [b](#step-1)\n`,
+      }),
+    );
+    expect(r.out).toContain("check-docs: ok");
   });
 
   it("accepts a docs/ path that resolves relative to the citing file", () => {

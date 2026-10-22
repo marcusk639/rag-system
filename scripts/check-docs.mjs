@@ -87,6 +87,35 @@ function frontMatter(text) {
   return fields;
 }
 
+// GitHub's heading slugs: lowercase, drop punctuation (keeping letters,
+// digits, spaces, "-" and "_"), spaces to hyphens, "-1", "-2"... for repeats.
+// Explicit <a id="..."> anchors count too.
+const anchorCache = new Map();
+function anchorsOf(file) {
+  if (anchorCache.has(file)) return anchorCache.get(file);
+  const set = new Set();
+  const seen = new Map();
+  let fenced = false;
+  for (const line of readFileSync(file, "utf-8").split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced) continue;
+    for (const m of line.matchAll(/<a\s+(?:id|name)="([^"]+)"/g)) set.add(m[1]);
+    const h = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
+    if (!h) continue;
+    const base = h[1]
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/<[^>]+>/g, "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+      .replace(/\s/g, "-");
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    set.add(n === 0 ? base : `${base}-${n}`);
+  }
+  anchorCache.set(file, set);
+  return set;
+}
+
 // Markdown links outside fenced code blocks: [text](target)
 function links(text) {
   const out = [];
@@ -130,15 +159,20 @@ function check(root) {
   for (const d of live) {
     const text = readFileSync(join(root, d), "utf-8");
 
-    // 2. relative links resolve
+    // 2. relative links and their #anchors resolve
     for (const t of links(text)) {
-      if (/^[a-z]+:/i.test(t) || t.startsWith("#")) continue;
-      const path = t.split("#")[0];
-      if (!path) continue;
-      const target = normalize(
-        join(dirname(join(root, d)), decodeURIComponent(path)),
-      );
-      if (!existsSync(target)) errors.push(`broken link in ${d}: ${t}`);
+      if (/^[a-z]+:/i.test(t)) continue;
+      const [path, frag] = t.split("#");
+      const target = path
+        ? normalize(join(dirname(join(root, d)), decodeURIComponent(path)))
+        : join(root, d);
+      if (!existsSync(target)) {
+        errors.push(`broken link in ${d}: ${t}`);
+        continue;
+      }
+      if (frag && target.endsWith(".md") && !anchorsOf(target).has(frag)) {
+        errors.push(`broken anchor in ${d}: ${t}`);
+      }
     }
 
     // 3. front matter
