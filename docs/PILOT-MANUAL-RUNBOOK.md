@@ -99,11 +99,12 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
    - Admin consent.
    - A client secret.
 3. **Set the three variables on every service that reads them.** These are `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET`. Seal them in the dashboard, then redeploy each service.
-   - **`rag-worker`:** runs the sync.
-   - **`rag-api`:** builds connectors.
-   - **`rag-web`:** its `/admin/access` page uses Graph for email→oid lookup and group-overage checks.
+   - **`rag-worker`:** runs the sync. It is the only backend service that builds connectors (`apps/worker/src/deps.ts`).
+   - **`rag-web`:** its `/admin/access` page uses Graph for email→oid lookup and group-overage checks (`apps/web/src/lib/graph-client.ts`).
 
-   `./scripts/set-ms-credentials.sh --with-api` covers `rag-worker` and `rag-api`. It does **not** touch `rag-web`; set that one by hand.
+   `rag-api` and `rag-mcp` don't read these variables. If `rag-api` still carries old values from an earlier `--with-api` run, they do nothing.
+
+   `./scripts/set-ms-credentials.sh` (without `--with-api`) sets `rag-worker`. It does **not** touch `rag-web`; set that one by hand.
 
 4. **Resolve the new site's composite `siteId`** with `./scripts/resolve-siteid.sh`. It also proves the new credentials can read SharePoint (`docs/PLAN-SHAREPOINT-GOLIVE.md` §0.2 and "Why resolve-siteid is the auth canary").
 5. **Create a new SharePoint source.** `POST /sources` with `{"kind":"sharepoint","name":"Knowledge Base","config":{"siteId":"<new siteId>"}}` and an admin token (`docs/PHASE-3-SHAREPOINT-RUNBOOK.md` step 7).
@@ -113,7 +114,7 @@ Per the original 2026-07-04 reconciliation document's own framing, items 1-3 bel
    - `rag-worker` logs until the `ingestion_jobs` row is `completed`, not `failed`.
    - The `ingest_log` for `failed` rows.
 7. **Move access to the new source id.** Access is keyed by source id in two places:
-   - **`API_PRINCIPALS` on `rag-api`** (direct API/MCP tokens). Replace the old id in every principal's `allowedSourceIds`, then redeploy (`docs/CONFIGURE-PRINCIPALS.md`).
+   - **`API_PRINCIPALS` on `rag-api` and `rag-mcp`** (direct API and MCP tokens; both services authenticate with it via `buildAuthProvider`). Set the same value on both, replacing the old id in every principal's `allowedSourceIds`, then redeploy both (`docs/CONFIGURE-PRINCIPALS.md`).
      - Today `marcus` is scoped to the old id.
      - `chris` is scoped to three ids that **don't exist** in the database, so that principal can currently see nothing. Fix it in the same edit.
    - **The database grants used by web and Teams** (`staff_source_assignments`; one row points at the old source). Grant the new source with `node node_modules/@rag/db/dist/manage-access.js grant --user <id> --source <new id> --by <admin>`, run in a service container. Then `check --user <id>`.

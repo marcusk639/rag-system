@@ -252,15 +252,15 @@ Overlap is safe (409 if one's already running).
 
 ## Troubleshooting
 
-| Symptom (worker logs)                                 | Cause / fix                                                                                                                                                                               |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requires microsoft credentials (MS_TENANT_ID, …)`    | Env not set/redeployed on rag-worker. Step 5, then `railway redeploy`.                                                                                                                    |
-| `403` / `Authorization_RequestDenied` at `validate()` | Admin consent not granted, or wrong permission type (Delegated instead of Application).                                                                                                   |
-| `401` / `invalid_client` getting the token            | Wrong `MS_CLIENT_SECRET` (copied Secret ID not Value), or the secret expired. Recreate it.                                                                                                |
-| `404` resolving the site                              | Wrong site URL/path in Step 6. Confirm `https://<tenant>.sharepoint.com/sites/<SiteName>`.                                                                                                |
-| `400` `Tenant does not have a SPO license.`           | The tenant in `MS_TENANT_ID` has no SharePoint Online (auth still succeeds). Point `MS_*` on rag-worker, rag-api **and** rag-web at a licensed tenant: `PILOT-MANUAL-RUNBOOK.md` item 3a. |
-| Sync 202 but 0 chunks                                 | `folderPath` scoped to an empty/wrong folder, or files exceed `maxFileBytes` (50MB default).                                                                                              |
-| `429` Too Many Requests                               | Graph throttling (shared with Outlook). Backoff is built in; stage large re-syncs.                                                                                                        |
+| Symptom (worker logs)                                 | Cause / fix                                                                                                                                                                      |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requires microsoft credentials (MS_TENANT_ID, …)`    | Env not set/redeployed on rag-worker. Step 5, then `railway redeploy`.                                                                                                           |
+| `403` / `Authorization_RequestDenied` at `validate()` | Admin consent not granted, or wrong permission type (Delegated instead of Application).                                                                                          |
+| `401` / `invalid_client` getting the token            | Wrong `MS_CLIENT_SECRET` (copied Secret ID not Value), or the secret expired. Recreate it.                                                                                       |
+| `404` resolving the site                              | Wrong site URL/path in Step 6. Confirm `https://<tenant>.sharepoint.com/sites/<SiteName>`.                                                                                       |
+| `400` `Tenant does not have a SPO license.`           | The tenant in `MS_TENANT_ID` has no SharePoint Online (auth still succeeds). Point `MS_*` on rag-worker **and** rag-web at a licensed tenant: `PILOT-MANUAL-RUNBOOK.md` item 3a. |
+| Sync 202 but 0 chunks                                 | `folderPath` scoped to an empty/wrong folder, or files exceed `maxFileBytes` (50MB default).                                                                                     |
+| `429` Too Many Requests                               | Graph throttling (shared with Outlook). Backoff is built in; stage large re-syncs.                                                                                               |
 
 ## Reference (exact symbols)
 

@@ -8,9 +8,10 @@
 >   upload) from the 2026-09-02 sync.
 > - **What's missing:** it lacks the parser upgrade (#142) and the chunker heading-path fix (#116). Both reach
 >   existing documents only on re-ingest.
-> - **To fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker`, `rag-api` **and**
->   `rag-web` to a SharePoint-licensed tenant's app registration. Then create a new source, full-sync it, move
->   access to the new source id, and purge the old source.
+> - **To fix:** set `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` on `rag-worker` **and** `rag-web`
+>   (the only services that read them) to a SharePoint-licensed tenant's app registration. Then create a new
+>   source, full-sync it, move access to the new source id (`API_PRINCIPALS` on `rag-api` and `rag-mcp`, plus
+>   the DB grants), and purge the old source.
 >
 > Full procedure: [`PILOT-MANUAL-RUNBOOK.md`](./PILOT-MANUAL-RUNBOOK.md) item **3a**. Tracked as P0 gate **3a** below.
 
@@ -285,13 +286,15 @@ human/infra/legal; **gate #1 is not** — see its entry.
       tenant named by `MS_TENANT_ID` lost SharePoint Online after the last good sync on 2026-09-02.
 
       **Required change:** update `MS_TENANT_ID`, `MS_CLIENT_ID` and `MS_CLIENT_SECRET` on Railway, on
-      `rag-worker`, `rag-api` and `rag-web`, to a SharePoint-licensed tenant (with admin consent), then
-      redeploy. `scripts/set-ms-credentials.sh --with-api` does not set `rag-web`.
+      `rag-worker` and `rag-web` (the only services that read them), to a SharePoint-licensed tenant (with
+      admin consent), then redeploy. `scripts/set-ms-credentials.sh` sets `rag-worker` only; set `rag-web` by
+      hand.
 
       **Then:**
       - Create a new SharePoint source. The `siteId` changes with the tenant, and sources can't be edited.
       - Full-sync it.
-      - Repoint `API_PRINCIPALS` and the web/Teams grants to the new source id.
+      - Repoint `API_PRINCIPALS` (on both `rag-api` and `rag-mcp`) and the web/Teams grants to the new
+        source id.
       - Purge the old source. The delete cascades its access grants, so repoint access first.
 
       **Why it gates launch:**
