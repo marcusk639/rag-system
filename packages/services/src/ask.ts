@@ -122,6 +122,10 @@ export interface AskResult {
  * A citation problem `filterCitationsToAnswer` would otherwise hide:
  * - `invalid_citation`: the answer cites `[N]` for no retrieved document.
  * - `uncited_answer`: a non-refusal answer with no valid citation left.
+ *
+ * Not a per-claim check: an answer with one valid citation and other
+ * unsupported claims produces no warning, so an empty list is not proof the
+ * whole answer is grounded.
  */
 export type CitationWarning =
   { kind: "invalid_citation"; indices: number[] } | { kind: "uncited_answer" };
