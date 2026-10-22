@@ -64,30 +64,31 @@ npx tsx scripts/reembed-chunks.ts                                          # re-
 
 ## Where to find things
 
-| Concern                   | Location                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| Shared types/interfaces   | `packages/core/src/`                                                                        |
-| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                                     |
-| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                                           |
-| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                               |
-| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`               |
-| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                         |
-| Embedding providers       | `packages/rag/src/embeddings/`                                                              |
-| Chunking strategies       | `packages/rag/src/chunking/`                                                                |
-| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                               |
-| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4,custom}/` |
-| Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)          |
-| Neighbor expansion        | `packages/rag/src/retrieval/contextualize.ts`                                               |
-| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                        |
-| HTTP routes               | `apps/api/src/routes/`                                                                      |
-| MCP tools                 | `apps/mcp/src/tools/`                                                                       |
-| Worker job handlers       | `apps/worker/src/handlers/`                                                                 |
-| Python parser             | `services/parser-py/app/main.py`                                                            |
-| Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules      |
-| Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)             |
-| E2E suites                | `tests/e2e/` (`@rag/e2e`, also hosts the eval harness) and `tests/web-e2e/`                 |
-| Shared test fixtures      | `packages/test-fixtures/`                                                                   |
-| Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                              |
+| Concern                   | Location                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared types/interfaces   | `packages/core/src/`                                                                                                                     |
+| Shared service layer      | `packages/services/src/` (search/ask/sources/documents)                                                                                  |
+| Shared runtime dep graph  | `packages/runtime/src/index.ts` (`buildCoreDeps`)                                                                                        |
+| Auth providers (contract) | `packages/core/src/{auth,oidc-auth,auth-provider-factory}.ts`                                                                            |
+| Auth provider wiring      | `packages/runtime/src/index.ts` (`buildAuthProvider`); `apps/api/src/auth.ts`                                                            |
+| DB schema + migrations    | `packages/db/src/schema.ts`, `packages/db/drizzle/`                                                                                      |
+| Embedding providers       | `packages/rag/src/embeddings/`                                                                                                           |
+| Chunking strategies       | `packages/rag/src/chunking/`                                                                                                             |
+| Hybrid retrieval (RRF)    | `packages/rag/src/retrieval/`                                                                                                            |
+| Connector implementations | `packages/connectors/src/{sharepoint,gdrive,gmail,outlook,git-markdown,ecfr-part4,custom}/`                                              |
+| Reranking (optional)      | `packages/rag/src/retrieval/reranker.ts` — off by default (`RERANK_PROVIDER=none`)                                                       |
+| Neighbor expansion        | `packages/rag/src/retrieval/contextualize.ts`                                                                                            |
+| Model prompts             | `packages/rag/src/prompts/*.md` — exact model input: Prettier-ignored, copied to `dist/` by the build (rebuild `@rag/rag` after editing) |
+| Ingestion pipeline        | `packages/ingestion/src/pipeline.ts`                                                                                                     |
+| HTTP routes               | `apps/api/src/routes/`                                                                                                                   |
+| MCP tools                 | `apps/mcp/src/tools/`                                                                                                                    |
+| Worker job handlers       | `apps/worker/src/handlers/`                                                                                                              |
+| Python parser             | `services/parser-py/app/main.py`                                                                                                         |
+| Web chat UI (Next.js)     | `apps/web/` — see `apps/web/CLAUDE.md` for auth model and server-only credential rules                                                   |
+| Teams bot                 | `apps/teams-bot/` — single-instance only (`MemoryStorage` for the SSO exchange)                                                          |
+| E2E suites                | `tests/e2e/` (`@rag/e2e`, also hosts the eval harness) and `tests/web-e2e/`                                                              |
+| Shared test fixtures      | `packages/test-fixtures/`                                                                                                                |
+| Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                                                                           |
 
 ## Adding a provider (connector, embedding model, auth strategy)
 
