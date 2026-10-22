@@ -24,7 +24,7 @@
     "@huggingface/transformers": "^3.5.2",
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
-    "gpt-tokenizer": "^4.1.0",
+    "gpt-tokenizer": "^2.7.0",
     "openai": "^7.39.0",
     "undici": "^8.12.3"
   },
