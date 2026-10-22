@@ -25,7 +25,7 @@
     "@rag/core": "workspace:*",
     "@rag/db": "workspace:*",
     "gpt-tokenizer": "^4.1.0",
-    "openai": "^4.77.0",
+    "openai": "^7.39.0",
     "undici": "^8.12.3"
   },
   "devDependencies": {
