@@ -32,6 +32,15 @@ updates:
       # engines >=22.9), not the newest Node release.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # Every gpt-tokenizer 4.x release (4.0.0-4.1.0) is published with
+      # devDependencies "vite-plus": "catalog:", which `pnpm deploy` (pnpm
+      # 9.12, every app Dockerfile) cannot resolve: the image build fails with
+      # ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_SPEC. CI never runs `pnpm deploy`,
+      # so the bump passes checks and only breaks on Railway. Lift this once a
+      # 4.x release ships without the catalog spec, and run `pnpm eval` with it
+      # (token counts drive chunk boundaries).
+      - dependency-name: "gpt-tokenizer"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: chore(deps)
 
