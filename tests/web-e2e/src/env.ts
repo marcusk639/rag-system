@@ -8,7 +8,7 @@ const SECRET64 = "e".repeat(64);
  *
  * - `local` (default, and what CI runs): Ollama `llama3.1:8b` + ONNX bge-base.
  *   No secrets, no spend — but it measures llama's behavior, not production's.
- * - `gemini`: the TWK pilot's actual stack (`gemini-2.5-flash` +
+ * - `gemini`: the production pilot's actual stack (`gemini-2.5-flash` +
  *   `gemini-embedding-001`, chunk size 800). Model-behavior results (marker
  *   emission, refusals, grounding, latency) only transfer to the pilot from a
  *   run in THIS mode. Needs GEMINI_API_KEY and costs API spend.
