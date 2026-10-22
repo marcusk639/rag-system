@@ -89,27 +89,9 @@ npx tsx scripts/reembed-chunks.ts                                          # re-
 | Shared test fixtures      | `packages/test-fixtures/`                                                                   |
 | Postgres backup sidecar   | `services/backup/` (`backup.sh` + Dockerfile + `railway.json`)                              |
 
-## Adding a new connector
+## Adding a provider (connector, embedding model, auth strategy)
 
-1. Implement the `Connector` interface from `@rag/core` (`validate`, `list`, `fetch` methods; delta sync is driven by the `cursor` passed to `list()`, not a separate method).
-2. Add a subdirectory under `packages/connectors/src/<name>/`.
-3. Add a `case` to `packages/connectors/src/factory.ts`. (Optionally also re-export the class from `packages/connectors/src/index.ts` — note `git-markdown` and `ecfr-part4` do not, and work fine, since callers go through `createConnector`.) Exception: `custom` (browser uploads) is deliberately rejected by `createConnector` — the worker builds it directly in `apps/worker/src/deps.ts` with its staging and object stores.
-4. Extend `sourceKindEnum` in `packages/db/src/schema.ts` **and** the matching migration.
-5. Document OAuth/credential setup in `docs/reference/CONNECTORS.md`.
-6. Add env vars to `env.example`.
-
-## Adding a new embedding provider
-
-1. Implement `EmbeddingProvider` in `packages/rag/src/embeddings/<name>.ts`.
-2. Register it in `packages/rag/src/embeddings/factory.ts`.
-3. Document the model + dimensions in `env.example` and `docs/architecture/ARCHITECTURE.md`.
-
-## Adding a new auth provider
-
-1. Implement `AuthProvider` (`authenticate(credential) → Promise<Principal | null>`) in `packages/core/src/`. Fail closed: return `null` for anything you can't positively authenticate; never throw for a bad credential.
-2. Add its config shape to `AuthProviderConfig` and a `case` in `createAuthProvider` (`packages/core/src/auth-provider-factory.ts`). Keep env parsing OUT of core — it lives in the runtime/app config layer.
-3. Wire env → config in `buildAuthProvider` (`packages/runtime/src/index.ts`).
-4. Document the env vars in `env.example`.
+All three follow the same shape: implement the interface from `@rag/core`, register it in the factory, document env in `env.example`. A new connector also needs a `sourceKindEnum` value **plus** its migration; `custom` is the one kind `createConnector` deliberately rejects. Auth providers must fail closed (return `null`, never throw) and keep env parsing out of core. The full step lists are in `.claude/rules/adding-{connector,embedding-provider,auth-provider}.md`; they load automatically when you touch those directories. The `rag-add-provider` skill walks through the same steps.
 
 ## Things that will trip you up
 
