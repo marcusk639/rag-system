@@ -33,6 +33,50 @@ describe("isRefusal", () => {
     ).toBe(false);
   });
 
+  it("rejects a fabricated answer smuggled into the related-material line ahead of its citation", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nClosest related material: Travel SOP [1]. However, the 2025 mileage rate is 70 cents per mile [1].`,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a related-material line whose title carries a sentence of prose", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nClosest related material: Mileage memo. The 2025 rate is 70 cents per mile [1]`,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects more than one related-material line", () => {
+    expect(
+      isRefusal(
+        `${EMPTY_ANSWER}\nClosest related material: Travel SOP [1]\nClosest related material: Mileage memo [2]`,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a refusal followed by an uncited claim with no continuation word", () => {
+    expect(
+      isRefusal(`${EMPTY_ANSWER} The 2025 rate is 70 cents per mile.`),
+    ).toBe(false);
+  });
+
+  it("rejects an answer whose opening line merely contains the rubric label", () => {
+    expect(
+      isRefusal(
+        "Residency rules do not bear on the question of filing status; the deadline is April 15.",
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts the related-material line after a blank line", () => {
+    expect(
+      isRefusal(`${EMPTY_ANSWER}\n\nClosest related material: Travel SOP [2].`),
+    ).toBe(true);
+  });
+
   it("rejects a fabricated answer on the line after the refusal sentence", () => {
     expect(
       isRefusal(

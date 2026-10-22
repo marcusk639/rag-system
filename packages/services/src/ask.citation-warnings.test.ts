@@ -107,6 +107,29 @@ describe.each([
     expect(citationWarnings).toEqual([]);
   });
 
+  it("flags a refusal followed by an uncited claim", async () => {
+    const { citationWarnings } = await run(
+      `${EMPTY_ANSWER} The 2025 rate is 70 cents per mile.`,
+    );
+    expect(citationWarnings).toEqual([{ kind: "uncited_answer" }]);
+  });
+
+  it("flags only the fabricated index on a refusal citing unretrieved related material", async () => {
+    const { citationWarnings } = await run(
+      `${EMPTY_ANSWER}\nClosest related material: Travel SOP [5]`,
+    );
+    expect(citationWarnings).toEqual([
+      { kind: "invalid_citation", indices: [5] },
+    ]);
+  });
+
+  it("reports no warnings on a refusal citing retrieved related material", async () => {
+    const { citationWarnings } = await run(
+      `${EMPTY_ANSWER}\nClosest related material: Travel SOP [2]`,
+    );
+    expect(citationWarnings).toEqual([]);
+  });
+
   it("logs warnings with the answerId and never the answer text", async () => {
     const { warn, answerId } = await run("Secret client figure is 42 [5].");
     expect(warn).toHaveBeenCalledTimes(1);
