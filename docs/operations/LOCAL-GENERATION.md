@@ -117,6 +117,8 @@ Done when: steps 2 and 3 behave as described, and step 4 has a captured record i
 `tests/e2e/src/eval/run-local-generation-eval.ts` runs a list of models (`LOCAL_EVAL_MODELS=qwen2.5:3b,llama3.1:8b`)
 against the same locally seeded corpus, holding retrieval constant. It reports citation validity, self-retrieval and
 refusal on out-of-corpus negatives. It measures grounding, not correctness. Its refusal count is a floor, and its
-"confabulated" list is an upper bound to read by hand. It **truncates the target database**, so point `DATABASE_URL`
+"confabulated" list is an upper bound to read by hand. A reply counts as a refusal only in the exact case-C shape defined in
+[What counts as a refusal](../evaluation/EVAL-GOLD-SET-GUIDE.md#what-counts-as-a-refusal), so refusal counts from
+runs before that check was tightened (PR #150) are not comparable. It **truncates the target database**, so point `DATABASE_URL`
 at a local dev database only. The header comment in the file has the usage line. Evaluation in general is in
 [`EVALUATION.md`](../evaluation/EVALUATION.md).

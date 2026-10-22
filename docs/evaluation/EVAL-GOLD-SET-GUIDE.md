@@ -168,9 +168,41 @@ What it does:
 - **Reports retrieval.** It gives recall@1/3/5 and MRR for questions with a non-empty `relevant`.
 - **Reports refusals.** It counts correct refusals on `relevant: []` questions, answerable questions that
   were refused, fabricated citations, and truncated answers.
+- **Uses one refusal check.** See [What counts as a refusal](#what-counts-as-a-refusal) below.
 - **Does not score faithfulness or correctness.** Claim-level faithfulness needs the calibrated judge in
   [EVALUATION.md](./EVALUATION.md#calibrated-judge-specification-open). Tier-2 correctness needs the
   credentialed reviewer.
+
+### What counts as a refusal
+
+`isRefusal` in `packages/services/src/refusal.ts` decides it. The same predicate drives `eval:gold`,
+`run-local-generation-eval.ts` and the `uncited_answer` citation warning on `/ask`. An answer is a refusal only
+when it has exactly the shape coverage case C of the generation prompt prescribes:
+
+1. An opening line that is the sentence `The available documents do not contain enough information to answer
+that.` (final period optional), or a whole-line echo of the rubric label, such as `The documents do not bear
+on the question.`
+2. Optionally, exactly one more line: `Closest related material: <title> [N]`. The title may not contain
+   brackets or a sentence break.
+3. Nothing else.
+
+Any other prose means the model kept answering, so the reply is scored as an answer. That includes
+`However, …`, a bare claim with no citation, or text placed ahead of the related-material citation.
+
+**Scores before and after this change are not comparable.** Until PR #150, `eval:gold` counted any reply whose
+first line contained `do not contain enough information to answer that`. The change moves the refusal counts
+in three ways that have nothing to do with model quality:
+
+| Reply                                                                              | Before  | Now         |
+| ---------------------------------------------------------------------------------- | ------- | ----------- |
+| Refusal sentence, then `However, …` or any other added prose                       | refusal | not refusal |
+| Paraphrased sentence (`The provided documents do not contain enough information…`) | refusal | not refusal |
+| Related-material title with an abbreviation (`Rev. Proc. 2019-46 [2]`)             | refusal | not refusal |
+| Whole-line rubric label (`The documents do not bear on the question.`)             | answer  | refusal     |
+
+The first row is the intended fix: it was scoring confabulations as correct refusals. The other three are side
+effects. Expect `correctlyRefused` to fall and the answered and refused counts to move. Before comparing with a
+run from before the change, re-run `pnpm eval:gold` on the current code to set a new baseline.
 
 Constraints:
 
