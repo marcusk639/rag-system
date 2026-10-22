@@ -82,7 +82,14 @@ async function resolveDocIds(): Promise<Record<"a" | "b" | "c" | "d", string>> {
  */
 function runSeedChildProcess(): void {
   try {
-    execFileSync(TSX_BIN, [SEED_MAIN], { stdio: "inherit", env: process.env });
+    // E2E_ENV too, not just process.env: code below the seeder reads its
+    // settings from the environment (EgressPolicy.fromEnv() reads
+    // EGRESS_ALLOWED_HOSTS). Without it, gemini mode's embedding calls are all
+    // egress-blocked and the corpus seeds with zero chunks.
+    execFileSync(TSX_BIN, [SEED_MAIN], {
+      stdio: "inherit",
+      env: { ...process.env, ...E2E_ENV },
+    });
   } catch (err) {
     const status = (err as { status?: number | null }).status ?? null;
     const signal = (err as { signal?: string | null }).signal ?? null;
