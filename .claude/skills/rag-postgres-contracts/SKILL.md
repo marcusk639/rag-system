@@ -43,11 +43,6 @@ never the model's actual width.** An explicitly mismatched
 `EMBEDDING_MODEL` + `EMBEDDING_DIMENSIONS` pair still fails at insert time, not
 startup. That gap is known and open.
 
-cd ~/dev/pii-redaction
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-
 Changing the embedding model means: re-embed every chunk, change the column, and
 drop/rebuild the HNSW index. Embeddings are immutable per
 (provider, model, dimensions); `chunks` records the model so mixed-model
