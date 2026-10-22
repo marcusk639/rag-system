@@ -14,7 +14,7 @@ markitdown[all]==0.1.8
 # docx/html containing links. Cap below 0.13 until markitdown itself is upgraded.
 markdownify==1.2.3
 # Unstructured: fallback for difficult/scanned docs with OCR support.
-unstructured[local-inference]==0.24.1
+unstructured[local-inference]==0.27.28
 # torch/torchvision arrive transitively via unstructured[local-inference] →
 # unstructured-inference → layoutparser, and upstream pins neither. PyPI serves
 # the CUDA build, so a plain resolve drags in the whole nvidia-*/triton stack.
@@ -32,8 +32,8 @@ unstructured[local-inference]==0.24.1
 # there and cannot silently fall back to PyPI's CUDA wheel. Keep the two
 # versions paired (torch 2.13 ↔ torchvision 0.28) when bumping.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.13.0+cpu
-torchvision==0.28.0+cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
 # openpyxl: direct XLSX parsing with formula-value access (data_only=True).
 # Pulled in transitively by markitdown but pinned here because we import it directly.
 openpyxl==3.1.5
