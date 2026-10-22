@@ -11,3 +11,5 @@ packages/db/drizzle
 services/parser-py
 .test-passed
 .superpowers
+# Prompt text is sent to models byte-for-byte; formatting it changes model input.
+packages/rag/src/prompts/*.md
