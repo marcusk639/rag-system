@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@azure/msal-node": "^2.16.2",
+    "@azure/msal-node": "^7.1.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@rag/core": "workspace:*",
     "fast-xml-parser": "^5.11.2",
