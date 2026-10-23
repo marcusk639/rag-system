@@ -9,3 +9,12 @@ packages:
   # resolves workspace imports through their built dist/, so it needs
   # `pnpm -r build` first, like every other package.
   - "scripts"
+
+# Satisfies `"vite-plus": "catalog:"`, which gpt-tokenizer 4.x publishes in
+# its own devDependencies (a reference to its upstream monorepo's catalog).
+# `pnpm deploy` (every app Dockerfile) fails with
+# ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_SPEC without an entry here. Nothing in
+# this workspace depends on vite-plus, and a dependency's devDependencies are
+# never installed, so the version is never resolved or fetched.
+catalog:
+  vite-plus: "1.0.0"
